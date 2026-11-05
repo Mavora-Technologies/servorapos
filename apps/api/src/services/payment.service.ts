@@ -1,3 +1,4 @@
+// apps/api/src/services/payment.service.ts
 import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
@@ -20,8 +21,8 @@ export interface CashPaymentInput {
   orderId: number;
   shiftId?: number;
   cashierId: number;
-  amountToAllocate: number; // Portion of the order being settled
-  tenderedCash: number; // Actual notes/coins handed over by customer
+  amountToAllocate: number; 
+  tenderedCash: number; 
 }
 
 export interface StkPushInitiateInput {
@@ -29,7 +30,7 @@ export interface StkPushInitiateInput {
   branchId?: number;
   orderId: number;
   cashierId: number;
-  phoneNumber: string; // e.g., 0712345678 or 254712345678
+  phoneNumber: string; 
   amount: number;
 }
 
@@ -48,10 +49,10 @@ export interface DarajaStkCallbackPayload {
 }
 
 export interface DarajaC2bConfirmationPayload {
-  TransactionType: string; // "Pay Bill" or "Buy Goods"
-  TransID: string; // e.g., "SLK49X12AB"
-  TransTime: string; // YYYYMMDDHHmmss
-  TransAmount: string; // "1500.00"
+  TransactionType: string; 
+  TransID: string; 
+  TransTime: string; 
+  TransAmount: string; 
   BusinessShortCode: string;
   BillRefNumber?: string;
   InvoiceNumber?: string;
@@ -69,7 +70,7 @@ export interface ClaimC2bTillInput {
   c2bCallbackId: number;
   orderId: number;
   cashierId: number;
-  amountToClaim?: number; // Optional partial claim for split payments
+  amountToClaim?: number; 
 }
 
 // ============================================================================
@@ -109,7 +110,7 @@ function getDarajaTimestamp(): string {
 
 export class PaymentService {
   /**
-   * 1. CASH PAYMENT (Supports full or split payment + updates Cashier Shift expected cash)
+   * 1. CASH PAYMENT
    */
   static async recordCashPayment(input: CashPaymentInput) {
     if (input.amountToAllocate <= 0) {
@@ -120,7 +121,6 @@ export class PaymentService {
     }
 
     return await db.transaction(async (tx) => {
-      // Lock the order row to prevent concurrent overpayment
       const [order] = await tx
         .select()
         .from(orders)
@@ -138,50 +138,23 @@ export class PaymentService {
       const appliedAmount = Math.min(input.amountToAllocate, remainingBalance);
       const changeDue = Number((input.tenderedCash - appliedAmount).toFixed(2));
 
-      // Verify and update active Cashier Shift expected physical cash (Section 20)
-      if (input.shiftId) {
-        const [shift] = await tx
-          .select()
-          .from(cashierShifts)
-          .where(
-            and(
-              eq(cashierShifts.tenantId, input.tenantId),
-              eq(cashierShifts.id, input.shiftId),
-              eq(cashierShifts.status, 'OPEN')
-            )
-          )
-          .for('update');
-
-        if (!shift) {
-          throw new Error('Active cashier shift not found or already closed.');
-        }
-
-        const updatedExpectedCash = Number(shift.expectedCash) + appliedAmount;
-        await tx
-          .update(cashierShifts)
-          .set({ expectedCash: updatedExpectedCash.toFixed(2) })
-          .where(eq(cashierShifts.id, shift.id));
-      }
-
-      // Insert verified Cash Payment record
+      // Insert verified Cash Payment record (matching schema payments columns)
       const [paymentRecord] = await tx
         .insert(payments)
         .values({
           tenantId: input.tenantId,
           branchId: input.branchId ?? order.branchId ?? null,
+          paymentNumber: `PMT-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+          paymentFlow: 'INBOUND_AR',
+          paymentMethod: 'CASH_DRAWER',
+          clearingAccount: 'Main Cash Drawer',
           orderId: order.id,
-          shiftId: input.shiftId ?? null,
-          processedByUserId: input.cashierId,
-          paymentMethod: 'CASH',
+          processedById: input.cashierId,
           amount: appliedAmount.toFixed(2),
-          tenderedAmount: input.tenderedCash.toFixed(2),
-          changeDue: changeDue.toFixed(2),
-          status: 'COMPLETED',
-          paidAt: new Date(),
+          status: 'POSTED',
         })
         .returning();
 
-      // Recompute order balance, release table if complete, and queue eTIMS invoice
       const updatedOrder = await this.recomputeOrderSettlementInTx(tx, {
         order,
         addedAmount: appliedAmount,
@@ -197,13 +170,11 @@ export class PaymentService {
   }
 
   /**
-   * 2. INITIATE M-PESA DARAJA STK PUSH (Lipa na M-Pesa Online)
-   * Note: Keeps external HTTP call outside the DB lock per Section 32.
+   * 2. INITIATE M-PESA DARAJA STK PUSH
    */
   static async initiateMpesaStkPush(input: StkPushInitiateInput) {
     const formattedPhone = normalizeKenyanPhone(input.phoneNumber);
 
-    // Validate order exists and has an unpaid balance before calling Safaricom
     const [order] = await db
       .select()
       .from(orders)
@@ -221,7 +192,6 @@ export class PaymentService {
       throw new Error('STK Push amount must be greater than zero.');
     }
 
-    // Obtain Daraja OAuth Token & fire STK Push
     const shortCode = process.env.MPESA_SHORTCODE;
     const passkey = process.env.MPESA_PASSKEY;
     const callbackUrl = process.env.MPESA_STK_CALLBACK_URL;
@@ -233,9 +203,7 @@ export class PaymentService {
         : 'https://sandbox.safaricom.co.ke';
 
     if (!shortCode || !passkey || !callbackUrl || !consumerKey || !consumerSecret) {
-      throw new Error(
-        'M-Pesa Daraja credentials are not fully configured in environment variables.'
-      );
+      throw new Error('M-Pesa Daraja credentials are not fully configured.');
     }
 
     const authHeader = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
@@ -262,8 +230,7 @@ export class PaymentService {
         BusinessShortCode: shortCode,
         Password: password,
         Timestamp: timestamp,
-        TransactionType:
-          process.env.MPESA_TRANSACTION_TYPE || 'CustomerBuyGoodsOnline',
+        TransactionType: process.env.MPESA_TRANSACTION_TYPE || 'CustomerBuyGoodsOnline',
         Amount: amountToRequest,
         PartyA: formattedPhone,
         PartyB: process.env.MPESA_PARTY_B || shortCode,
@@ -284,25 +251,25 @@ export class PaymentService {
 
     if (!stkRes.ok || stkData.ResponseCode !== '0' || !stkData.CheckoutRequestID) {
       throw new Error(
-        stkData.errorMessage ||
-          stkData.ResponseDescription ||
-          'Safaricom rejected STK Push request.'
+        stkData.errorMessage || stkData.ResponseDescription || 'Safaricom rejected STK Push request.'
       );
     }
 
-    // Persist PENDING payment record linked via CheckoutRequestID (Never mark PAID here!)
+    // Persist pending mpesa transaction record
     const [pendingPayment] = await db
       .insert(payments)
       .values({
         tenantId: input.tenantId,
         branchId: input.branchId ?? order.branchId ?? null,
+        paymentNumber: `PMT-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+        paymentFlow: 'INBOUND_AR',
+        paymentMethod: 'MPESA_B2B',
+        clearingAccount: 'M-Pesa Till / Paybill',
         orderId: order.id,
-        processedByUserId: input.cashierId,
-        paymentMethod: 'MPESA_STK',
+        processedById: input.cashierId,
         amount: amountToRequest.toFixed(2),
-        status: 'PENDING',
-        checkoutRequestId: stkData.CheckoutRequestID,
-        customerPhone: formattedPhone,
+        status: 'POSTED',
+        transactionReference: stkData.CheckoutRequestID,
       })
       .returning();
 
@@ -314,7 +281,7 @@ export class PaymentService {
   }
 
   /**
-   * 3. PROCESS DARAJA STK PUSH WEBHOOK CALLBACK (Idempotent & Transactional)
+   * 3. PROCESS DARAJA STK PUSH WEBHOOK CALLBACK
    */
   static async handleStkCallback(payload: DarajaStkCallbackPayload) {
     const callback = payload?.Body?.stkCallback;
@@ -323,65 +290,48 @@ export class PaymentService {
     }
 
     return await db.transaction(async (tx) => {
-      // Lock payment row by CheckoutRequestID
       const [payment] = await tx
         .select()
         .from(payments)
-        .where(eq(payments.checkoutRequestId, callback.CheckoutRequestID))
+        .where(eq(payments.transactionReference, callback.CheckoutRequestID))
         .for('update');
 
       if (!payment) {
         return { ignored: true, reason: 'Unknown CheckoutRequestID' };
       }
 
-      // Idempotency guard: if webhook was already processed, exit cleanly
-      if (payment.status === 'COMPLETED' || payment.status === 'FAILED') {
-        return { ignored: true, reason: 'Already processed', status: payment.status };
+      if (payment.status === 'RECONCILED' || callback.ResultCode !== 0) {
+        return { ignored: true, reason: 'Already processed or failed', status: payment.status };
       }
 
-      // If customer cancelled or timed out (ResultCode !== 0)
-      if (callback.ResultCode !== 0) {
-        await tx
-          .update(payments)
-          .set({ status: 'FAILED' })
-          .where(eq(payments.id, payment.id));
-
-        return { status: 'FAILED', resultDesc: callback.ResultDesc };
-      }
-
-      // Extract MpesaReceiptNumber & verified Amount from CallbackMetadata
       const items = callback.CallbackMetadata?.Item || [];
       const receiptItem = items.find((i) => i.Name === 'MpesaReceiptNumber');
       const amountItem = items.find((i) => i.Name === 'Amount');
-      const phoneItem = items.find((i) => i.Name === 'PhoneNumber');
 
       const mpesaReceipt = String(receiptItem?.Value || '');
       const verifiedAmount = Number(amountItem?.Value ?? payment.amount);
 
-      // Update payment record to COMPLETED
       await tx
         .update(payments)
         .set({
-          status: 'COMPLETED',
+          status: 'RECONCILED',
           amount: verifiedAmount.toFixed(2),
-          providerReference: mpesaReceipt,
-          customerPhone: phoneItem?.Value ? String(phoneItem.Value) : payment.customerPhone,
-          paidAt: new Date(),
+          transactionReference: mpesaReceipt,
+          reconciledAt: new Date(),
         })
         .where(eq(payments.id, payment.id));
 
-      // Lock and update the parent Order balance
       const [order] = await tx
         .select()
         .from(orders)
-        .where(and(eq(orders.tenantId, payment.tenantId), eq(orders.id, payment.orderId)))
+        .where(and(eq(orders.tenantId, payment.tenantId), eq(orders.id, payment.orderId!)))
         .for('update');
 
       if (order) {
         await this.recomputeOrderSettlementInTx(tx, {
           order,
           addedAmount: verifiedAmount,
-          actorUserId: payment.processedByUserId ?? undefined,
+          actorUserId: payment.processedById ?? undefined,
           providerRef: mpesaReceipt,
         });
       }
@@ -395,9 +345,7 @@ export class PaymentService {
   }
 
   /**
-   * 4. INGEST DARAJA C2B TILL / PAYBILL CONFIRMATION WEBHOOK
-   * Auto-allocates if BillRefNumber matches an open order, otherwise places in
-   * UNALLOCATED queue for the POS "Unclaimed M-Pesa Payments" feed.
+   * 4. INGEST DARAJA C2B TILL CONFIRMATION
    */
   static async handleC2bConfirmation(
     tenantId: number,
@@ -408,11 +356,10 @@ export class PaymentService {
     const transAmount = Number(payload.TransAmount);
 
     if (!transId || isNaN(transAmount) || transAmount <= 0) {
-      throw new Error('Invalid C2B payload: missing TransID or TransAmount.');
+      throw new Error('Invalid C2B payload.');
     }
 
     return await db.transaction(async (tx) => {
-      // 1. Idempotency check on (tenantId, transId)
       const [existingC2b] = await tx
         .select()
         .from(mpesaC2bCallbacks)
@@ -426,12 +373,11 @@ export class PaymentService {
       if (existingC2b) {
         return {
           ResultCode: 0,
-          ResultDesc: 'Confirmation already processed (Idempotent)',
+          ResultDesc: 'Confirmation already processed',
           c2bRecord: existingC2b,
         };
       }
 
-      // 2. Check if BillRefNumber matches an open Order Number (Paybill auto-match)
       let matchedOrder: typeof orders.$inferSelect | undefined;
       const cleanBillRef = payload.BillRefNumber?.trim().toUpperCase();
 
@@ -452,7 +398,6 @@ export class PaymentService {
         }
       }
 
-      // 3. Insert C2B callback record
       const isAutoMatched = Boolean(matchedOrder);
       const [insertedC2b] = await tx
         .insert(mpesaC2bCallbacks)
@@ -477,18 +422,18 @@ export class PaymentService {
         })
         .returning();
 
-      // 4. If auto-matched via Paybill BillRefNumber, create payment & settle order
       if (matchedOrder) {
         await tx.insert(payments).values({
           tenantId,
           branchId: matchedOrder.branchId,
+          paymentNumber: `PMT-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+          paymentFlow: 'INBOUND_AR',
+          paymentMethod: 'MPESA_B2B',
+          clearingAccount: 'M-Pesa C2B Till',
           orderId: matchedOrder.id,
-          paymentMethod: 'MPESA_TILL',
           amount: transAmount.toFixed(2),
-          status: 'COMPLETED',
-          providerReference: transId,
-          customerPhone: payload.MSISDN,
-          paidAt: new Date(),
+          status: 'POSTED',
+          transactionReference: transId,
         });
 
         await this.recomputeOrderSettlementInTx(tx, {
@@ -508,7 +453,7 @@ export class PaymentService {
   }
 
   /**
-   * 5. LIST UNCLAIMED C2B TILL PAYMENTS FOR POS DRAWER
+   * 5. LIST UNCLAIMED C2B TILL PAYMENTS
    */
   static async listUnclaimedTillPayments(tenantId: number, branchId?: number) {
     return await db
@@ -526,12 +471,10 @@ export class PaymentService {
   }
 
   /**
-   * 6. CLAIM AN UNALLOCATED M-PESA BUY GOODS TILL PAYMENT ON POS
-   * Uses strict FOR UPDATE row locking so two cashiers cannot claim the same TransID.
+   * 6. CLAIM AN UNALLOCATED M-PESA TILL PAYMENT
    */
   static async claimC2bTillPayment(input: ClaimC2bTillInput) {
     return await db.transaction(async (tx) => {
-      // 1. Lock the C2B callback row
       const [c2b] = await tx
         .select()
         .from(mpesaC2bCallbacks)
@@ -547,9 +490,7 @@ export class PaymentService {
         throw new Error('M-Pesa Till transaction not found.');
       }
       if (c2b.allocationStatus === 'FULLY_ALLOCATED') {
-        throw new Error(
-          `M-Pesa transaction ${c2b.transId} has already been claimed on another order.`
-        );
+        throw new Error(`M-Pesa transaction ${c2b.transId} has already been claimed.`);
       }
 
       const availableOnTill = Number(
@@ -559,7 +500,6 @@ export class PaymentService {
         throw new Error(`M-Pesa transaction ${c2b.transId} has zero remaining balance.`);
       }
 
-      // 2. Lock the target Order row
       const [order] = await tx
         .select()
         .from(orders)
@@ -585,7 +525,6 @@ export class PaymentService {
           ? 'FULLY_ALLOCATED'
           : 'PARTIALLY_ALLOCATED';
 
-      // 3. Update C2B Till record status
       await tx
         .update(mpesaC2bCallbacks)
         .set({
@@ -597,24 +536,23 @@ export class PaymentService {
         })
         .where(eq(mpesaC2bCallbacks.id, c2b.id));
 
-      // 4. Create verified Payment record linked to the M-Pesa TransID
       const [paymentRecord] = await tx
         .insert(payments)
         .values({
           tenantId: input.tenantId,
           branchId: input.branchId ?? order.branchId ?? null,
+          paymentNumber: `PMT-${new Date().getFullYear()}-${Date.now().toString().slice(-4)}`,
+          paymentFlow: 'INBOUND_AR',
+          paymentMethod: 'MPESA_B2B',
+          clearingAccount: 'M-Pesa C2B Till',
           orderId: order.id,
-          processedByUserId: input.cashierId,
-          paymentMethod: 'MPESA_TILL',
+          processedById: input.cashierId,
           amount: actualAllocated.toFixed(2),
-          status: 'COMPLETED',
-          providerReference: c2b.transId,
-          customerPhone: c2b.msisdn,
-          paidAt: new Date(),
+          status: 'POSTED',
+          transactionReference: c2b.transId,
         })
         .returning();
 
-      // 5. Update Order settlement & queue eTIMS fiscal invoice if complete
       const updatedOrder = await this.recomputeOrderSettlementInTx(tx, {
         order,
         addedAmount: actualAllocated,
@@ -622,7 +560,6 @@ export class PaymentService {
         providerRef: c2b.transId,
       });
 
-      // 6. Write Audit Trail
       await tx.insert(auditLogs).values({
         tenantId: input.tenantId,
         branchId: input.branchId ?? order.branchId ?? null,
@@ -647,10 +584,6 @@ export class PaymentService {
     });
   }
 
-  /**
-   * INTERNAL HELPER: Updates Order amountPaid & paymentStatus, frees Dine-In table
-   * if completed, and queues a KRA eTIMS Fiscal Invoice record when fully settled.
-   */
   private static async recomputeOrderSettlementInTx(
     tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
     params: {
@@ -683,7 +616,6 @@ export class PaymentService {
       .where(eq(orders.id, params.order.id))
       .returning();
 
-    // If fully paid, queue a KRA eTIMS Fiscal Invoice record (Section 26A)
     if (isFullyPaid) {
       const [existingFiscal] = await tx
         .select()
@@ -707,7 +639,6 @@ export class PaymentService {
         });
       }
 
-      // If Dine-In order is already Served and now Paid, mark table as Cleaning
       if (params.order.tableId && newOrderStatus === 'Completed') {
         await tx
           .update(restaurantTables)

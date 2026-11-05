@@ -1,4 +1,5 @@
-import { eq, and } from 'drizzle-orm';
+// apps/api/src/repositories/inventory.repository.ts
+import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../config/db';
 import { inventoryItems, stockMovements } from '../config/schema';
 
@@ -40,22 +41,29 @@ export const adjustStockTransaction = async (tenantId: number, data: {
     );
     if (!item) throw new Error('Inventory item not found or unauthorized');
 
-    const newStock = parseFloat(item.currentStock) + data.adjustment;
+    const currentStockNum = parseFloat(item.currentStock) || 0;
+    const newStock = currentStockNum + data.adjustment;
     if (newStock < 0) throw new Error('Stock balance cannot fall below zero');
+
+    const unitCostNum = parseFloat(item.costPrice) || 0;
+    const totalValuationNum = Math.abs(data.adjustment) * unitCostNum;
 
     // Update current stock balance
     const [updatedItem] = await tx.update(inventoryItems)
-      .set({ currentStock: newStock.toString(), updatedAt: new Date() })
+      .set({ currentStock: newStock.toFixed(4), updatedAt: new Date() })
       .where(eq(inventoryItems.id, data.itemId))
       .returning();
 
-    // Create traceable stock movement record
+    // Create traceable stock movement record with all required columns
     await tx.insert(stockMovements).values({
       tenantId,
       inventoryItemId: data.itemId,
       type: data.type,
-      quantity: data.adjustment.toString(),
-      notes: data.notes,
+      quantity: data.adjustment.toFixed(4),
+      unitCost: unitCostNum.toFixed(4),
+      totalValuation: totalValuationNum.toFixed(4),
+      balanceAfter: newStock.toFixed(4),
+      notes: data.notes || null,
     });
 
     return updatedItem;
