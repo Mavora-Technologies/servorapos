@@ -163,7 +163,7 @@ const navigationGroups: NavGroup[] = [
       { label: 'Modifiers & Add-ons', href: '/menu/modifiers', code: 'BOM04', icon: SlidersHorizontal, permission: 'menu.manage' },
       { label: 'Combo Meal Bundles', href: '/menu/combos', code: 'BOM05', icon: ShoppingBasket, permission: 'menu.manage' },
       { label: 'Dynamic Pricing Rules', href: '/menu/pricing', code: 'BOM06', icon: BadgePercent, permission: 'menu.manage' },
-      { label: '86ed Stock Availability', href: '/menu/availability', code: 'BOM07', icon: Clock, permission: 'menu.manage' },
+      { label: 'Stock Availability', href: '/menu/availability', code: 'BOM07', icon: Clock, permission: 'menu.manage' },
       { label: 'Standard Recipes (BOM)', href: '/menu/recipes', code: 'BOM08', icon: CookingPot, permission: 'recipes.view' },
       { label: 'Food Cost & Margin Matrix', href: '/menu/recipes/costing', code: 'BOM09', icon: FileChartColumn, permission: 'recipes.view' },
       { label: 'UOM & Unit Conversions', href: '/menu/recipes/units', code: 'BOM10', icon: RefreshCw, permission: 'inventory.manage' },
