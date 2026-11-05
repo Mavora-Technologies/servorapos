@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { createTenant } from '../controllers/tenant.controller';
+import { onboardTenant } from '../controllers/tenant.controller';
 
 const router = Router();
 
-router.post('/onboard', createTenant);
+router.post('/onboard', onboardTenant);
 
 export default router;

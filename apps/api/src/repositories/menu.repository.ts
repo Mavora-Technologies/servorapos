@@ -1,3 +1,4 @@
+// apps/api/src/repositories/menu.repository.ts
 import { eq, and } from 'drizzle-orm';
 import { db } from '../config/db';
 import { menuCategories, menuItems } from '../config/schema';
@@ -34,4 +35,8 @@ export const getActiveMenu = async (tenantId: number) => {
     )
   );
   return { categories, items };
+};
+
+export const getCategories = async (tenantId: number) => {
+  return await db.select().from(menuCategories).where(eq(menuCategories.tenantId, tenantId));
 };

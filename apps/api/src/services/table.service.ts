@@ -1,3 +1,4 @@
+// apps/api/src/services/table.service.ts
 import * as tableRepo from '../repositories/table.repository';
 
 export const fetchFloorPlan = async (tenantId: number) => await tableRepo.getFloorPlan(tenantId);

@@ -1,3 +1,4 @@
+// apps/api/src/services/inventory.service.ts
 import * as inventoryRepo from '../repositories/inventory.repository';
 
 export const fetchInventoryItems = async (tenantId: number) => {

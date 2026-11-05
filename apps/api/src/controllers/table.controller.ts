@@ -1,3 +1,4 @@
+// apps/api/src/controllers/table.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as tableService from '../services/table.service';

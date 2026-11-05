@@ -1,3 +1,4 @@
+// apps/api/src/repositories/reservation.repository.ts
 import { eq, and, desc } from 'drizzle-orm';
 import { db } from '../config/db';
 import { reservations, restaurantTables } from '../config/schema';

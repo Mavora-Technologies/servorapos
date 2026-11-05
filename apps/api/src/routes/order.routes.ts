@@ -1,14 +1,16 @@
+// apps/api/src/routes/order.routes.ts
 import { Router } from 'express';
-import { createOrder, getOrders, getOpenOrders, updateStatus, getTakeawayOrders } from '../controllers/order.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { createOrder, getOrders, getOpenOrders, updateStatus, getTakeawayOrders } from '../controllers/order.controller';
 
 const router = Router();
-router.use(requireAuth);
 
-router.get('/open', getOpenOrders);
-router.get('/takeaway', getTakeawayOrders);
+router.use(requireAuth); // Protect all order routes
+
 router.post('/', createOrder);
 router.get('/', getOrders);
-router.patch('/:id/status', updateStatus); 
+router.get('/open', getOpenOrders);
+router.get('/takeaway', getTakeawayOrders);
+router.patch('/:id/status', updateStatus);
 
 export default router;

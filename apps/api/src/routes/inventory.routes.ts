@@ -1,3 +1,4 @@
+// apps/api/src/routes/inventory.routes.ts
 import { Router } from 'express';
 import { getInventory, createInventoryItem, adjustStock } from '../controllers/inventory.controller';
 import { requireAuth } from '../middleware/auth.middleware';

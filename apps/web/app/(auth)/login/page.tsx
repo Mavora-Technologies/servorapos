@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
+import { fetchApi } from '@/lib/api';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -34,22 +35,13 @@ export default function LoginPage() {
     setServerError(null);
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
-      const response = await fetch(`${apiUrl}/auth/login`, {
+      const result = await fetchApi('/api/v1/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: data.email, password: data.password }),
       });
 
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || 'Failed to authenticate');
-      }
-
       localStorage.setItem('servora_token', result.data.token);
       router.push('/dashboard');
-      
     } catch (error: any) {
       setServerError(error.message);
     } finally {
@@ -60,10 +52,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen w-full flex bg-servora-pale relative selection:bg-servora-teal selection:text-white overflow-x-hidden">
       
-      {/* Left Side: Brand & Marketing Panel (Visible on Desktop / Large Tablets) */}
+      {/* Left Side: Brand & Marketing Panel */}
       <div className="hidden lg:flex flex-col justify-between w-1/2 bg-servora-navy relative overflow-hidden p-12 xl:p-20">
-        
-        {/* Ambient background glows */}
         <div className="absolute top-[-20%] left-[-10%] w-[70%] h-[70%] rounded-full bg-servora-core/25 blur-[140px] pointer-events-none" />
         <div className="absolute bottom-[-20%] right-[-10%] w-[70%] h-[70%] rounded-full bg-servora-teal/20 blur-[140px] pointer-events-none" />
 
@@ -78,7 +68,6 @@ export default function LoginPage() {
             <span>Back to Home</span>
           </Link>
 
-          {/* Logo isolated in a high-contrast container */}
           <div className="bg-white px-5 py-3.5 rounded-2xl inline-flex shadow-xl mb-10 ring-1 ring-white/20">
             <Image
               src="/logo.png"
@@ -106,7 +95,6 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Social Proof / Trust Indicators */}
         <div className="relative z-10 flex items-center gap-4 border-t border-white/10 pt-8 mt-12">
           <div className="flex -space-x-3">
             <div className="w-10 h-10 rounded-full bg-servora-core border-2 border-servora-navy flex items-center justify-center text-xs font-bold text-white shadow-md">MK</div>
@@ -120,18 +108,13 @@ export default function LoginPage() {
         </div>
       </div>
 
-      {/* 
-        Right Side: Interactive Form Panel (Full width on Mobile/Tablet, half width on Desktop) 
-      */}
+      {/* Right Side: Interactive Form Panel */}
       <div className="w-full lg:w-1/2 flex items-center justify-center relative p-6 sm:p-10 lg:p-12 xl:p-16">
-        
-        {/* Mobile-only background ambient blurs */}
         <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-servora-core/10 blur-[120px] pointer-events-none lg:hidden" />
         <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-servora-teal/10 blur-[120px] pointer-events-none lg:hidden" />
 
         <div className="w-full max-w-[460px] bg-white rounded-3xl shadow-[0_20px_50px_rgba(4,31,86,0.08)] border border-gray-100 p-8 sm:p-10 z-10 relative">
           
-          {/* Mobile Back to Home Button */}
           <div className="flex lg:hidden items-center justify-between mb-6 pb-4 border-b border-gray-100">
             <Link 
               href="/" 
@@ -145,7 +128,6 @@ export default function LoginPage() {
             <span className="text-[10px] font-bold text-servora-teal uppercase tracking-wider">Servora Portal</span>
           </div>
 
-          {/* Mobile-only logo */}
           <div className="flex lg:hidden justify-center mb-6">
             <Image
               src="/logo.png"
@@ -170,7 +152,6 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            
             {serverError && (
               <div className="flex items-center gap-3 p-4 text-xs text-red-700 bg-red-50/90 rounded-2xl border border-red-100 animate-in fade-in shadow-xs">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0 text-red-500">
@@ -273,7 +254,6 @@ export default function LoginPage() {
                 Register with us
               </Link>
             </div>
-            
           </form>
 
           <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center text-[11px] text-servora-deepTeal font-medium gap-2">

@@ -1,5 +1,6 @@
+// apps/api/src/routes/menu.routes.ts
 import { Router } from 'express';
-import { createCategory, createMenuItem, getActiveMenu } from '../controllers/menu.controller';
+import { createCategory, createMenuItem, getActiveMenu, getCategories } from '../controllers/menu.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 
 const router = Router();
@@ -8,7 +9,8 @@ const router = Router();
 router.use(requireAuth);
 
 router.post('/categories', createCategory);
-router.post('/items', createMenuItem);
+router.post('/items', createMenuItem); 
 router.get('/active', getActiveMenu); // Endpoint used by the POS terminal
+router.get('/categories', getCategories); // Endpoint to fetch all categories
 
 export default router;

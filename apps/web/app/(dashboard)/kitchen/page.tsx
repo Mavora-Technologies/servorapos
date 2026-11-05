@@ -1,7 +1,15 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ChefHat, Clock, CheckCircle2, PlayCircle, AlertCircle } from 'lucide-react';
+import { ChefHat, Clock, CheckCircle2, PlayCircle, AlertCircle, Flame, Layers } from 'lucide-react';
+import { fetchApi } from '@/lib/api'; // Import centralized dynamic API helper
+
+interface KitchenItem {
+  id: number;
+  quantity: number;
+  name: string;
+  station: string;
+}
 
 interface KitchenTicket {
   id: number;
@@ -9,22 +17,28 @@ interface KitchenTicket {
   orderType: string;
   status: 'Confirmed' | 'Preparing';
   createdAt: string;
-  items: { id: number; quantity: number; name: string }[];
+  items: KitchenItem[];
 }
 
+const STATIONS = [
+  { id: 'ALL', label: 'All Expediter Queue' },
+  { id: 'MAIN_KITCHEN', label: 'Main Kitchen' },
+  { id: 'GRILL', label: 'Grill / Nyama Choma' },
+  { id: 'BAR', label: 'Bar & Beverages' },
+];
+
 export default function KitchenDisplayPage() {
+  const [activeStation, setActiveStation] = useState('ALL');
   const [tickets, setTickets] = useState<KitchenTicket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
 
-  const fetchTickets = async () => {
+  const fetchTickets = async (station: string) => {
     try {
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch('http://localhost:8000/api/v1/kitchen/tickets', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Failed to fetch tickets');
-      const result = await res.json();
+      setIsLoading(true);
+      const query = station !== 'ALL' ? `?station=${station}` : '';
+      // Uses dynamic base URL and securely attaches token via fetchApi
+      const result = await fetchApi(`/api/v1/kitchen/tickets${query}`);
       setTickets(result.data);
     } catch (error) {
       console.error(error);
@@ -33,14 +47,12 @@ export default function KitchenDisplayPage() {
     }
   };
 
-  // Initial load and polling every 10 seconds
   useEffect(() => {
-    fetchTickets();
-    const pollInterval = setInterval(fetchTickets, 10000);
+    fetchTickets(activeStation);
+    const pollInterval = setInterval(() => fetchTickets(activeStation), 10000);
     return () => clearInterval(pollInterval);
-  }, []);
+  }, [activeStation]);
 
-  // Update current time every minute for elapsed time calculation
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
@@ -48,19 +60,11 @@ export default function KitchenDisplayPage() {
 
   const handleUpdateStatus = async (id: number, newStatus: string) => {
     try {
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch(`http://localhost:8000/api/v1/kitchen/tickets/${id}/status`, {
+      await fetchApi(`/api/v1/kitchen/tickets/${id}/status`, {
         method: 'PATCH',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ status: newStatus }),
       });
-
-      if (!res.ok) throw new Error('Failed to update status');
       
-      // Remove ticket from screen if marked Ready, otherwise update state locally
       if (newStatus === 'Ready') {
         setTickets(prev => prev.filter(t => t.id !== id));
       } else {
@@ -73,39 +77,57 @@ export default function KitchenDisplayPage() {
 
   const getElapsedTime = (createdAt: string) => {
     const elapsedMs = currentTime.getTime() - new Date(createdAt).getTime();
-    const minutes = Math.floor(elapsedMs / 60000);
-    return minutes;
+    return Math.floor(elapsedMs / 60000);
   };
 
   return (
     <div className="flex flex-col h-[calc(100vh-6rem)]">
       
-      <div className="flex justify-between items-center mb-6 shrink-0">
+      {/* Header & Station Selector */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 shrink-0">
         <div>
           <h1 className="text-2xl font-bold text-servora-navy flex items-center gap-2">
-            <ChefHat size={28} className="text-servora-core" /> Kitchen Display System
+            <ChefHat size={28} className="text-servora-core" /> Kitchen Display & Station Monitor
           </h1>
-          <p className="text-servora-deepTeal text-xs mt-1">Live order queue. Auto-refreshes every 10 seconds.</p>
+          <p className="text-servora-deepTeal text-xs mt-1">Live order routing. Auto-refreshes every 10 seconds.</p>
         </div>
-        <div className="text-right text-sm font-semibold text-gray-500 bg-white px-4 py-2 rounded-lg border border-gray-100 shadow-sm">
-          {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+
+        {/* Station Tabs */}
+        <div className="flex bg-white p-1 rounded-xl border border-gray-200 shadow-sm overflow-x-auto max-w-full">
+          {STATIONS.map(station => (
+            <button
+              key={station.id}
+              onClick={() => {
+                setIsLoading(true);
+                setActiveStation(station.id);
+              }}
+              className={`px-4 py-2 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                activeStation === station.id 
+                  ? 'bg-servora-navy text-white shadow-sm' 
+                  : 'text-gray-600 hover:text-servora-navy hover:bg-gray-50'
+              }`}
+            >
+              {station.label}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* Ticket Grid */}
       <div className="flex-1 min-h-0 overflow-y-auto pb-6">
         {isLoading && tickets.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-servora-deepTeal">Loading kitchen tickets...</div>
+          <div className="flex items-center justify-center h-full text-servora-deepTeal">Loading live kitchen queue...</div>
         ) : tickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400 bg-white rounded-xl border border-dashed border-gray-300">
             <CheckCircle2 size={48} className="mb-4 opacity-20 text-green-500" />
-            <p className="text-lg font-bold text-servora-navy">All Caught Up!</p>
-            <p className="text-sm mt-1">No active orders waiting for preparation.</p>
+            <p className="text-lg font-bold text-servora-navy">Station Clear!</p>
+            <p className="text-sm mt-1">No active tickets waiting in this queue.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {tickets.map(ticket => {
               const elapsedMins = getElapsedTime(ticket.createdAt);
-              const isDelayed = elapsedMins > 15; // Flag orders taking longer than 15 minutes
+              const isDelayed = elapsedMins > 12; // 12-minute warning threshold
 
               return (
                 <div 
@@ -114,7 +136,7 @@ export default function KitchenDisplayPage() {
                     ticket.status === 'Preparing' 
                       ? 'bg-blue-50/30 border-blue-200' 
                       : isDelayed 
-                        ? 'bg-red-50/30 border-red-200' 
+                        ? 'bg-red-50/30 border-red-200 animate-pulse' 
                         : 'bg-white border-gray-200'
                   }`}
                 >
@@ -126,13 +148,15 @@ export default function KitchenDisplayPage() {
                         ? 'bg-red-600' 
                         : 'bg-servora-navy'
                   }`}>
-                    <div className="font-bold text-lg tracking-wider">{ticket.orderNumber}</div>
-                    <div className="flex items-center gap-3">
+                    <div className="font-bold text-lg tracking-wider flex items-center gap-2">
+                      {ticket.orderNumber}
+                      {isDelayed && <Flame size={16} className="text-yellow-300 animate-bounce" />}
+                    </div>
+                    <div className="flex items-center gap-2">
                       <span className="text-xs font-semibold bg-white/20 px-2 py-1 rounded">
                         {ticket.orderType}
                       </span>
                       <div className="flex items-center gap-1 font-mono text-sm bg-white/10 px-2 py-1 rounded">
-                        {isDelayed && <AlertCircle size={14} />}
                         <Clock size={14} />
                         {elapsedMins}m
                       </div>
@@ -143,11 +167,16 @@ export default function KitchenDisplayPage() {
                   <div className="flex-1 p-4 overflow-y-auto">
                     <ul className="space-y-3">
                       {ticket.items.map(item => (
-                        <li key={item.id} className="flex items-start gap-3 text-servora-navy">
-                          <span className="bg-gray-100 text-gray-700 font-bold px-2 py-0.5 rounded text-sm shrink-0 border border-gray-200">
-                            {item.quantity}x
+                        <li key={item.id} className="flex items-start justify-between text-servora-navy border-b border-gray-50 pb-2">
+                          <div className="flex items-start gap-3">
+                            <span className="bg-gray-100 text-gray-700 font-bold px-2 py-0.5 rounded text-sm shrink-0 border border-gray-200">
+                              {item.quantity}x
+                            </span>
+                            <span className="text-sm font-semibold leading-tight pt-0.5">{item.name}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-gray-400 uppercase bg-gray-50 px-1.5 py-0.5 rounded">
+                            {item.station}
                           </span>
-                          <span className="text-sm font-semibold leading-tight pt-0.5">{item.name}</span>
                         </li>
                       ))}
                     </ul>
@@ -158,16 +187,16 @@ export default function KitchenDisplayPage() {
                     {ticket.status === 'Confirmed' ? (
                       <button 
                         onClick={() => handleUpdateStatus(ticket.id, 'Preparing')}
-                        className="w-full py-2.5 bg-white border-2 border-servora-core text-servora-core font-bold rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center gap-2"
+                        className="w-full py-2.5 bg-white border-2 border-servora-core text-servora-core font-bold rounded-lg hover:bg-blue-50 transition-colors flex items-center justify-center gap-2 text-xs"
                       >
-                        <PlayCircle size={18} /> Start Preparing
+                        <PlayCircle size={16} /> Start Preparing
                       </button>
                     ) : (
                       <button 
                         onClick={() => handleUpdateStatus(ticket.id, 'Ready')}
-                        className="w-full py-2.5 bg-green-600 text-white font-bold rounded-lg shadow-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2"
+                        className="w-full py-2.5 bg-green-600 text-white font-bold rounded-lg shadow-sm hover:bg-green-700 transition-colors flex items-center justify-center gap-2 text-xs"
                       >
-                        <CheckCircle2 size={18} /> Mark as Ready
+                        <CheckCircle2 size={16} /> Mark as Ready
                       </button>
                     )}
                   </div>

@@ -1,3 +1,4 @@
+// apps/api/src/routes/reservation.routes.ts
 import { Router } from 'express';
 import { getReservations, createReservation, updateStatus } from '../controllers/reservation.controller';
 import { requireAuth } from '../middleware/auth.middleware';

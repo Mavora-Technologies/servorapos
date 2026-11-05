@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ClipboardList, Plus, Users, Clock, BellRing, CheckCircle2, XCircle, Phone, X, AlertTriangle } from 'lucide-react';
+import { fetchApi } from '@/lib/api'; // Import centralized dynamic API helper
 
 interface WaitlistEntry {
   id: number;
@@ -29,10 +30,9 @@ export default function WaitlistPage() {
 
   const fetchWaitlist = async () => {
     try {
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch('http://localhost:8000/api/v1/waitlist', { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) throw new Error('Failed to fetch waitlist');
-      const result = await res.json();
+      setIsLoading(true);
+      // Fetch waitlist records dynamically using fetchApi (handles base URL and auth headers)
+      const result = await fetchApi('/api/v1/waitlist');
       setWaitlist(result.data);
     } catch (error) {
       console.error(error);
@@ -50,10 +50,8 @@ export default function WaitlistPage() {
   const handleAddWaitlist = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch('http://localhost:8000/api/v1/waitlist', {
+      await fetchApi('/api/v1/waitlist', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           customerName,
           customerPhone,
@@ -62,8 +60,6 @@ export default function WaitlistPage() {
           notes
         })
       });
-
-      if (!res.ok) throw new Error('Failed to add to waitlist');
       
       setIsModalOpen(false);
       setCustomerName(''); setCustomerPhone(''); setPartySize('2'); setQuotedWaitTime('15'); setNotes('');
@@ -75,10 +71,8 @@ export default function WaitlistPage() {
 
   const updateStatus = async (id: number, status: string) => {
     try {
-      const token = localStorage.getItem('servora_token');
-      await fetch(`http://localhost:8000/api/v1/waitlist/${id}/status`, {
+      await fetchApi(`/api/v1/waitlist/${id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status })
       });
       fetchWaitlist();

@@ -1,3 +1,4 @@
+// apps/api/src/services/reservation.service.ts
 import * as reservationRepo from '../repositories/reservation.repository';
 
 export const getReservations = async (tenantId: number) => await reservationRepo.fetchReservations(tenantId);

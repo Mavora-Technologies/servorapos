@@ -1,3 +1,4 @@
+// apps/api/src/controllers/menu.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { createCategorySchema, createMenuItemSchema } from '../validators/menu.validator';
@@ -35,5 +36,15 @@ export const getActiveMenu = async (req: AuthRequest, res: Response): Promise<vo
   } catch (error: any) {
     console.error('[Menu API Error]:', error);
     res.status(500).json({ status: 'error', message: 'Internal server error' });
+  }
+};
+
+export const getCategories = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const categories = await menuService.fetchCategories(tenantId);
+    res.status(200).json({ status: 'success', data: categories });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: 'Failed to fetch categories' });
   }
 };

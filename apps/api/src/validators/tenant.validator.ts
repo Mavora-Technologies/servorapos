@@ -1,3 +1,4 @@
+// apps/api/src/validators/tenant.validator.ts
 import { z } from 'zod';
 
 export const createTenantSchema = z.object({

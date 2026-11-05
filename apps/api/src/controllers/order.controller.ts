@@ -1,3 +1,4 @@
+// app/controllers/order.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as orderRepo from '../repositories/order.repository';
@@ -5,13 +6,17 @@ import * as orderRepo from '../repositories/order.repository';
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const { orderType, subtotal, tax, total, items } = req.body;
+    const { orderType, subtotal, tax, total, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod } = req.body;
     
-    const order = await orderRepo.createOrderRecord(tenantId, { orderType, subtotal, tax, total }, items);
+    const order = await orderRepo.createOrderRecord(
+      tenantId, 
+      { orderType, subtotal, tax, total, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod }, 
+      items
+    );
     res.status(201).json({ status: 'success', data: order });
   } catch (error: any) {
     console.error('[Order Error]:', error);
-    res.status(500).json({ status: 'error', message: 'Failed to process order' });
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to process order' });
   }
 };
 

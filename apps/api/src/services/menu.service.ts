@@ -1,3 +1,4 @@
+// apps/api/src/services/menu.service.ts
 import * as menuRepo from '../repositories/menu.repository';
 import { CreateCategoryInput, CreateMenuItemInput } from '../validators/menu.validator';
 
@@ -24,4 +25,8 @@ export const fetchActiveMenu = async (tenantId: number) => {
       category: categories.find(c => c.id === i.categoryId)?.name || 'Uncategorized'
     }))
   };
+};
+
+export const fetchCategories = async (tenantId: number) => {
+  return await menuRepo.getCategories(tenantId);
 };

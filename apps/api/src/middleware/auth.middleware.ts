@@ -1,26 +1,31 @@
+// apps/api/src/middleware/auth.middleware.ts
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-// Extend Express Request to include user data
 export interface AuthRequest extends Request {
-  user?: { userId: number; tenantId: number };
+  user?: {
+    userId: number;
+    tenantId: number;
+    role: string;
+    email: string;
+    defaultBranchId?: number | null;
+  };
 }
 
 export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction): void => {
   const authHeader = req.headers.authorization;
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    res.status(401).json({ status: 'error', message: 'Authentication required' });
     return;
   }
 
   const token = authHeader.split(' ')[1];
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { userId: number; tenantId: number };
-    req.user = decoded; // Attach tenant and user context
+    const secret = process.env.JWT_SECRET || 'servora-super-secret-key-2026';
+    const decoded = jwt.verify(token, secret) as any;
+    req.user = decoded;
     next();
-  } catch (error) {
-    res.status(401).json({ status: 'error', message: 'Invalid or expired token' });
+  } catch (err) {
+    res.status(401).json({ status: 'error', message: 'Invalid or expired session token' });
   }
 };

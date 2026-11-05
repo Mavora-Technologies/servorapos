@@ -1,3 +1,4 @@
+// apps/api/src/repositories/table.repository.ts
 import { eq, and } from 'drizzle-orm';
 import { db } from '../config/db';
 import { diningAreas, restaurantTables } from '../config/schema';

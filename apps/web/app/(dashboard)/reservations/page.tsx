@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CalendarDays, Plus, Users, Clock, CheckCircle2, XCircle, Phone, MapPin, X } from 'lucide-react';
+import { fetchApi } from '@/lib/api'; // Import centralized dynamic API helper
 
 interface Reservation {
   id: number;
@@ -31,21 +32,15 @@ export default function ReservationsPage() {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('servora_token');
       
-      // Fetch Reservations
-      const resReq = await fetch('http://localhost:8000/api/v1/reservations', { headers: { Authorization: `Bearer ${token}` } });
-      if (resReq.ok) {
-        const result = await resReq.json();
-        setReservations(result.data);
-      }
+      // Fetch Reservations & Tables concurrently via dynamic fetchApi
+      const [resResult, tableResult] = await Promise.all([
+        fetchApi('/api/v1/reservations'),
+        fetchApi('/api/v1/tables')
+      ]);
 
-      // Fetch Tables for the assignment dropdown
-      const tableReq = await fetch('http://localhost:8000/api/v1/tables', { headers: { Authorization: `Bearer ${token}` } });
-      if (tableReq.ok) {
-        const result = await tableReq.json();
-        setTables(result.data.tables);
-      }
+      setReservations(resResult.data);
+      setTables(tableResult.data.tables);
     } catch (error) {
       console.error(error);
     } finally {
@@ -58,10 +53,8 @@ export default function ReservationsPage() {
   const handleCreateReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch('http://localhost:8000/api/v1/reservations', {
+      await fetchApi('/api/v1/reservations', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           customerName,
           customerPhone,
@@ -71,8 +64,6 @@ export default function ReservationsPage() {
           specialRequests
         })
       });
-
-      if (!res.ok) throw new Error('Failed to create reservation');
 
       setIsModalOpen(false);
       setCustomerName(''); setCustomerPhone(''); setPartySize('2'); setReservationDate(''); setTableId(''); setSpecialRequests('');
@@ -84,10 +75,8 @@ export default function ReservationsPage() {
 
   const updateStatus = async (id: number, status: string) => {
     try {
-      const token = localStorage.getItem('servora_token');
-      await fetch(`http://localhost:8000/api/v1/reservations/${id}/status`, {
+      await fetchApi(`/api/v1/reservations/${id}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status })
       });
       fetchData();

@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Plus, UtensilsCrossed, Tag, DollarSign, CheckCircle2, XCircle } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { Plus, UtensilsCrossed, Tag, CheckCircle2, XCircle, Search, Layers } from 'lucide-react';
+import { fetchApi } from '@/lib/api'; // Import centralized dynamic API helper
 
 interface MenuItem {
   id: string;
@@ -11,43 +13,43 @@ interface MenuItem {
   isAvailable: boolean;
   sku?: string;
   description?: string;
+  kitchenStation?: string;
+  stockTrackingType?: string;
 }
 
-export default function MenuManagementPage() {
+export default function AdvancedMenuManagementPage() {
+  const router = useRouter();
   const [categories, setCategories] = useState<string[]>([]);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('All');
 
-  // Modal states
-  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  // Modal state for adding a menu item
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
 
-  // Form states
-  const [newCatName, setNewCatName] = useState('');
+  // Form states for Menu Item
   const [newItemName, setNewItemName] = useState('');
   const [newItemCategory, setNewItemCategory] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemSku, setNewItemSku] = useState('');
+  const [newItemDesc, setNewItemDesc] = useState('');
+  const [newItemStation, setNewItemStation] = useState('MAIN_KITCHEN');
+  const [newItemStockType, setNewItemStockType] = useState('RECIPE');
 
   const fetchMenuData = async () => {
     try {
       setIsLoading(true);
-      const token = localStorage.getItem('servora_token');
-      const res = await fetch('http://localhost:8000/api/v1/menu/active', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      // Fetch active menu records dynamically using fetchApi
+      const result = await fetchApi('/api/v1/menu/active');
       
-      if (!res.ok) throw new Error('Failed to fetch menu data');
-      
-      const result = await res.json();
       setCategories(result.data.categories);
       setItems(result.data.items);
       if (result.data.categories.length > 0 && !newItemCategory) {
         setNewItemCategory(result.data.categories[0]);
       }
     } catch (err: any) {
-      setError(err.message);
+      console.error(err);
     } finally {
       setIsLoading(false);
     }
@@ -57,58 +59,38 @@ export default function MenuManagementPage() {
     fetchMenuData();
   }, []);
 
-  const handleCreateCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('servora_token');
-      // Note: We need the backend category creation endpoint. We will pass category name.
-      const res = await fetch('http://localhost:8000/api/v1/menu/categories', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify({ name: newCatName })
-      });
-
-      if (!res.ok) throw new Error('Failed to create category');
-
-      setNewCatName('');
-      setIsCategoryModalOpen(false);
-      fetchMenuData();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
+  const filteredItems = useMemo(() => {
+    return items.filter(item => {
+      const matchesCategory = selectedCategoryFilter === 'All' || item.category === selectedCategoryFilter;
+      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase()));
+      return matchesCategory && matchesSearch;
+    });
+  }, [items, selectedCategoryFilter, searchQuery]);
 
   const handleCreateItem = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const token = localStorage.getItem('servora_token');
-      // Find category ID or send matching structure. For simplicity, match backend validator requirements.
-      // We will look up category ID index + 1 or map it properly.
       const categoryId = categories.indexOf(newItemCategory) + 1;
 
-      const res = await fetch('http://localhost:8000/api/v1/menu/items', {
+      await fetchApi('/api/v1/menu/items', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}` 
-        },
         body: JSON.stringify({ 
           categoryId: categoryId > 0 ? categoryId : 1,
           name: newItemName,
           price: parseFloat(newItemPrice),
           sku: newItemSku || undefined,
+          description: newItemDesc || undefined,
+          kitchenStation: newItemStation,
+          stockTrackingType: newItemStockType,
           isAvailable: true 
         })
       });
 
-      if (!res.ok) throw new Error('Failed to create menu item');
-
       setNewItemName('');
       setNewItemPrice('');
       setNewItemSku('');
+      setNewItemDesc('');
       setIsItemModalOpen(false);
       fetchMenuData();
     } catch (err: any) {
@@ -119,15 +101,15 @@ export default function MenuManagementPage() {
   return (
     <div className="space-y-6">
       
-      {/* Header Actions */}
+      {/* Header & Quick Action Buttons */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-servora-navy">Menu & Recipe Management</h1>
-          <p className="text-servora-deepTeal text-xs mt-1">Configure categories, pricing, availability, and POS products.</p>
+          <h1 className="text-2xl font-bold text-servora-navy">Advanced Menu & Catalog</h1>
+          <p className="text-servora-deepTeal text-xs mt-1">Configure pricing, station routing, and active POS inventory mapping.</p>
         </div>
         <div className="flex gap-2">
           <button 
-            onClick={() => setIsCategoryModalOpen(true)}
+            onClick={() => router.push('/menu/categories')}
             className="bg-white border border-gray-200 text-servora-navy text-xs font-medium px-4 py-2 rounded-lg shadow-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
           >
             <Tag size={14} /> Add Category
@@ -141,46 +123,78 @@ export default function MenuManagementPage() {
         </div>
       </div>
 
+      {/* Search & Filter Toolbar */}
+      <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex flex-col sm:flex-row gap-3 justify-between items-center">
+        <div className="relative w-full sm:w-80">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+          <input 
+            type="text" 
+            placeholder="Search by name or SKU..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-servora-core/20"
+          />
+        </div>
+
+        {/* Category Filter Pills */}
+        <div className="flex gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0 scrollbar-hide">
+          <button
+            onClick={() => setSelectedCategoryFilter('All')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+              selectedCategoryFilter === 'All' ? 'bg-servora-navy text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            All Categories ({items.length})
+          </button>
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategoryFilter(cat)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                selectedCategoryFilter === cat ? 'bg-servora-navy text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+            >
+              {cat} ({items.filter(i => i.category === cat).length})
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         
-        {/* Categories Sidebar */}
-        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm lg:col-span-1 h-fit">
-          <h3 className="text-sm font-semibold text-servora-navy mb-4 flex items-center gap-2">
-            <Tag size={16} className="text-servora-core" /> Categories ({categories.length})
+        {/* Categories Overview Sidebar */}
+        <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm lg:col-span-1 h-fit space-y-4">
+          <h3 className="text-sm font-semibold text-servora-navy flex items-center gap-2">
+            <Layers size={16} className="text-servora-core" /> Categories Summary
           </h3>
-          {categories.length === 0 ? (
-            <p className="text-xs text-gray-400">No categories created yet.</p>
-          ) : (
-            <div className="space-y-1">
-              {categories.map((cat) => (
-                <div key={cat} className="flex items-center justify-between p-2.5 rounded-lg bg-gray-50 text-xs font-medium text-servora-navy">
-                  <span>{cat}</span>
-                  <span className="text-[10px] bg-blue-50 text-servora-core px-2 py-0.5 rounded-full">
-                    {items.filter(i => i.category === cat).length} items
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="space-y-2">
+            {categories.map((cat) => (
+              <div key={cat} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 text-xs text-servora-navy border border-gray-100">
+                <span className="font-medium">{cat}</span>
+                <span className="text-[10px] bg-blue-50 text-servora-core px-2 py-0.5 rounded-full font-bold">
+                  {items.filter(i => i.category === cat).length}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Menu Items Table */}
+        {/* Menu Items Catalog Table */}
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm lg:col-span-3 overflow-hidden">
-          <div className="p-5 border-b border-gray-100">
+          <div className="p-5 border-b border-gray-100 flex justify-between items-center">
             <h3 className="text-sm font-semibold text-servora-navy flex items-center gap-2">
-              <UtensilsCrossed size={16} className="text-servora-core" /> Menu Items ({items.length})
+              <UtensilsCrossed size={16} className="text-servora-core" /> Catalog Products ({filteredItems.length})
             </h3>
           </div>
 
           <div className="overflow-x-auto">
             {isLoading ? (
-              <div className="p-12 text-center text-servora-deepTeal text-xs">Loading menu records from database...</div>
-            ) : items.length === 0 ? (
+              <div className="p-12 text-center text-servora-deepTeal text-xs">Loading menu catalog...</div>
+            ) : filteredItems.length === 0 ? (
               <div className="p-12 text-center text-gray-400">
                 <UtensilsCrossed size={32} className="mx-auto mb-2 opacity-20" />
-                <p className="text-sm font-medium text-servora-navy">No menu items found</p>
-                <p className="text-xs mt-1">Click "Add Menu Item" above to add your first product.</p>
+                <p className="text-sm font-medium text-servora-navy">No items found matching filter</p>
               </div>
             ) : (
               <table className="w-full text-left border-collapse text-xs">
@@ -188,26 +202,33 @@ export default function MenuManagementPage() {
                   <tr className="bg-gray-50 text-servora-deepTeal uppercase tracking-wider border-b border-gray-100">
                     <th className="p-4 font-semibold">Item Name</th>
                     <th className="p-4 font-semibold">Category</th>
-                    <th className="p-4 font-semibold">SKU</th>
+                    <th className="p-4 font-semibold">Station</th>
                     <th className="p-4 font-semibold">Price (KES)</th>
                     <th className="p-4 font-semibold">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-servora-navy">
-                  {items.map((item) => (
+                  {filteredItems.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="p-4 font-medium">{item.name}</td>
-                      <td className="p-4 text-servora-deepTeal">{item.category}</td>
-                      <td className="p-4 font-mono text-gray-500">{item.sku || 'N/A'}</td>
+                      <td className="p-4">
+                        <div className="font-bold">{item.name}</div>
+                        {item.sku && <div className="text-[10px] text-gray-400 font-mono">SKU: {item.sku}</div>}
+                      </td>
+                      <td className="p-4 text-servora-deepTeal font-medium">{item.category}</td>
+                      <td className="p-4">
+                        <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-mono">
+                          {item.kitchenStation || 'MAIN_KITCHEN'}
+                        </span>
+                      </td>
                       <td className="p-4 font-bold text-servora-core">KES {item.price.toLocaleString()}</td>
                       <td className="p-4">
                         {item.isAvailable ? (
                           <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 px-2.5 py-1 rounded-full text-[11px] font-medium">
-                            <CheckCircle2 size={12} /> Available
+                            <CheckCircle2 size={12} /> Active
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 px-2.5 py-1 rounded-full text-[11px] font-medium">
-                            <XCircle size={12} /> Unavailable
+                            <XCircle size={12} /> Hidden
                           </span>
                         )}
                       </td>
@@ -221,113 +242,86 @@ export default function MenuManagementPage() {
 
       </div>
 
-      {/* Add Category Modal */}
-      {isCategoryModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100">
-            <h3 className="text-lg font-bold text-servora-navy mb-4">Add Menu Category</h3>
-            <form onSubmit={handleCreateCategory} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-servora-navy mb-1">Category Name</label>
-                <input 
-                  type="text" 
-                  required
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="e.g. Beverages, Main Courses"
-                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-servora-core/20 focus:border-servora-core"
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setIsCategoryModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-4 py-2 text-xs font-medium text-white bg-servora-core rounded-lg hover:bg-blue-700 shadow-sm"
-                >
-                  Save Category
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Add Menu Item Modal */}
       {isItemModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100">
-            <h3 className="text-lg font-bold text-servora-navy mb-4">Add Menu Item</h3>
-            <form onSubmit={handleCreateItem} className="space-y-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-100 space-y-4">
+            <h3 className="text-base font-bold text-servora-navy">Add POS Menu Item</h3>
+            <form onSubmit={handleCreateItem} className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-servora-navy mb-1">Item Name</label>
+                <label className="block text-xs font-medium text-servora-navy mb-1">Item Name *</label>
                 <input 
                   type="text" 
                   required
                   value={newItemName}
                   onChange={(e) => setNewItemName(e.target.value)}
-                  placeholder="e.g. Cappuccino, Cheeseburger"
-                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-servora-core/20 focus:border-servora-core"
+                  placeholder="e.g. Nyama Choma Portion"
+                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs"
                 />
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-servora-navy mb-1">Category</label>
-                <select 
-                  value={newItemCategory}
-                  onChange={(e) => setNewItemCategory(e.target.value)}
-                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-servora-core/20 focus:border-servora-core"
-                >
-                  {categories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-servora-navy mb-1">Price (KES)</label>
+                  <label className="block text-xs font-medium text-servora-navy mb-1">Category *</label>
+                  <select 
+                    value={newItemCategory}
+                    onChange={(e) => setNewItemCategory(e.target.value)}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs"
+                  >
+                    {categories.map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-servora-navy mb-1">Kitchen Station</label>
+                  <select 
+                    value={newItemStation}
+                    onChange={(e) => setNewItemStation(e.target.value)}
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs"
+                  >
+                    <option value="MAIN_KITCHEN">Main Kitchen</option>
+                    <option value="GRILL">Grill & Choma</option>
+                    <option value="BAR">Bar & Beverages</option>
+                    <option value="PASTRY">Pastry & Bakery</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-servora-navy mb-1">Price (KES) *</label>
                   <input 
                     type="number" 
                     step="0.01"
                     required
                     value={newItemPrice}
                     onChange={(e) => setNewItemPrice(e.target.value)}
-                    placeholder="350.00"
-                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-servora-core/20 focus:border-servora-core"
+                    placeholder="750"
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-servora-navy mb-1">SKU / Code (Optional)</label>
+                  <label className="block text-xs font-medium text-servora-navy mb-1">SKU / Code</label>
                   <input 
                     type="text" 
                     value={newItemSku}
                     onChange={(e) => setNewItemSku(e.target.value)}
-                    placeholder="BEV-001"
-                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-servora-core/20 focus:border-servora-core"
+                    placeholder="MEAT-01"
+                    className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs"
                   />
                 </div>
               </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button 
-                  type="button" 
-                  onClick={() => setIsItemModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit" 
-                  className="px-4 py-2 text-xs font-medium text-white bg-servora-core rounded-lg hover:bg-blue-700 shadow-sm"
-                >
-                  Save Item
-                </button>
+              <div>
+                <label className="block text-xs font-medium text-servora-navy mb-1">Description / Recipe Note</label>
+                <textarea 
+                  value={newItemDesc}
+                  onChange={(e) => setNewItemDesc(e.target.value)}
+                  placeholder="Ingredients or serving notes..."
+                  className="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-lg text-xs h-16"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setIsItemModalOpen(false)} className="px-4 py-2 text-xs text-gray-600 bg-gray-100 rounded-lg">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-xs text-white bg-servora-core rounded-lg font-bold">Publish Item</button>
               </div>
             </form>
           </div>

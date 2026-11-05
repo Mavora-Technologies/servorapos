@@ -1,3 +1,4 @@
+// apps/api/src/routes/table.routes.ts
 import { Router } from 'express';
 import { getFloorPlan, createArea, createTable, updateStatus } from '../controllers/table.controller';
 import { requireAuth } from '../middleware/auth.middleware';
@@ -7,7 +8,7 @@ router.use(requireAuth);
 
 router.get('/', getFloorPlan);
 router.post('/areas', createArea);
-router.post('/items', createTable);
+router.post('/tables', createTable);
 router.patch('/:id/status', updateStatus);
 
 export default router;

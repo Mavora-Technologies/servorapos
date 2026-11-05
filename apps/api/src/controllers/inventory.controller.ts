@@ -1,3 +1,4 @@
+// apps/api/src/controllers/inventory.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as inventoryService from '../services/inventory.service';
