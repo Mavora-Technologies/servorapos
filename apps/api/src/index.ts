@@ -50,10 +50,25 @@ import notificationRoutes from './routes/notification.routes';
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+// apps/api/src/index.ts
+const allowedOrigins = [
+  'http://localhost:3000',
+  'https://servora.mavoratechnologies.com',
+  'https://www.servora.mavoratechnologies.com',
+  'https://servorapos.pages.dev',
+  process.env.FRONTEND_URL,
+].filter(Boolean) as string[];
 
 app.use(cors({
-  origin: frontendUrl,
+  origin: (origin, callback) => {
+    // Allow non-browser requests (Postman, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      callback(null, true);
+    } else {
+      callback(new Error(`CORS policy violation: Origin ${origin} not allowed.`));
+    }
+  },
   credentials: true,
 }));
 
