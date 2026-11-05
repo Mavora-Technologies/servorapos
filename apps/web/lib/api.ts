@@ -10,15 +10,22 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
     ...(options.headers || {}),
   };
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.message || `API error: ${response.statusText}`);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${response.statusText}`);
+    }
+
+    return response.json();
+  } catch (error: any) {
+    if (error.message === 'Failed to fetch') {
+      throw new Error(`Unable to connect to backend server at ${API_BASE_URL}. Verify backend status and CORS settings.`);
+    }
+    throw error;
   }
-
-  return response.json();
 }
