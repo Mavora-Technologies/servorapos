@@ -75,6 +75,7 @@ interface CashDrawerSession {
 type OrderType = 'Dine-In' | 'Takeaway' | 'Delivery';
 type PaymentMethod = 'Cash' | 'M-Pesa' | 'Card' | 'Split';
 type MobileTab = 'menu' | 'cart';
+type ThermalPaperSize = '80mm' | '58mm';
 
 export default function POSPage() {
   const searchParams = useSearchParams();
@@ -114,6 +115,9 @@ export default function POSPage() {
   const [cashTendered, setCashTendered] = useState<string>('');
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+
+  // Paper Format Selection (80mm vs 58mm)
+  const [paperSize, setPaperSize] = useState<ThermalPaperSize>('80mm');
 
   // Completed Order Receipt State
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
@@ -267,12 +271,10 @@ export default function POSPage() {
         })
       });
 
-      // Synchronize table to 'Occupied' locally
       if (orderType === 'Dine-In' && selectedTableId) {
         setTables(prev => prev.map(t => String(t.id) === selectedTableId ? { ...t, status: 'Occupied' } : t));
       }
 
-      // STK Push if M-Pesa tender selected
       if (paymentMethod === 'M-Pesa' && (customerPhone || mpesaPhone)) {
         await fetchApi('/api/v1/payments/mpesa/stk-push', {
           method: 'POST',
@@ -326,19 +328,26 @@ export default function POSPage() {
     }
   };
 
-  // Dedicated Thermal Printer Engine: Isolated Hidden Iframe with single-page height constraints
-  const handlePrintReceipt = () => {
+  // High-Density Thermal Print Engine: Matched to 80mm (72mm print area) or 58mm (48mm print area)
+  const handlePrintReceipt = (selectedSize: ThermalPaperSize = paperSize) => {
     const receiptElement = receiptPrintRef.current;
     if (!receiptElement) {
       window.print();
       return;
     }
 
+    const is80mm = selectedSize === '80mm';
+    const paperWidth = is80mm ? '80mm' : '58mm';
+    const printableWidth = is80mm ? '72mm' : '48mm';
+    const baseFontSize = is80mm ? '13px' : '11px';
+    const headerFontSize = is80mm ? '15px' : '13px';
+    const totalFontSize = is80mm ? '16px' : '14px';
+
     const printFrame = document.createElement('iframe');
     printFrame.style.position = 'fixed';
     printFrame.style.top = '-9999px';
     printFrame.style.left = '-9999px';
-    printFrame.style.width = '80mm';
+    printFrame.style.width = printableWidth;
     printFrame.style.height = 'auto';
     printFrame.style.border = 'none';
 
@@ -352,42 +361,88 @@ export default function POSPage() {
       <!DOCTYPE html>
       <html>
         <head>
+          <meta charset="utf-8" />
           <title>Receipt - ${completedOrder?.orderNumber || 'Slip'}</title>
           <style>
             @page {
-              size: 80mm auto;
-              margin: 0;
+              size: ${paperWidth} auto;
+              margin: 0mm !important;
             }
             html, body {
-              margin: 0;
-              padding: 0;
-              background: #fff;
+              margin: 0 !important;
+              padding: 0 !important;
+              width: ${printableWidth} !important;
+              background: #ffffff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              -webkit-text-size-adjust: 100% !important;
             }
             body {
-              font-family: 'Courier New', Courier, monospace;
-              font-size: 11px;
-              color: #000;
-              width: 72mm;
-              margin: 3mm auto;
-              padding: 0;
-              line-height: 1.3;
-              page-break-inside: avoid;
+              /* Native Windows Font stack that maps 1:1 to thermal micro-pin grids */
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+              font-size: ${baseFontSize};
+              line-height: 1.35;
+              font-weight: 700;
+              color: #000000 !important;
+              width: ${printableWidth} !important;
+              padding: 1.5mm 1mm 4mm 1mm !important;
+              box-sizing: border-box;
+              -webkit-font-smoothing: none !important;
+              text-rendering: geometricPrecision;
+            }
+            .header-title {
+              font-size: ${headerFontSize};
+              font-weight: 900;
+              text-align: center;
+              text-transform: uppercase;
+              margin-bottom: 2px;
             }
             .text-center { text-align: center; }
-            .font-bold { font-weight: bold; }
-            .border-b-dashed { border-bottom: 1px dashed #000; }
-            .pb-2 { padding-bottom: 5px; }
-            .pt-2 { padding-top: 5px; }
-            .my-2 { margin-top: 5px; margin-bottom: 5px; }
-            .flex-between { display: flex; justify-content: space-between; align-items: flex-start; }
-            .text-xs { font-size: 10px; }
-            .text-sm { font-size: 13px; }
-            .uppercase { text-transform: uppercase; }
-            .leading-tight { line-height: 1.15; }
-            .space-y-1 > * + * { margin-top: 3px; }
-            .space-y-2 > * + * { margin-top: 6px; }
-            .space-y-3 > * + * { margin-top: 10px; }
-            * { page-break-inside: avoid; }
+            .font-bold { font-weight: 800; }
+            .font-black { font-weight: 900; }
+            .text-sm { font-size: ${baseFontSize}; }
+            .text-xs { font-size: ${is80mm ? '11.5px' : '10px'}; }
+            .text-lg { font-size: ${totalFontSize}; }
+            .mono { font-family: Consolas, "Courier New", monospace !important; }
+            
+            .flex-between {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              width: 100%;
+            }
+            .solid-divider {
+              border: none;
+              border-bottom: 2px solid #000000;
+              margin: 5px 0;
+              width: 100%;
+            }
+            .dashed-divider {
+              border: none;
+              border-bottom: 1.5px dashed #000000;
+              margin: 4px 0;
+              width: 100%;
+            }
+            .item-row {
+              display: flex;
+              justify-content: space-between;
+              align-items: flex-start;
+              width: 100%;
+              margin-bottom: 3px;
+            }
+            .item-name {
+              max-width: ${is80mm ? '70%' : '65%'};
+              word-break: break-word;
+            }
+            .item-price {
+              text-align: right;
+              font-weight: 800;
+              white-space: nowrap;
+            }
+            * {
+              color: #000000 !important;
+              box-sizing: border-box;
+            }
           </style>
         </head>
         <body>
@@ -418,6 +473,7 @@ export default function POSPage() {
             height: auto !important;
             overflow: visible !important;
             background: #fff !important;
+            -webkit-font-smoothing: none !important;
           }
           body * {
             visibility: hidden !important;
@@ -425,18 +481,22 @@ export default function POSPage() {
           #thermal-receipt-printable,
           #thermal-receipt-printable * {
             visibility: visible !important;
+            color: #000000 !important;
           }
           #thermal-receipt-printable {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
-            width: 72mm !important;
-            max-width: 80mm !important;
+            width: ${paperSize === '80mm' ? '72mm' : '48mm'} !important;
+            max-width: ${paperSize === '80mm' ? '80mm' : '58mm'} !important;
             margin: 0 auto !important;
-            padding: 3mm !important;
+            padding: 1.5mm !important;
             box-shadow: none !important;
             border: none !important;
             background: #fff !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+            font-size: ${paperSize === '80mm' ? '13px' : '11px'} !important;
+            font-weight: 700 !important;
             page-break-inside: avoid !important;
           }
           .print\\:hidden {
@@ -805,7 +865,6 @@ export default function POSPage() {
               </button>
             </div>
 
-            {/* Total Display */}
             <div className="p-3.5 bg-slate-50 border border-gray-200 rounded-xl flex justify-between items-center">
               <span className="text-xs font-bold text-servora-navy uppercase tracking-wider">Total Settlement Due</span>
               <span className="font-mono font-bold text-lg text-servora-core">
@@ -813,7 +872,6 @@ export default function POSPage() {
               </span>
             </div>
 
-            {/* Tender Method Selector */}
             <div className="grid grid-cols-2 gap-2">
               {(['Cash', 'M-Pesa', 'Card', 'Split'] as PaymentMethod[]).map(method => (
                 <button
@@ -830,7 +888,6 @@ export default function POSPage() {
               ))}
             </div>
 
-            {/* Cash Tendered Calculator with Change Calculation */}
             {paymentMethod === 'Cash' && (
               <div className="p-3 bg-slate-50 border border-gray-200 rounded-xl space-y-2 text-xs">
                 <label className="block text-[11px] font-bold text-servora-navy">Cash Tendered ({currencySymbol}) *</label>
@@ -850,7 +907,6 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* M-Pesa STK Push Details */}
             {paymentMethod === 'M-Pesa' && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
                 <span className="font-bold text-emerald-800 flex items-center gap-1.5">
@@ -886,38 +942,67 @@ export default function POSPage() {
 
       {/* STANDARD 80MM / 58MM FISCAL THERMAL RECEIPT MODAL */}
       {completedOrder && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
           
           <div 
             id="thermal-receipt-printable"
-            className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black"
+            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
+              paperSize === '80mm' ? 'max-w-[340px]' : 'max-w-[280px]'
+            }`}
           >
+            {/* Paper Size Quick Selector (Excluded from Printing) */}
+            <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl text-xs font-bold print:hidden">
+              <span className="text-[10px] text-gray-500 uppercase px-2">Paper Roll:</span>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('80mm')}
+                  className={`px-3 py-1 rounded-lg text-xs transition-all ${
+                    paperSize === '80mm' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-600 hover:text-black'
+                  }`}
+                >
+                  80mm Roll
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaperSize('58mm')}
+                  className={`px-3 py-1 rounded-lg text-xs transition-all ${
+                    paperSize === '58mm' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-600 hover:text-black'
+                  }`}
+                >
+                  58mm Roll
+                </button>
+              </div>
+            </div>
+
             {/* Printable Content Node */}
-            <div ref={receiptPrintRef} className="space-y-3">
+            <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
               
               {/* Dynamic Corporate Tax Header */}
-              <div className="text-center border-b-dashed pb-2 space-y-0.5">
-                <h2 className="text-sm font-bold tracking-wider uppercase">{completedOrder.businessName}</h2>
+              <div className="text-center space-y-0.5">
+                <h2 className="header-title">{completedOrder.businessName}</h2>
                 {completedOrder.legalName && completedOrder.legalName !== completedOrder.businessName && (
-                  <p className="text-xs text-gray">{completedOrder.legalName}</p>
+                  <p className="text-xs font-bold">{completedOrder.legalName}</p>
                 )}
-                <p className="text-xs text-gray">
+                <p className="text-xs">
                   {completedOrder.branchName} {completedOrder.branchAddress && `• ${completedOrder.branchAddress}`}
                 </p>
                 {completedOrder.kraPin && (
-                  <p className="text-xs text-gray font-mono">VAT PIN: {completedOrder.kraPin}</p>
+                  <p className="text-xs mono font-bold">VAT PIN: {completedOrder.kraPin}</p>
                 )}
                 {completedOrder.etimsDeviceSerial && (
-                  <p className="text-xs text-gray font-mono">eTIMS CU Serial: {completedOrder.etimsDeviceSerial}</p>
+                  <p className="text-xs mono font-bold">eTIMS CU Serial: {completedOrder.etimsDeviceSerial}</p>
                 )}
-                <div className="pt-2 font-bold text-xs font-mono">
+                <div className="pt-1 font-black text-sm mono">
                   {completedOrder.orderNumber}
                 </div>
-                <p className="text-xs text-gray">{completedOrder.timestamp} &bull; {completedOrder.tableName}</p>
+                <p className="text-xs">{completedOrder.timestamp} &bull; {completedOrder.tableName}</p>
               </div>
 
+              <div className="dashed-divider"></div>
+
               {/* Customer, Server & Taxpayer Attributes */}
-              <div className="border-b-dashed pb-2 text-xs space-y-0.5">
+              <div className="text-xs space-y-0.5">
                 <div className="flex-between">
                   <span>Guest:</span>
                   <span className="font-bold">{completedOrder.customerName || 'Walk-in Guest'}</span>
@@ -927,52 +1012,61 @@ export default function POSPage() {
                   <span className="font-bold">{completedOrder.servedBy}</span>
                 </div>
                 {completedOrder.buyerKraPin && (
-                  <div className="flex-between">
+                  <div className="flex-between mono">
                     <span>Buyer PIN:</span>
                     <span className="font-bold">{completedOrder.buyerKraPin}</span>
                   </div>
                 )}
               </div>
 
+              <div className="dashed-divider"></div>
+
               {/* Itemized Line Ledger */}
-              <div className="space-y-1.5 border-b-dashed pb-2">
+              <div className="space-y-1">
                 {completedOrder.items.map((i: any) => (
-                  <div key={i.cartItemId} className="flex-between">
-                    <span style={{ maxWidth: '70%' }}>{i.quantity}x {i.name}</span>
-                    <span className="font-bold">{(i.price * i.quantity).toLocaleString()}</span>
+                  <div key={i.cartItemId} className="item-row text-xs">
+                    <span className="item-name font-bold">{i.quantity}x {i.name}</span>
+                    <span className="item-price mono font-bold">{(i.price * i.quantity).toLocaleString()}</span>
                   </div>
                 ))}
               </div>
 
+              <div className="dashed-divider"></div>
+
               {/* Fiscal Tax Matrix Breakdown (16% VAT + 2% Levy) */}
-              <div className="space-y-1 text-xs border-b-dashed pb-2">
+              <div className="space-y-1 text-xs">
                 <div className="flex-between">
-                  <span className="text-gray">Taxable Base Net:</span>
-                  <span>{currencySymbol} {completedOrder.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>Taxable Base Net:</span>
+                  <span className="mono">{currencySymbol} {completedOrder.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex-between">
-                  <span className="text-gray">KRA VAT (16%):</span>
-                  <span>{currencySymbol} {completedOrder.vatAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>KRA VAT (16%):</span>
+                  <span className="mono">{currencySymbol} {completedOrder.vatAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 <div className="flex-between">
-                  <span className="text-gray">Catering Levy (2%):</span>
-                  <span>{currencySymbol} {completedOrder.levyAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>Catering Levy (2%):</span>
+                  <span className="mono">{currencySymbol} {completedOrder.levyAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
                 {completedOrder.discountAmount > 0 && (
                   <div className="flex-between font-bold">
                     <span>Total Discount:</span>
-                    <span>-{currencySymbol} {completedOrder.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="mono">-{currencySymbol} {completedOrder.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 )}
-                <div className="flex-between font-bold text-sm pt-2" style={{ borderTop: '1px solid #000' }}>
+                
+                <div className="solid-divider"></div>
+                
+                <div className="flex-between font-black text-sm pt-0.5">
                   <span>TOTAL PAID:</span>
-                  <span>{currencySymbol} {completedOrder.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="mono text-base">{currencySymbol} {completedOrder.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                 </div>
               </div>
 
+              <div className="dashed-divider"></div>
+
               {/* Tender & Settlement Attribution */}
-              <div className="space-y-0.5 text-xs border-b-dashed pb-2 text-gray">
-                <div className="flex-between font-bold" style={{ color: '#000' }}>
+              <div className="space-y-0.5 text-xs">
+                <div className="flex-between font-bold">
                   <span>Tender Type:</span>
                   <span className="uppercase">{completedOrder.paymentMethod}</span>
                 </div>
@@ -980,34 +1074,31 @@ export default function POSPage() {
                   <>
                     <div className="flex-between">
                       <span>Cash Tendered:</span>
-                      <span>{currencySymbol} {completedOrder.cashTendered.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="mono">{currencySymbol} {completedOrder.cashTendered.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
-                    <div className="flex-between font-bold" style={{ color: '#000' }}>
+                    <div className="flex-between font-bold">
                       <span>Change Returned:</span>
-                      <span>{currencySymbol} {completedOrder.cashChangeDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span className="mono font-black">{currencySymbol} {completedOrder.cashChangeDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                     </div>
                   </>
                 )}
               </div>
 
-              {/* Customer Review & Non-Fiscal Audit Footer */}
-              <div className="text-center pt-1 space-y-2 text-xs">
-                <div className="space-y-1">
-                  <p className="font-bold">Thank you for your business. Karibu tena!</p>
-                  <p className="text-gray">Review Us: How Did We Serve You?</p>
-                  <div className="text-gray font-mono tracking-widest text-[11px] leading-tight select-none">
-                    .................................................................<br />
-                    ................................................................<br />
-                    ..............................................................
-                  </div>
+              <div className="dashed-divider"></div>
+
+              {/* Review & Non-Fiscal Audit Footer */}
+              <div className="text-center pt-1 space-y-1 text-xs">
+                <p className="font-bold">Thank you for your business. Karibu tena!</p>
+                <p className="text-xs">Review Us: How Did We Serve You?</p>
+                <div className="mono text-xs leading-tight select-none">
+                  ------------------------------------------
                 </div>
 
-                <div className="pt-2 border-b-dashed space-y-1 pb-2">
-                  <p className="font-bold text-[11px]">NON-FISCAL RECEIPT</p>
-                  <p className="text-[10px] text-gray uppercase">FINAL FISCAL RECEIPT</p>
-                  <p className="text-[10px] text-gray uppercase">PROVIDED UPON CHECK-OUT</p>
-                  <p className="text-[9px] font-mono tracking-tight mt-1 text-gray">
-                    ......*****END OF NON-TAX INVOICE****.......
+                <div className="pt-1 space-y-0.5">
+                  <p className="font-black text-xs">NON-FISCAL RECEIPT</p>
+                  <p className="text-xs uppercase">FINAL FISCAL RECEIPT PROVIDED UPON CHECK-OUT</p>
+                  <p className="mono text-[11px] mt-1">
+                    *** END OF NON-TAX INVOICE ***
                   </p>
                 </div>
               </div>
@@ -1017,12 +1108,14 @@ export default function POSPage() {
             {/* Action Bar (Strictly excluded from printing) */}
             <div className="flex gap-2 pt-2 font-sans print:hidden">
               <button
-                onClick={handlePrintReceipt}
+                type="button"
+                onClick={() => handlePrintReceipt(paperSize)}
                 className="flex-1 py-2.5 bg-servora-navy text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
-                <Printer size={14} /> Print Receipt
+                <Printer size={14} /> Print ({paperSize})
               </button>
               <button
+                type="button"
                 onClick={() => setCompletedOrder(null)}
                 className="px-4 py-2.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
               >
