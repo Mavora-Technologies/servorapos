@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const inventory_reorder_controller_1 = require("../controllers/inventory-reorder.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/suggestions', inventory_reorder_controller_1.getReorderSuggestions);
+router.patch('/assign-supplier', inventory_reorder_controller_1.assignPreferredSupplier);
+router.post('/execute', inventory_reorder_controller_1.executeReplenishment);
+exports.default = router;

@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const waitlist_controller_1 = require("../controllers/waitlist.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', waitlist_controller_1.getWaitlist);
+router.post('/', waitlist_controller_1.createWaitlistEntry);
+router.patch('/:id/status', waitlist_controller_1.updateStatus);
+exports.default = router;

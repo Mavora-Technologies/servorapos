@@ -1,10 +1,10 @@
 // apps/api/src/controllers/auth.controller.ts
 import { Request, Response } from 'express';
-import { eq } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import { db } from '../config/db';
-import { users, tenants, branches } from '../config/schema';
+import { users, tenants, branches, roles } from '../config/schema'; // <-- Added roles here
 import { loginSchema } from '../validators/auth.validator';
-import { loginUser } from '../services/auth.service';
+import { loginUser, DEFAULT_ROLE_PERMISSIONS } from '../services/auth.service';
 import { AuthRequest } from '../middleware/auth.middleware';
 
 export const login = async (req: Request, res: Response): Promise<void> => {
@@ -48,6 +48,7 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
         email: users.email,
         role: users.role,
         tenantId: users.tenantId,
+        defaultBranchId: users.defaultBranchId,
         businessName: tenants.businessName,
         legalName: tenants.legalName,
         kraPin: tenants.kraPin,
@@ -66,9 +67,35 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    let branchRecord: any = null;
+    // Resolve dynamic permissions for the user's role
+    let effectivePermissions: string[] = [];
+    if (userRecord.role === 'SUPER_ADMIN' || userRecord.role === 'ADMIN') {
+      effectivePermissions = ['*'];
+    } else if (userRecord.tenantId) {
+      const [roleRecord] = await db
+        .select({ permissions: roles.permissions })
+        .from(roles)
+        .where(
+          and(
+            eq(roles.slug, userRecord.role),
+            or(eq(roles.tenantId, userRecord.tenantId), eq(roles.isSystemRole, true))
+          )
+        )
+        .limit(1);
 
+      effectivePermissions =
+        roleRecord?.permissions && roleRecord.permissions.length > 0
+          ? roleRecord.permissions
+          : DEFAULT_ROLE_PERMISSIONS[userRecord.role] ?? ['pos.access', 'help.view'];
+    }
+
+    // Resolve branch record
+    let branchRecord: any = null;
     if (userRecord.tenantId) {
+      const branchQuery = userRecord.defaultBranchId
+        ? eq(branches.id, userRecord.defaultBranchId)
+        : eq(branches.tenantId, userRecord.tenantId);
+
       const [foundBranch] = await db
         .select({
           id: branches.id,
@@ -83,7 +110,7 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
           receiptFooter: branches.receiptFooter,
         })
         .from(branches)
-        .where(eq(branches.tenantId, userRecord.tenantId))
+        .where(branchQuery)
         .limit(1);
 
       branchRecord = foundBranch;
@@ -99,6 +126,7 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
           fullName: `${userRecord.firstName} ${userRecord.lastName}`.trim(),
           email: userRecord.email,
           role: userRecord.role,
+          permissions: effectivePermissions,
         },
         business: {
           id: userRecord.tenantId,

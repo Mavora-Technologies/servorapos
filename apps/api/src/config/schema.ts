@@ -6,6 +6,7 @@ import {
   boolean,
   timestamp,
   integer,
+  numeric,
   decimal,
   jsonb,
   uniqueIndex,
@@ -17,11 +18,12 @@ import { relations } from 'drizzle-orm';
 // 1. Define explicit role enum
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
-  'OWNER',
+  'ADMIN',
   'MANAGER',
   'CASHIER',
   'WAITER',
   'CHEF',
+  'HEAD_CHEF',
   'STOREKEEPER',
   'ACCOUNTANT',
 ]);
@@ -1085,6 +1087,36 @@ export const stockTransferItems = pgTable(
   ]
 );
 
+
+export const logisticsVehicles = pgTable(
+  'logistics_vehicles',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    primaryBranchId: integer('primary_branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    plateNumber: varchar('plate_number', { length: 30 }).notNull(), // e.g., KDA 412X
+    makeModel: varchar('make_model', { length: 100 }).notNull(), // e.g., Isuzu FRR / Toyota HiAce
+    vehicleType: varchar('vehicle_type', { length: 40 }).notNull().default('VAN'), // 'REFRIGERATED_TRUCK', 'VAN', 'MOTORCYCLE', 'PICKUP'
+    driverName: varchar('driver_name', { length: 120 }).notNull(),
+    driverPhone: varchar('driver_phone', { length: 30 }).notNull(),
+    maxPayloadKg: numeric('max_payload_kg', { precision: 10, scale: 2 }).notNull().default('1000.00'),
+    temperatureControlled: boolean('temperature_controlled').notNull().default(false),
+    currentStatus: varchar('current_status', { length: 30 }).notNull().default('AVAILABLE'), // 'AVAILABLE', 'IN_TRANSIT', 'MAINTENANCE', 'OFF_DUTY'
+    currentLocationLat: numeric('current_location_lat', { precision: 10, scale: 7 }),
+    currentLocationLng: numeric('current_location_lng', { precision: 10, scale: 7 }),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('logistics_vehicles_tenant_idx').on(t.tenantId),
+    index('logistics_vehicles_status_idx').on(t.tenantId, t.currentStatus),
+  ]
+);
+
+// 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 export const logisticsFleet = pgTable(
   'logistics_fleet',
   {
@@ -1093,41 +1125,92 @@ export const logisticsFleet = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
-    vehiclePlate: varchar('vehicle_plate', { length: 50 }).notNull(), // e.g. "KBZ 412X"
+    
+    // Core Plate & Type
+    vehiclePlate: varchar('vehicle_plate', { length: 50 }).notNull(), // e.g. "KDE 321B"
+    makeModel: varchar('make_model', { length: 100 }).default('Standard Fleet').notNull(),
     vehicleType: varchar('vehicle_type', { length: 50 }).default('REEFER_VAN').notNull(), // 'REEFER_VAN', 'BOX_TRUCK', 'PICKUP', 'MOTORBIKE'
-    driverName: varchar('driver_name', { length: 100 }),
+    
+    // Driver Details
+    driverName: varchar('driver_name', { length: 120 }),
     driverPhone: varchar('driver_phone', { length: 30 }),
+    
+    // Payload & Capacity
+    maxPayloadKg: numeric('max_payload_kg', { precision: 10, scale: 2 }).default('1500.00').notNull(),
+    
+    // Cold-Chain Controls
     isRefrigerated: boolean('is_refrigerated').default(false).notNull(),
     minTargetTemp: decimal('min_target_temp', { precision: 5, scale: 2 }), // e.g. 2.00
     maxTargetTemp: decimal('max_target_temp', { precision: 5, scale: 2 }), // e.g. 8.00
+    
+    // Live Operational Telemetry
+    currentStatus: varchar('current_status', { length: 30 }).default('AVAILABLE').notNull(), // 'AVAILABLE', 'IN_TRANSIT', 'MAINTENANCE', 'OFF_DUTY'
+    currentLocationLat: numeric('current_location_lat', { precision: 10, scale: 7 }),
+    currentLocationLng: numeric('current_location_lng', { precision: 10, scale: 7 }),
+    
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('fleet_tenant_idx').on(t.tenantId),
-    index('fleet_plate_idx').on(t.vehiclePlate),
+    index('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
+    index('fleet_status_idx').on(t.tenantId, t.currentStatus),
   ]
 );
 
+// 2. B2B INTER-BRANCH TRANSFERS DISPATCH WAYBILLS
+export const transferFleetDispatches = pgTable(
+  'transfer_fleet_dispatches',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    transferId: integer('transfer_id')
+      .notNull()
+      .references(() => stockTransfers.id, { onDelete: 'cascade' }),
+    fleetVehicleId: integer('fleet_vehicle_id')
+      .notNull()
+      .references(() => logisticsFleet.id, { onDelete: 'restrict' }),
+    dispatchedById: integer('dispatched_by_id').references(() => users.id, { onDelete: 'set null' }),
+    dispatchStatus: varchar('dispatch_status', { length: 30 }).default('IN_TRANSIT').notNull(), // 'IN_TRANSIT', 'DELIVERED', 'FAILED'
+    departureOdometerKm: numeric('departure_odometer_km', { precision: 10, scale: 2 }),
+    arrivalOdometerKm: numeric('arrival_odometer_km', { precision: 10, scale: 2 }),
+    departureTime: timestamp('departure_time', { withTimezone: true }).defaultNow(),
+    arrivalTime: timestamp('arrival_time', { withTimezone: true }),
+    dispatchTempProbe: decimal('dispatch_temp_probe', { precision: 5, scale: 2 }),
+    arrivalTempProbe: decimal('arrival_temp_probe', { precision: 5, scale: 2 }),
+    deliveryNotes: text('delivery_notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('transfer_dispatches_tenant_idx').on(t.tenantId),
+    index('transfer_dispatches_transfer_idx').on(t.transferId),
+    index('transfer_dispatches_vehicle_idx').on(t.fleetVehicleId),
+  ]
+);
+
+// 3. B2C LAST-MILE CUSTOMER ORDER DELIVERIES
 export const deliveryAssignments = pgTable(
   'delivery_assignments',
   {
     id: serial('id').primaryKey(),
     tenantId: integer('tenant_id')
-      .references(() => tenants.id, { onDelete: 'cascade' })
-      .notNull(),
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
     orderId: integer('order_id')
-      .references(() => orders.id, { onDelete: 'cascade' })
-      .notNull(),
-    provider: varchar('provider', { length: 100 }).default('In-House').notNull(), // In-House, Uber Direct, Bolt, Glovo, Little Cab
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    provider: varchar('provider', { length: 100 }).default('In-House').notNull(), // 'In-House', 'Uber Direct', 'Bolt', 'Glovo'
+    fleetVehicleId: integer('fleet_vehicle_id').references(() => logisticsFleet.id, { onDelete: 'set null' }), // Optional link if in-house
     driverName: varchar('driver_name', { length: 255 }).notNull(),
     driverPhone: varchar('driver_phone', { length: 50 }),
     deliveryAddress: text('delivery_address'),
     trackingUrl: varchar('tracking_url', { length: 500 }),
     deliveryFee: decimal('delivery_fee', { precision: 12, scale: 2 }).default('0.00').notNull(),
-    status: varchar('status', { length: 50 }).default('Assigned').notNull(), // Assigned, Dispatched, Delivered, Failed
+    status: varchar('status', { length: 50 }).default('Assigned').notNull(), // 'Assigned', 'Dispatched', 'Delivered', 'Failed'
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }).defaultNow().notNull(),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   },
@@ -1706,5 +1789,62 @@ export const notifications = pgTable(
     index('notifications_tenant_idx').on(t.tenantId),
     index('notifications_unread_idx').on(t.tenantId, t.isRead),
     index('notifications_severity_idx').on(t.tenantId, t.severity),
+  ]
+);
+
+// 1. STORAGE ZONES / WAREHOUSE AREAS (SAP Storage Types / NetSuite Zones)
+export const warehouseZones = pgTable(
+  'warehouse_zones',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    zoneCode: varchar('zone_code', { length: 30 }).notNull(), // e.g., 'ZONE-CHILLER-01', 'AMB-DRY-MAIN'
+    name: varchar('name', { length: 120 }).notNull(), // e.g., 'Cold-Chain Dairy Chiller', 'Main Bulk Dry Storeroom'
+    zoneType: varchar('zone_type', { length: 40 }).notNull().default('INTERNAL_STORAGE'), // 'RECEIVING', 'INTERNAL_STORAGE', 'COLD_STORAGE', 'DEEP_FREEZE', 'STAGING_DISPATCH', 'QUARANTINE_SCRAP'
+    temperatureMinC: numeric('temperature_min_c', { precision: 5, scale: 2 }),
+    temperatureMaxC: numeric('temperature_max_c', { precision: 5, scale: 2 }),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('warehouse_zones_tenant_idx').on(t.tenantId),
+    index('warehouse_zones_branch_idx').on(t.tenantId, t.branchId),
+    index('warehouse_zones_code_idx').on(t.tenantId, t.zoneCode),
+  ]
+);
+
+// 2. GRANULAR STORAGE BINS / SLOTS (SAP Bin Master Data / NetSuite Bins)
+export const warehouseBins = pgTable(
+  'warehouse_bins',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    zoneId: integer('zone_id')
+      .notNull()
+      .references(() => warehouseZones.id, { onDelete: 'cascade' }),
+    binCode: varchar('bin_code', { length: 40 }).notNull(), // e.g., 'A01-R02-S03-B04'
+    barcode: varchar('barcode', { length: 80 }), // e.g., 'BIN-CBD-A01-02'
+    binType: varchar('bin_type', { length: 30 }).notNull().default('STANDARD_SHELF'), // 'STANDARD_SHELF', 'PALLET_RACK', 'FLOOR_BULK', 'LOCKER', 'REEFER_BIN'
+    pickSequence: integer('pick_sequence').notNull().default(10), // Optimized order picking wave route
+    maxWeightKg: numeric('max_weight_kg', { precision: 10, scale: 2 }).notNull().default('500.00'),
+    maxVolumeCbm: numeric('max_volume_cbm', { precision: 8, scale: 3 }).notNull().default('1.500'),
+    isQuarantine: boolean('is_quarantine').notNull().default(false), // Replaces scrap / damaged items isolation
+    isOccupied: boolean('is_occupied').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('warehouse_bins_tenant_idx').on(t.tenantId),
+    index('warehouse_bins_zone_idx').on(t.zoneId),
+    index('warehouse_bins_code_idx').on(t.tenantId, t.binCode),
   ]
 );

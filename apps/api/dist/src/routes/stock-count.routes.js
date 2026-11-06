@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const stock_count_controller_1 = require("../controllers/stock-count.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', stock_count_controller_1.getStockCounts);
+router.post('/initiate', stock_count_controller_1.initiateStockCount);
+router.get('/:id', stock_count_controller_1.getStockCountDetails);
+router.put('/items/:itemId', stock_count_controller_1.updateStockCountLine);
+router.post('/:id/reconcile', stock_count_controller_1.reconcileStockCount);
+exports.default = router;

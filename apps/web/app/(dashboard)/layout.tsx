@@ -3,11 +3,11 @@
 import { useEffect, useState, useRef, useTransition } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  Menu, 
-  Building2, 
-  Store, 
-  PanelLeftClose, 
+import {
+  Menu,
+  Building2,
+  Store,
+  PanelLeftClose,
   PanelLeftOpen,
   Bell,
   Check,
@@ -15,6 +15,7 @@ import {
   ShoppingBag,
   ExternalLink,
   ShieldCheck,
+  ShieldAlert,
   Settings,
   LogOut,
   HelpCircle,
@@ -25,7 +26,8 @@ import {
   Search,
   ChefHat,
   Receipt,
-  AlertCircle
+  AlertCircle,
+  Lock
 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { fetchApi } from '@/lib/api';
@@ -37,6 +39,7 @@ interface UserProfile {
   fullName: string;
   email: string;
   role: string;
+  permissions?: string[];
 }
 
 interface BranchRecord {
@@ -64,6 +67,148 @@ interface HeaderNotification {
   createdAt: string;
 }
 
+// Comprehensive Route-to-Permission Mapping (Sorted automatically from most specific to least specific)
+const ROUTE_PERMISSIONS: Record<string, string> = {
+  // Mission Control & Terminals
+  '/dashboard': 'dashboard.view',
+  '/pos': 'pos.access',
+
+  // Front-of-House & Guest Service
+  '/orders/open': 'orders.view',
+  '/orders/takeaway': 'orders.view',
+  '/orders/delivery': 'delivery.view',
+  '/orders': 'orders.view',
+  '/online-orders': 'orders.view',
+  '/tables': 'tables.view',
+  '/reservations/waitlist': 'reservations.view',
+  '/reservations': 'reservations.view',
+
+  // Kitchen Operations (KDS)
+  '/kitchen/stations': 'kitchen.manage',
+  '/kitchen/history': 'kitchen.view',
+  '/kitchen/performance': 'reports.view',
+  '/kitchen': 'kitchen.view',
+
+  // Menu & Recipe Engineering
+  '/menu/categories': 'menu.manage',
+  '/menu/items': 'menu.view',
+  '/menu/modifiers': 'menu.manage',
+  '/menu/combos': 'menu.manage',
+  '/menu/pricing': 'menu.manage',
+  '/menu/availability': 'menu.manage',
+  '/menu/recipes/costing': 'recipes.view',
+  '/menu/recipes/units': 'inventory.manage',
+  '/menu/recipes': 'recipes.view',
+  '/menu': 'menu.view',
+
+  // Inventory & Logistics
+  '/inventory/items': 'inventory.view',
+  '/inventory/movements': 'inventory.view',
+  '/inventory/counts': 'inventory.manage',
+  '/inventory/transfers/fleet': 'inventory.manage',
+  '/inventory/transfers': 'inventory.manage',
+  '/inventory/locations': 'inventory.manage',
+  '/inventory/batches': 'inventory.view',
+  '/inventory/reorder': 'inventory.view',
+  '/inventory/waste': 'inventory.manage',
+  '/inventory': 'inventory.view',
+
+  // Procurement & Vendors
+  '/suppliers': 'suppliers.view',
+  '/purchasing/requests': 'purchasing.view',
+  '/purchasing/orders': 'purchasing.view',
+  '/purchasing/receiving': 'purchasing.receive',
+  '/purchasing/invoices': 'purchasing.view',
+  '/purchasing/returns': 'purchasing.manage',
+
+  // Treasury, Finance & Cash
+  '/payments/mpesa': 'payments.view',
+  '/payments/reconciliation': 'payments.reconcile',
+  '/payments/refunds': 'refunds.view',
+  '/payments': 'payments.view',
+  '/cash-management/drawers': 'cash.view',
+  '/cash-management/shifts': 'cash.view',
+  '/cash-management/reconciliation': 'cash.reconcile',
+  '/finance/expenses': 'finance.view',
+  '/finance/payables': 'finance.view',
+  '/finance/taxes': 'finance.manage',
+  '/finance/adjustments': 'finance.adjust',
+
+  // Guests & Loyalty
+  '/customers/feedback': 'customers.view',
+  '/customers': 'customers.view',
+  '/loyalty/transactions': 'loyalty.view',
+  '/loyalty/rewards': 'loyalty.manage',
+  '/loyalty': 'loyalty.view',
+  '/marketing/campaigns': 'marketing.manage',
+
+  // Executive Analytics & BI
+  '/reports/builder': 'reports.custom',
+  '/reports/exports': 'reports.export',
+  '/reports': 'reports.view',
+
+  // Servora Intelligence AI & Automations
+  '/ai-assistant': 'ai.use',
+  '/automations/runs': 'automations.view',
+  '/automations': 'automations.manage',
+  '/notifications': 'notifications.view',
+
+  // Staff & Shift Management
+  '/staff/roles': 'staff.manage',
+  '/staff/schedules': 'staff.view',
+  '/staff/attendance': 'staff.view',
+  '/staff/handover': 'staff.view',
+  '/staff/cashier-assignments': 'staff.manage',
+  '/staff/performance': 'reports.view',
+  '/staff/incidents': 'staff.manage',
+  '/staff': 'staff.view',
+
+  // Organization & Settings
+  '/settings/business': 'settings.view',
+  '/settings/branches': 'branches.view',
+  '/settings/financial': 'settings.manage',
+  '/settings/service-models': 'settings.manage',
+  '/settings/receipts': 'settings.manage',
+  '/settings/printers': 'settings.manage',
+  '/settings/kitchen': 'settings.manage',
+  '/settings/integrations': 'integrations.manage',
+  '/settings/notifications': 'settings.manage',
+  '/settings/audit-logs': 'audit.view',
+  '/settings/offline': 'settings.manage',
+  '/settings/devices': 'settings.manage',
+  '/settings/billing': 'billing.view',
+  '/settings/security': 'settings.security',
+  '/help': 'help.view',
+};
+
+function getRequiredPermissionForPath(pathname: string): string | null {
+  if (!pathname) return null;
+  // Sort keys by length descending so deeper routes match before parent routes
+  const sortedRoutes = Object.keys(ROUTE_PERMISSIONS).sort((a, b) => b.length - a.length);
+  const matchedRoute = sortedRoutes.find(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+  return matchedRoute ? ROUTE_PERMISSIONS[matchedRoute] : null;
+}
+
+function checkRouteAccess(pathname: string, permissions?: string[], role?: string): boolean {
+  // Full administrative bypass for ADMIN and SUPER_ADMIN
+  if (
+    role === 'ADMIN' ||
+    role === 'SUPER_ADMIN' ||
+    (permissions && permissions.includes('*'))
+  ) {
+    return true;
+  }
+
+  if (!permissions) return true;
+
+  const requiredPerm = getRequiredPermissionForPath(pathname);
+  if (!requiredPerm) return true;
+
+  return permissions.includes(requiredPerm);
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -84,7 +229,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
 
-  // Production Notifications State (Zero Hardcoding)
+  // Notifications State
   const [notifications, setNotifications] = useState<HeaderNotification[]>([]);
 
   const branchRef = useRef<HTMLDivElement>(null);
@@ -201,7 +346,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const handleMarkAllRead = async () => {
     try {
       await fetchApi('/api/v1/notifications/read-all', { method: 'PATCH' });
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+      setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
     } catch (err) {
       console.error('Failed to mark all notifications read:', err);
     }
@@ -217,23 +362,47 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return `${first}${last}`.toUpperCase() || 'U';
   };
 
+  // Modern, clean, professional title generator
   const getHeaderTitle = () => {
     if (!pathname) return 'Dashboard';
-    if (pathname === '/' || pathname === '/dashboard') return 'Executive Control Tower';
-    if (pathname === '/pos') return 'POS Terminal [POS01]';
-    if (pathname === '/kitchen') return 'Kitchen Display System [KDS01]';
-    if (pathname === '/menu') return 'Menu Catalog Master [BOM01]';
-    if (pathname === '/inventory') return 'Inventory Control Tower [MM01]';
-    if (pathname === '/inventory/items') return 'Item SKU Master [MM02]';
-    if (pathname === '/inventory/movements') return 'Stock Movement Ledger [MM03]';
-    if (pathname === '/inventory/counts') return 'Physical Stocktake Reconciliation [MM04]';
-    if (pathname === '/inventory/transfers') return 'Inter-Branch Consignments [MM05]';
-    if (pathname === '/purchasing/orders') return 'Purchase Orders [P2P03]';
-    if (pathname === '/purchasing/receiving') return 'Goods Received GRN [P2P04]';
-    if (pathname === '/payments/mpesa') return 'M-Pesa Daraja Hub [FI02]';
-    if (pathname === '/settings/branches') return 'Multi-Branch Nodes [CFG02]';
-    if (pathname === '/finance/taxes') return 'KRA eTIMS Ledger [FI10]';
+    if (pathname === '/' || pathname === '/dashboard') return 'Overview Dashboard';
+    if (pathname === '/pos') return 'Point of Sale Terminal';
+    if (pathname === '/kitchen') return 'Kitchen Display Console';
+    if (pathname === '/kitchen/stations') return 'Kitchen Preparation Stations';
+    if (pathname === '/kitchen/history') return 'Fulfillment Ticket History';
+    if (pathname === '/kitchen/performance') return 'Culinary SLA & Performance';
+    if (pathname === '/menu') return 'Menu Catalog Master';
+    if (pathname === '/menu/categories') return 'Category Architecture';
+    if (pathname === '/menu/items') return 'Menu Items & Variations';
+    if (pathname === '/menu/recipes') return 'Standard Recipes & Bill of Materials';
+    if (pathname === '/menu/recipes/costing') return 'Food Cost & Margin Matrix';
+    if (pathname === '/inventory') return 'Stock Valuation Ledger';
+    if (pathname === '/inventory/items') return 'Raw Materials & Master SKUs';
+    if (pathname === '/inventory/movements') return 'Stock Movement Ledger';
+    if (pathname === '/inventory/counts') return 'Physical Stock Audits';
+    if (pathname === '/inventory/transfers') return 'Inter-Branch Stock Transfers';
+    if (pathname === '/inventory/transfers/fleet') return 'Logistics Fleet & Dispatch Console';
+    if (pathname === '/inventory/locations') return 'Warehouse Layout & Storage Locations';
+    if (pathname === '/inventory/batches') return 'Lot Batches & Expiry Dates';
+    if (pathname === '/inventory/reorder') return 'Automated Reorder Engine';
+    if (pathname === '/inventory/waste') return 'Waste, Spoilage & Shrinkage';
+    if (pathname === '/suppliers') return 'Vendor & Supplier Directory';
+    if (pathname === '/purchasing/requests') return 'Purchase Requisitions';
+    if (pathname === '/purchasing/orders') return 'Purchase Orders';
+    if (pathname === '/purchasing/receiving') return 'Goods Received Notes';
+    if (pathname === '/purchasing/invoices') return 'Supplier Invoices';
+    if (pathname === '/payments') return 'Tender Settlement Cockpit';
+    if (pathname === '/payments/mpesa') return 'M-Pesa Express & Daraja Console';
+    if (pathname === '/payments/reconciliation') return 'Bank Account Reconciliation';
+    if (pathname === '/cash-management/drawers') return 'Cash Drawer Registers';
+    if (pathname === '/cash-management/shifts') return 'Cashier Till Shifts';
+    if (pathname === '/staff') return 'Employee Directory & Roster';
+    if (pathname === '/staff/roles') return 'Role Clearances & Access Authority Matrix';
+    if (pathname === '/settings/branches') return 'Multi-Branch Topology';
+    if (pathname === '/settings/business') return 'Business Entity Profile';
+    if (pathname === '/finance/taxes') return 'Tax Compliance & eTIMS Ledger';
     if (pathname === '/notifications') return 'System Alert Center';
+    if (pathname === '/help') return 'Servora Helpdesk & Documentation';
 
     const segments = pathname.split('/').filter(Boolean);
     if (segments.length > 0) {
@@ -241,10 +410,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         .map((s) => s.charAt(0).toUpperCase() + s.slice(1).replace(/-/g, ' '))
         .join(' / ');
     }
-    return 'Enterprise Cockpit';
+    return 'Servora Workspace';
   };
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  // Evaluate route security clearance
+  const isPageAuthorized = checkRouteAccess(
+    pathname,
+    workspace?.user.permissions,
+    workspace?.user.role
+  );
+  const requiredPermission = getRequiredPermissionForPath(pathname);
 
   return (
     <div className="h-screen w-full flex bg-servora-pale text-servora-navy font-sans text-sm overflow-hidden">
@@ -252,6 +429,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         isMobileMenuOpen={isMobileMenuOpen}
         closeMobileMenu={closeMobileMenu}
         handleLogout={handleLogout}
+        allowedPermissions={workspace?.user.permissions}
         isCollapsed={isSidebarCollapsed}
         toggleCollapse={toggleSidebarCollapse}
         businessName={workspace?.business.name}
@@ -262,11 +440,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Top Header Shell */}
         <header className="h-16 shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6 z-20 shadow-xs">
-          {/* Left section: Hamburger, Collapse toggle, Title */}
+          {/* Left section: Mobile Toggle, Desktop Collapse, Dynamic Title */}
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setIsMobileMenuOpen(true)}
-              className="lg:hidden p-2 -ml-2 text-servora-navy hover:bg-gray-100 rounded-lg"
+              className="lg:hidden p-2 -ml-2 text-servora-navy hover:bg-gray-100 rounded-lg cursor-pointer"
               aria-label="Open mobile menu"
             >
               <Menu size={20} />
@@ -275,7 +453,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <button
               onClick={toggleSidebarCollapse}
               title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
-              className="hidden lg:flex items-center justify-center p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-lg transition-colors"
+              className="hidden lg:flex items-center justify-center p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
             >
               {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
             </button>
@@ -288,25 +466,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
 
-          {/* Right section: Branch Switcher, Quick POS Action, Alerts, User Avatar */}
+          {/* Right section: Action Buttons, Branch Switcher, Alerts, Profile */}
           <div className="flex items-center gap-2 lg:gap-3 shrink-0">
-            {/* Quick POS Terminal Jump */}
-            {pathname !== '/pos' && (
+            {/* Direct POS Link (Only shown if user has pos.access or wildcard) */}
+            {pathname !== '/pos' && checkRouteAccess('/pos', workspace?.user.permissions, workspace?.user.role) && (
               <Link
                 href="/pos"
                 className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-servora-core text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition-colors"
               >
                 <ShoppingBag size={14} />
-                <span>POS [POS01]</span>
+                <span>Open POS</span>
               </Link>
             )}
 
-            {/* Multi-Branch Quick Node Switcher Dropdown */}
+            {/* Operating Branch Dropdown */}
             <div ref={branchRef} className="relative">
               <button
                 type="button"
                 onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-bold text-servora-navy transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-bold text-servora-navy transition-colors cursor-pointer"
               >
                 <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span>
                 <Store size={13} className="text-servora-core shrink-0" />
@@ -318,7 +496,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div className="absolute right-0 top-11 w-68 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 z-30 animate-in fade-in zoom-in-95">
                   <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between mb-1">
                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      Switch Operating Node
+                      Switch Active Location
                     </span>
                     <Link
                       href="/settings/branches"
@@ -339,11 +517,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                             key={b.id}
                             type="button"
                             onClick={() => handleSelectBranchNode(b)}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left ${
-                              isSelected
-                                ? 'bg-servora-pale text-servora-core font-bold'
-                                : 'text-servora-navy hover:bg-gray-50'
-                            }`}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${isSelected
+                              ? 'bg-servora-pale text-servora-core font-bold'
+                              : 'text-servora-navy hover:bg-gray-50'
+                              }`}
                           >
                             <div className="min-w-0 flex-1">
                               <span className="truncate block">{b.name}</span>
@@ -357,7 +534,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       })
                     ) : (
                       <div className="px-3 py-2 text-xs text-gray-500">
-                        {activeBranchName} (Single Node)
+                        {activeBranchName} (Single Location)
                       </div>
                     )}
                   </div>
@@ -369,7 +546,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-servora-deepTeal hover:text-servora-core hover:bg-gray-50 rounded-lg transition-colors"
                     >
                       <Truck size={13} />
-                      <span>Inter-Branch Stock Transfers [MM05]</span>
+                      <span>Inter-Branch Stock Transfers</span>
                     </Link>
                   </div>
                 </div>
@@ -381,7 +558,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <button
                 type="button"
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="relative p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-xl transition-colors"
+                className="relative p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
                 title="Notifications & Operational Alerts"
               >
                 <Bell size={17} />
@@ -416,9 +593,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       notifications.map((notif) => (
                         <div
                           key={notif.id}
-                          className={`p-2.5 rounded-xl border text-xs transition-colors ${
-                            notif.isRead ? 'bg-white border-gray-100' : 'bg-slate-50 border-gray-200'
-                          }`}
+                          className={`p-2.5 rounded-xl border text-xs transition-colors ${notif.isRead ? 'bg-white border-gray-100' : 'bg-slate-50 border-gray-200'
+                            }`}
                         >
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="font-bold text-servora-navy">{notif.title}</span>
@@ -450,7 +626,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <button
                 type="button"
                 onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-                className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded-xl transition-colors text-left"
+                className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded-xl transition-colors text-left cursor-pointer"
               >
                 <div
                   title={workspace?.user.fullName || 'User Profile'}
@@ -487,7 +663,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
                   >
                     <Building2 size={14} className="text-gray-400" />
-                    <span>Corporate Entity [CFG01]</span>
+                    <span>Business Profile</span>
                   </Link>
 
                   <Link
@@ -496,7 +672,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
                   >
                     <Store size={14} className="text-gray-400" />
-                    <span>Multi-Branch Nodes [CFG02]</span>
+                    <span>Locations & Outlets</span>
                   </Link>
 
                   <Link
@@ -505,7 +681,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
                   >
                     <HelpCircle size={14} className="text-gray-400" />
-                    <span>Executive Helpdesk</span>
+                    <span>Documentation & Support</span>
                   </Link>
 
                   <div className="pt-1 border-t border-gray-100">
@@ -524,11 +700,53 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Content Viewport */}
+        {/* Content Viewport with Dynamic RBAC Interception */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-servora-pale">
-          <div className="w-full space-y-6">
-            {children}
-          </div>
+          {isPageAuthorized ? (
+            <div className="w-full space-y-6">
+              {children}
+            </div>
+          ) : (
+            <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 bg-white rounded-2xl border border-gray-200 shadow-xs text-center space-y-4">
+              <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
+                <ShieldAlert size={28} />
+              </div>
+
+              <div className="space-y-1.5 max-w-md">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-bold uppercase tracking-wider">
+                  <Lock size={10} /> Access Restricted
+                </span>
+                <h2 className="text-lg font-bold text-servora-navy">
+                  Security Clearance Required
+                </h2>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  Your current operational profile (<strong>{workspace?.user.role || 'Staff'}</strong>) does not include the required security permission to view or operate <code className="font-mono font-bold text-servora-core bg-slate-100 px-1.5 py-0.5 rounded">{pathname}</code>.
+                </p>
+              </div>
+
+              {requiredPermission && (
+                <div className="px-3.5 py-2 bg-slate-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-600">
+                  Required Authority: <strong className="text-servora-navy">{requiredPermission}</strong>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => router.back()}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  &larr; Go Back
+                </button>
+                <Link
+                  href="/dashboard"
+                  className="px-4 py-2 bg-servora-core text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-colors shadow-xs"
+                >
+                  Return to Overview
+                </Link>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

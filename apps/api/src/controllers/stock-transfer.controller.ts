@@ -1,3 +1,4 @@
+// apps/api/src/controllers/stock-transfer.controller.ts
 import { Response } from 'express';
 import { eq, desc, and, aliasedTable, sql } from 'drizzle-orm';
 import { db } from '../config/db';
@@ -8,7 +9,8 @@ import {
   stockMovements, 
   branches, 
   users,
-  logisticsFleet 
+  logisticsFleet,
+  transferFleetDispatches
 } from '../config/schema';
 import { AuthRequest } from '../middleware/auth.middleware';
 import {
@@ -229,7 +231,7 @@ export const createStockTransfer = async (req: AuthRequest, res: Response): Prom
   }
 };
 
-// 4. Dispatch Transfer (Deducts stock from source warehouse, moves to in-transit)
+// 4. Dispatch Transfer (Deducts stock from source warehouse, synchronizes fleet vehicle, and opens transit waybill)
 export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
@@ -284,7 +286,7 @@ export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Pr
           throw new Error(`Insufficient stock for ${inv.name}. Available: ${currentStockNum} ${inv.unit}`);
         }
 
-        // 1. Update transfer item line
+        // 1. Update transfer line item quantities
         await tx
           .update(stockTransferItems)
           .set({
@@ -293,7 +295,7 @@ export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Pr
           })
           .where(eq(stockTransferItems.id, line.id));
 
-        // 2. Post Outward Material Document Ledger
+        // 2. Post Outward Material Movement Ledger Document
         await tx.insert(stockMovements).values({
           tenantId: Number(tenantId),
           branchId: Number(transfer.sourceBranchId),
@@ -310,13 +312,14 @@ export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Pr
           notes: `Outward Goods Issue: STO #${transfer.transferNumber}`,
         });
 
-        // 3. Deduct source inventory stock
+        // 3. Deduct source warehouse inventory balance
         await tx
           .update(inventoryItems)
           .set({ currentStock: newBalance.toFixed(4), updatedAt: new Date() })
           .where(eq(inventoryItems.id, inv.id));
       }
 
+      // 4. Update the transfer record with carrier details
       await tx
         .update(stockTransfers)
         .set({
@@ -330,6 +333,46 @@ export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Pr
           updatedAt: new Date(),
         })
         .where(eq(stockTransfers.id, transfer.id));
+
+      // 5. SYNCHRONIZE LOGISTICS FLEET ASSET & OPEN TRANSIT WAYBILL
+      if (payload.carrierVehiclePlate) {
+        const [matchedVehicle] = await tx
+          .select({
+            id: logisticsFleet.id,
+            vehiclePlate: logisticsFleet.vehiclePlate,
+            currentStatus: logisticsFleet.currentStatus,
+          })
+          .from(logisticsFleet)
+          .where(
+            and(
+              eq(logisticsFleet.tenantId, tenantId),
+              sql`UPPER(REPLACE(${logisticsFleet.vehiclePlate}, ' ', '')) = UPPER(REPLACE(${payload.carrierVehiclePlate}, ' ', ''))`
+            )
+          )
+          .limit(1);
+
+        if (matchedVehicle) {
+          // Update vehicle status in the fleet registry
+          await tx
+            .update(logisticsFleet)
+            .set({ currentStatus: 'IN_TRANSIT', updatedAt: new Date() })
+            .where(eq(logisticsFleet.id, matchedVehicle.id));
+
+          // Create tracking record in transfer_fleet_dispatches
+          await tx
+            .insert(transferFleetDispatches)
+            .values({
+              tenantId,
+              transferId: transfer.id,
+              fleetVehicleId: matchedVehicle.id,
+              dispatchedById: userId ? Number(userId) : null,
+              dispatchStatus: 'IN_TRANSIT',
+              departureTime: new Date(),
+              dispatchTempProbe: payload.dispatchTempProbe !== undefined ? payload.dispatchTempProbe?.toString() : null,
+              deliveryNotes: payload.notes || `Consignment dispatched for STO #${transfer.transferNumber}`,
+            });
+        }
+      }
     });
 
     res.status(200).json({ status: 'success', message: 'Consignment successfully dispatched into in-transit fleet custody' });
@@ -338,7 +381,7 @@ export const dispatchStockTransfer = async (req: AuthRequest, res: Response): Pr
   }
 };
 
-// 5. Receive Transfer with In-Transit Shrinkage Write-off
+// 5. Receive Transfer (Balances inventory, writes off loss, and releases carrier vehicle)
 export const receiveStockTransfer = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
@@ -395,7 +438,7 @@ export const receiveStockTransfer = async (req: AuthRequest, res: Response): Pro
         const newBalance = currentStockNum + recvQty;
         const receivedValuation = recvQty * unitCostNum;
 
-        // 1. Update line quantities and shrinkage
+        // 1. Update line quantities and transit loss discrepancy
         await tx
           .update(stockTransferItems)
           .set({
@@ -405,7 +448,7 @@ export const receiveStockTransfer = async (req: AuthRequest, res: Response): Pro
           })
           .where(eq(stockTransferItems.id, line.id));
 
-        // 2. Post Destination Inward Material Document
+        // 2. Post Destination Inward Material Movement Document
         if (recvQty > 0) {
           await tx.insert(stockMovements).values({
             tenantId: Number(tenantId),
@@ -423,14 +466,14 @@ export const receiveStockTransfer = async (req: AuthRequest, res: Response): Pro
             notes: `Inward Goods Receipt: STO #${transfer.transferNumber}`,
           });
 
-          // Credit destination inventory
+          // Credit destination branch stock
           await tx
             .update(inventoryItems)
             .set({ currentStock: newBalance.toFixed(4), updatedAt: new Date() })
             .where(eq(inventoryItems.id, inv.id));
         }
 
-        // 3. Post Transit Shrinkage / Loss Scrap Entry if loss occurred
+        // 3. Post Transit Shrinkage / Waste Scrap entry if discrepancies occurred
         if (lossQty > 0) {
           await tx.insert(stockMovements).values({
             tenantId: Number(tenantId),
@@ -450,6 +493,7 @@ export const receiveStockTransfer = async (req: AuthRequest, res: Response): Pro
         }
       }
 
+      // 4. Finalize transfer record
       await tx
         .update(stockTransfers)
         .set({
@@ -461,9 +505,46 @@ export const receiveStockTransfer = async (req: AuthRequest, res: Response): Pro
           updatedAt: new Date(),
         })
         .where(eq(stockTransfers.id, transfer.id));
+
+      // 5. RELEASE FLEET VEHICLE BACK TO 'AVAILABLE' & CLOSE DISPATCH WAYBILL
+      if (transfer.carrierVehiclePlate) {
+        const [matchedVehicle] = await tx
+          .select({ id: logisticsFleet.id })
+          .from(logisticsFleet)
+          .where(
+            and(
+              eq(logisticsFleet.tenantId, tenantId),
+              sql`UPPER(REPLACE(${logisticsFleet.vehiclePlate}, ' ', '')) = UPPER(REPLACE(${transfer.carrierVehiclePlate}, ' ', ''))`
+            )
+          )
+          .limit(1);
+
+        if (matchedVehicle) {
+          // Restore vehicle status in the master fleet ledger
+          await tx
+            .update(logisticsFleet)
+            .set({ currentStatus: 'AVAILABLE', updatedAt: new Date() })
+            .where(eq(logisticsFleet.id, matchedVehicle.id));
+
+          // Mark dispatch waybill as delivered
+          await tx
+            .update(transferFleetDispatches)
+            .set({
+              dispatchStatus: 'DELIVERED',
+              arrivalTime: new Date(),
+              arrivalTempProbe: payload.arrivalTempProbe !== undefined ? payload.arrivalTempProbe?.toString() : null,
+            })
+            .where(
+              and(
+                eq(transferFleetDispatches.transferId, transfer.id),
+                eq(transferFleetDispatches.fleetVehicleId, matchedVehicle.id)
+              )
+            );
+        }
+      }
     });
 
-    res.status(200).json({ status: 'success', message: 'Consignment received and inventory ledger balanced' });
+    res.status(200).json({ status: 'success', message: 'Consignment received, inventory ledger balanced, and fleet vehicle released' });
   } catch (error: any) {
     res.status(400).json({ status: 'error', message: error.message });
   }
@@ -482,12 +563,16 @@ export const getLogisticsFleetList = async (req: AuthRequest, res: Response): Pr
       .select({
         id: logisticsFleet.id,
         vehiclePlate: logisticsFleet.vehiclePlate,
+        makeModel: logisticsFleet.makeModel,
         vehicleType: logisticsFleet.vehicleType,
         driverName: logisticsFleet.driverName,
         driverPhone: logisticsFleet.driverPhone,
+        maxPayloadKg: logisticsFleet.maxPayloadKg,
         isRefrigerated: logisticsFleet.isRefrigerated,
         minTargetTemp: logisticsFleet.minTargetTemp,
         maxTargetTemp: logisticsFleet.maxTargetTemp,
+        currentStatus: logisticsFleet.currentStatus,
+        branchId: logisticsFleet.branchId,
       })
       .from(logisticsFleet)
       .where(and(eq(logisticsFleet.tenantId, tenantId), eq(logisticsFleet.isActive, true)))

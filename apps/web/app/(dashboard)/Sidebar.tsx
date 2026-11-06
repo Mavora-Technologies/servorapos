@@ -85,221 +85,214 @@ interface SidebarProps {
 interface NavItem {
   label: string;
   href: string;
-  code: string; // SAP / NetSuite style rapid T-Code
   icon: LucideIcon;
   permission?: string;
   badge?: string;
   badgeType?: 'live' | 'warning' | 'info' | 'count';
+  keywords?: string[];
 }
 
 interface NavGroup {
   label: string;
-  domain: 'FRONT_OFFICE' | 'SUPPLY_CHAIN' | 'FINANCE_BI' | 'GOVERNANCE';
+  domain: 'OPERATIONS' | 'SUPPLY_CHAIN' | 'FINANCE_GROWTH' | 'ADMINISTRATION';
   icon: LucideIcon;
   items: NavItem[];
 }
 
 const domainHeaders: Record<NavGroup['domain'], string> = {
-  FRONT_OFFICE: 'Front-of-House & Culinary',
-  SUPPLY_CHAIN: 'Supply Chain & Materials (MM)',
-  FINANCE_BI: 'Financials, Treasury & BI (FI/CO)',
-  GOVERNANCE: 'Human Capital & System Admin',
+  OPERATIONS: 'Front-of-House & Culinary Operations',
+  SUPPLY_CHAIN: 'Supply Chain, Fleet & Inventory',
+  FINANCE_GROWTH: 'Finance, Treasury & Customer Growth',
+  ADMINISTRATION: 'Human Capital & System Settings',
 };
 
 const standaloneItems: NavItem[] = [
   {
-    label: 'Executive Dashboard',
+    label: 'Overview Dashboard',
     href: '/dashboard',
-    code: 'EXEC01',
     icon: LayoutDashboard,
     permission: 'dashboard.view',
+    keywords: ['metrics', 'summary', 'analytics', 'home'],
   },
   {
-    label: 'POS Register Terminal',
+    label: 'Point of Sale Terminal',
     href: '/pos',
-    code: 'POS01',
     icon: ShoppingCart,
     permission: 'pos.access',
     badge: 'Live',
     badgeType: 'live',
+    keywords: ['register', 'checkout', 'billing', 'cashier'],
   },
 ];
 
 const navigationGroups: NavGroup[] = [
   {
-    label: 'Sales & Guest Service',
-    domain: 'FRONT_OFFICE',
+    label: 'Orders & Guest Service',
+    domain: 'OPERATIONS',
     icon: Store,
     items: [
-      { label: 'All Orders Ledger', href: '/orders', code: 'SD01', icon: FileText, permission: 'orders.view' },
-      { label: 'Open Active Checks', href: '/orders/open', code: 'SD02', icon: ClipboardList, permission: 'orders.view' },
-      { label: 'Floor Plan & Tables', href: '/tables', code: 'SD03', icon: UtensilsCrossed, permission: 'tables.view' },
-      { label: 'Reservations Desk', href: '/reservations', code: 'SD04', icon: CalendarDays, permission: 'reservations.view' },
-      { label: 'Guest Waitlist Queue', href: '/reservations/waitlist', code: 'SD05', icon: Clock, permission: 'reservations.view' },
-      { label: 'Takeaway & Pickups', href: '/orders/takeaway', code: 'SD06', icon: ShoppingBasket, permission: 'orders.view' },
-      { label: '3PL Dispatch & Delivery', href: '/orders/delivery', code: 'SD07', icon: Truck, permission: 'delivery.view' },
-      { label: 'Online Storefront', href: '/online-orders', code: 'SD08', icon: Monitor, permission: 'orders.view' },
+      { label: 'All Orders Ledger', href: '/orders', icon: FileText, permission: 'orders.view', keywords: ['sales', 'receipts'] },
+      { label: 'Open Dining Checks', href: '/orders/open', icon: ClipboardList, permission: 'orders.view', keywords: ['active', 'tables'] },
+      { label: 'Floor Layout & Tables', href: '/tables', icon: UtensilsCrossed, permission: 'tables.view', keywords: ['seating', 'map'] },
+      { label: 'Table Reservations', href: '/reservations', icon: CalendarDays, permission: 'reservations.view', keywords: ['booking', 'calendar'] },
+      { label: 'Guest Waitlist Queue', href: '/reservations/waitlist', icon: Clock, permission: 'reservations.view', keywords: ['walkin', 'line'] },
+      { label: 'Takeaway & Express Pickups', href: '/orders/takeaway', icon: ShoppingBasket, permission: 'orders.view', keywords: ['to-go', 'pickup'] },
+      { label: 'Dispatch & Delivery Tracking', href: '/orders/delivery', icon: Truck, permission: 'delivery.view', keywords: ['courier', 'rider'] },
+      { label: 'Online Ordering Storefront', href: '/online-orders', icon: Monitor, permission: 'orders.view', keywords: ['web', 'menu'] },
     ],
   },
   {
     label: 'Kitchen Operations (KDS)',
-    domain: 'FRONT_OFFICE',
+    domain: 'OPERATIONS',
     icon: ChefHat,
     items: [
-      { label: 'Kitchen Display (KDS)', href: '/kitchen', code: 'KDS01', icon: CookingPot, permission: 'kitchen.view' },
-      { label: 'Preparation Stations', href: '/kitchen/stations', code: 'KDS02', icon: Boxes, permission: 'kitchen.manage' },
-      { label: 'Ticket Fulfillment Archive', href: '/kitchen/history', code: 'KDS03', icon: History, permission: 'kitchen.view' },
-      { label: 'Culinary SLA Analytics', href: '/kitchen/performance', code: 'KDS04', icon: ChartNoAxesCombined, permission: 'reports.view' },
+      { label: 'Kitchen Display Console', href: '/kitchen', icon: CookingPot, permission: 'kitchen.view', keywords: ['kds', 'line', 'prep'] },
+      { label: 'Kitchen Prep Stations', href: '/kitchen/stations', icon: Boxes, permission: 'kitchen.manage', keywords: ['grill', 'bar', 'cold'] },
+      { label: 'Completed Ticket History', href: '/kitchen/history', icon: History, permission: 'kitchen.view', keywords: ['served', 'orders'] },
+      { label: 'Culinary SLA & Speed of Service', href: '/kitchen/performance', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['time', 'cook'] },
     ],
   },
   {
-    label: 'Menu Engineering & BOM',
-    domain: 'FRONT_OFFICE',
+    label: 'Menu & Recipe Engineering',
+    domain: 'OPERATIONS',
     icon: UtensilsCrossed,
     items: [
-      { label: 'Menu Master Catalog', href: '/menu', code: 'BOM01', icon: BookOpen, permission: 'menu.view' },
-      { label: 'Category Hierarchy', href: '/menu/categories', code: 'BOM02', icon: Tags, permission: 'menu.manage' },
-      { label: 'Menu Items & SKUs', href: '/menu/items', code: 'BOM03', icon: UtensilsCrossed, permission: 'menu.view' },
-      { label: 'Modifiers & Add-ons', href: '/menu/modifiers', code: 'BOM04', icon: SlidersHorizontal, permission: 'menu.manage' },
-      { label: 'Combo Meal Bundles', href: '/menu/combos', code: 'BOM05', icon: ShoppingBasket, permission: 'menu.manage' },
-      { label: 'Dynamic Pricing Rules', href: '/menu/pricing', code: 'BOM06', icon: BadgePercent, permission: 'menu.manage' },
-      { label: 'Stock Availability', href: '/menu/availability', code: 'BOM07', icon: Clock, permission: 'menu.manage' },
-      { label: 'Standard Recipes (BOM)', href: '/menu/recipes', code: 'BOM08', icon: CookingPot, permission: 'recipes.view' },
-      { label: 'Food Cost & Margin Matrix', href: '/menu/recipes/costing', code: 'BOM09', icon: FileChartColumn, permission: 'recipes.view' },
-      { label: 'UOM & Unit Conversions', href: '/menu/recipes/units', code: 'BOM10', icon: RefreshCw, permission: 'inventory.manage' },
+      { label: 'Menu Catalog Master', href: '/menu', icon: BookOpen, permission: 'menu.view', keywords: ['dishes', 'beverages'] },
+      { label: 'Category Architecture', href: '/menu/categories', icon: Tags, permission: 'menu.manage', keywords: ['groups', 'sections'] },
+      { label: 'Item Modifiers & Variations', href: '/menu/modifiers', icon: SlidersHorizontal, permission: 'menu.manage', keywords: ['options', 'addons'] },
+      { label: 'Combos & Value Bundles', href: '/menu/combos', icon: ShoppingBasket, permission: 'menu.manage', keywords: ['sets', 'deals'] },
+      { label: 'Dynamic Pricing Schedules', href: '/menu/pricing', icon: BadgePercent, permission: 'menu.manage', keywords: ['happy hour', 'promotions'] },
+      { label: 'Item Availability & 86 List', href: '/menu/availability', icon: Clock, permission: 'menu.manage', keywords: ['out of stock', 'sold out'] },
+      { label: 'Recipe Formulas & BOM', href: '/menu/recipes', icon: CookingPot, permission: 'recipes.view', keywords: ['ingredients', 'portions'] },
+      { label: 'Food Cost & Contribution Margin', href: '/menu/recipes/costing', icon: FileChartColumn, permission: 'recipes.view', keywords: ['profit', 'cogs'] },
+      { label: 'Unit of Measure Conversions', href: '/menu/recipes/units', icon: RefreshCw, permission: 'inventory.manage', keywords: ['kg', 'litres', 'grams'] },
     ],
   },
   {
-    label: 'Inventory & Warehouse',
+    label: 'Inventory & Logistics',
     domain: 'SUPPLY_CHAIN',
     icon: Package,
     items: [
-      { label: 'Inventory Control Tower', href: '/inventory', code: 'MM01', icon: Boxes, permission: 'inventory.view' },
-      { label: 'Material Item Master', href: '/inventory/items', code: 'MM02', icon: Package, permission: 'inventory.view' },
-      { label: 'Stock Movement Ledger', href: '/inventory/movements', code: 'MM03', icon: History, permission: 'inventory.view' },
-      { label: 'Physical StockCounts', href: '/inventory/counts', code: 'MM04', icon: ClipboardList, permission: 'inventory.manage' },
-      { label: 'Inter-Branch Transfers', href: '/inventory/transfers', code: 'MM05', icon: Truck, permission: 'inventory.manage' },
-      { label: 'Cold-Chain Fleet & Vans', href: '/inventory/transfers/fleet', code: 'MM06', icon: Truck, permission: 'inventory.manage' },
-      { label: 'Warehouse Storage Bins', href: '/inventory/locations', code: 'MM07', icon: Warehouse, permission: 'inventory.manage' },
-      { label: 'Lot Batches & Expiry', href: '/inventory/batches', code: 'MM08', icon: CalendarDays, permission: 'inventory.view' },
-      { label: 'MRP Reorder Engine', href: '/inventory/reorder', code: 'MM09', icon: ShoppingBasket, permission: 'inventory.view' },
-      { label: 'Wastage & Spoilage Logs', href: '/inventory/waste', code: 'MM10', icon: Package, permission: 'inventory.manage' },
+      { label: 'Stock Valuation Ledger', href: '/inventory', icon: Boxes, permission: 'inventory.view', keywords: ['stock', 'on-hand'] },
+      { label: 'Raw Materials & Master SKUs', href: '/inventory/items', icon: Package, permission: 'inventory.view', keywords: ['ingredients', 'products'] },
+      { label: 'Stock Movements & Bin Cards', href: '/inventory/movements', icon: History, permission: 'inventory.view', keywords: ['inward', 'outward', 'adjustments'] },
+      { label: 'Physical Stock Audits', href: '/inventory/counts', icon: ClipboardList, permission: 'inventory.manage', keywords: ['stocktake', 'variance'] },
+      { label: 'Inter-Branch Transfers', href: '/inventory/transfers', icon: Truck, permission: 'inventory.manage', keywords: ['depot', 'internal movement'] },
+      { label: 'Logistics Fleet & Dispatch Console', href: '/inventory/transfers/fleet', icon: Truck, permission: 'inventory.manage', keywords: ['vans', 'vehicles', 'reefer', 'driver'] },
+      { label: 'Warehouse Layout & Storage Bins', href: '/inventory/locations', icon: Warehouse, permission: 'inventory.manage', keywords: ['zones', 'racks', 'shelves', 'chiller'] },
+      { label: 'Lot Batches & Expiry Dates', href: '/inventory/batches', icon: CalendarDays, permission: 'inventory.view', keywords: ['fifo', 'shelf life'] },
+      { label: 'Automated Reorder Engine', href: '/inventory/reorder', icon: ShoppingBasket, permission: 'inventory.view', keywords: ['par levels', 'low stock'] },
+      { label: 'Waste, Spoilage & Shrinkage', href: '/inventory/waste', icon: Package, permission: 'inventory.manage', keywords: ['scrap', 'loss', 'damage'] },
     ],
   },
   {
-    label: 'Procurement (Procure-to-Pay)',
+    label: 'Procurement & Vendors',
     domain: 'SUPPLY_CHAIN',
     icon: Warehouse,
     items: [
-      { label: 'Approved Vendor Master', href: '/suppliers', code: 'P2P01', icon: ContactRound, permission: 'suppliers.view' },
-      { label: 'Purchase Requisitions', href: '/purchasing/requests', code: 'P2P02', icon: ClipboardList, permission: 'purchasing.view' },
-      { label: 'Purchase Orders (PO)', href: '/purchasing/orders', code: 'P2P03', icon: FileText, permission: 'purchasing.view' },
-      { label: 'Goods Received (GRN)', href: '/purchasing/receiving', code: 'P2P04', icon: Warehouse, permission: 'purchasing.receive' },
-      { label: '3-Way Vendor Invoices', href: '/purchasing/invoices', code: 'P2P05', icon: Receipt, permission: 'purchasing.view' },
-      { label: 'Vendor Returns & Debit', href: '/purchasing/returns', code: 'P2P06', icon: RefreshCw, permission: 'purchasing.manage' },
+      { label: 'Vendor & Supplier Directory', href: '/suppliers', icon: ContactRound, permission: 'suppliers.view', keywords: ['vendors', 'contacts'] },
+      { label: 'Purchase Requisitions', href: '/purchasing/requests', icon: ClipboardList, permission: 'purchasing.view', keywords: ['requests', 'approvals'] },
+      { label: 'Purchase Orders (PO)', href: '/purchasing/orders', icon: FileText, permission: 'purchasing.view', keywords: ['orders', 'supply'] },
+      { label: 'Goods Received Notes (GRN)', href: '/purchasing/receiving', icon: Warehouse, permission: 'purchasing.receive', keywords: ['inbound', 'delivery'] },
+      { label: 'Supplier Invoices & 3-Way Match', href: '/purchasing/invoices', icon: Receipt, permission: 'purchasing.view', keywords: ['bills', 'verification'] },
+      { label: 'Vendor Returns & Debit Notes', href: '/purchasing/returns', icon: RefreshCw, permission: 'purchasing.manage', keywords: ['rejection', 'refund'] },
     ],
   },
   {
-    label: 'Payments & Treasury (FI)',
-    domain: 'FINANCE_BI',
+    label: 'Treasury & Payments',
+    domain: 'FINANCE_GROWTH',
     icon: Wallet,
     items: [
-      { label: 'Settlements Cockpit', href: '/payments', code: 'FI01', icon: CreditCard, permission: 'payments.view' },
-      { label: 'M-Pesa Daraja C2B/B2B', href: '/payments/mpesa', code: 'FI02', icon: Smartphone, permission: 'payments.view', badge: 'Daraja', badgeType: 'live' },
-      { label: 'Bank Reconciliation', href: '/payments/reconciliation', code: 'FI03', icon: RefreshCw, permission: 'payments.reconcile' },
-      { label: 'Credit Notes & Refunds', href: '/payments/refunds', code: 'FI04', icon: HandCoins, permission: 'refunds.view' },
-      { label: 'Physical Cash Drawers', href: '/cash-management/drawers', code: 'FI05', icon: Wallet, permission: 'cash.view' },
-      { label: 'Cashier Till Shifts', href: '/cash-management/shifts', code: 'FI06', icon: Clock, permission: 'cash.view' },
-      { label: 'End-of-Day Z-Balancing', href: '/cash-management/reconciliation', code: 'FI07', icon: ClipboardList, permission: 'cash.reconcile' },
-      { label: 'Operating Expenses', href: '/finance/expenses', code: 'FI08', icon: Receipt, permission: 'finance.view' },
-      { label: 'Accounts Payable (AP)', href: '/finance/payables', code: 'FI09', icon: HandCoins, permission: 'finance.view' },
-      { label: 'KRA eTIMS & VAT Ledger', href: '/finance/taxes', code: 'FI10', icon: FileText, permission: 'finance.manage' },
-      { label: 'Journal Adjustments', href: '/finance/adjustments', code: 'FI11', icon: SlidersHorizontal, permission: 'finance.adjust' },
+      { label: 'Tender Settlement Cockpit', href: '/payments', icon: CreditCard, permission: 'payments.view', keywords: ['receipts', 'methods'] },
+      { label: 'M-Pesa Express & C2B/B2B', href: '/payments/mpesa', icon: Smartphone, permission: 'payments.view', badge: 'M-Pesa', badgeType: 'live', keywords: ['daraja', 'mobile money', 'stk'] },
+      { label: 'Bank Account Reconciliation', href: '/payments/reconciliation', icon: RefreshCw, permission: 'payments.reconcile', keywords: ['clearing', 'audit'] },
+      { label: 'Refunds & Void Approvals', href: '/payments/refunds', icon: HandCoins, permission: 'refunds.view', keywords: ['reversals', 'credit'] },
+      { label: 'Cash Drawer Registers', href: '/cash-management/drawers', icon: Wallet, permission: 'cash.view', keywords: ['till', 'float'] },
+      { label: 'Cashier Till Shifts', href: '/cash-management/shifts', icon: Clock, permission: 'cash.view', keywords: ['opening float', 'handover'] },
+      { label: 'End of Day Z-Report Reconciliation', href: '/cash-management/reconciliation', icon: ClipboardList, permission: 'cash.reconcile', keywords: ['z-out', 'closeout'] },
+      { label: 'Operational Expense Ledger', href: '/finance/expenses', icon: Receipt, permission: 'finance.view', keywords: ['petty cash', 'overhead'] },
+      { label: 'Accounts Payable (AP)', href: '/finance/payables', icon: HandCoins, permission: 'finance.view', keywords: ['due dates', 'vendor pay'] },
+      { label: 'Tax Compliance & eTIMS Ledger', href: '/finance/taxes', icon: FileText, permission: 'finance.manage', keywords: ['kra', 'vat'] },
+      { label: 'General Journal Adjustments', href: '/finance/adjustments', icon: SlidersHorizontal, permission: 'finance.adjust', keywords: ['accruals', 'entries'] },
     ],
   },
   {
-    label: 'Customers & Loyalty (CRM)',
-    domain: 'FINANCE_BI',
+    label: 'Guests & Loyalty Programs',
+    domain: 'FINANCE_GROWTH',
     icon: Users,
     items: [
-      { label: 'Guest CRM Directory', href: '/customers', code: 'CRM01', icon: Users, permission: 'customers.view' },
-      { label: 'Loyalty Tier Program', href: '/loyalty', code: 'CRM02', icon: Sparkles, permission: 'loyalty.view' },
-      { label: 'Points Accrual Ledger', href: '/loyalty/transactions', code: 'CRM03', icon: History, permission: 'loyalty.view' },
-      { label: 'Promotional Vouchers', href: '/loyalty/rewards', code: 'CRM04', icon: BadgePercent, permission: 'loyalty.manage' },
-      { label: 'CSAT Guest Reviews', href: '/customers/feedback', code: 'CRM05', icon: ContactRound, permission: 'customers.view' },
-      { label: 'SMS/WhatsApp Broadcast', href: '/marketing/campaigns', code: 'CRM06', icon: Bell, permission: 'marketing.manage' },
+      { label: 'Guest Profiles Directory', href: '/customers', icon: Users, permission: 'customers.view', keywords: ['crm', 'clients'] },
+      { label: 'Loyalty Tiers & Membership', href: '/loyalty', icon: Sparkles, permission: 'loyalty.view', keywords: ['rewards', 'points'] },
+      { label: 'Point Accrual Transactions', href: '/loyalty/transactions', icon: History, permission: 'loyalty.view', keywords: ['redemption', 'balance'] },
+      { label: 'Vouchers & Gift Cards', href: '/loyalty/rewards', icon: BadgePercent, permission: 'loyalty.manage', keywords: ['coupons', 'discounts'] },
+      { label: 'Guest Feedback & Reviews', href: '/customers/feedback', icon: ContactRound, permission: 'customers.view', keywords: ['csat', 'ratings'] },
+      { label: 'Targeted Marketing Broadcasts', href: '/marketing/campaigns', icon: Bell, permission: 'marketing.manage', keywords: ['sms', 'whatsapp'] },
     ],
   },
   {
-    label: 'Business Intelligence (BI)',
-    domain: 'FINANCE_BI',
+    label: 'Executive Analytics & BI',
+    domain: 'FINANCE_GROWTH',
     icon: ChartNoAxesCombined,
     items: [
-      { label: 'BI Analytics Home', href: '/reports', code: 'BI01', icon: ChartNoAxesCombined, permission: 'reports.view' },
-      { label: 'Revenue & Hourly Sales', href: '/reports/sales', code: 'BI02', icon: FileChartColumn, permission: 'reports.view' },
-      { label: 'Menu Item Profitability', href: '/reports/products', code: 'BI03', icon: Tags, permission: 'reports.view' },
-      { label: 'Tender Type Breakdown', href: '/reports/payments', code: 'BI04', icon: CreditCard, permission: 'reports.view' },
-      { label: 'FIFO/AVCO Valuation', href: '/reports/inventory', code: 'BI05', icon: Package, permission: 'reports.view' },
-      { label: 'Theoretical vs Actual COGS', href: '/reports/food-costing', code: 'BI06', icon: CookingPot, permission: 'reports.view' },
-      { label: 'Shrinkage & Waste Audit', href: '/reports/waste', code: 'BI07', icon: FileChartColumn, permission: 'reports.view' },
-      { label: 'Vendor Spend Analytics', href: '/reports/procurement', code: 'BI08', icon: Truck, permission: 'reports.view' },
-      { label: 'Till Discrepancy Audit', href: '/reports/cash', code: 'BI09', icon: Wallet, permission: 'reports.view' },
-      { label: 'Custom Query Builder', href: '/reports/builder', code: 'BI10', icon: SlidersHorizontal, permission: 'reports.custom' },
-      { label: 'Scheduled Report Jobs', href: '/reports/saved', code: 'BI11', icon: BookOpen, permission: 'reports.view' },
-      { label: 'CSV / Excel Data Exports', href: '/reports/exports', code: 'BI12', icon: FileText, permission: 'reports.export' },
+      { label: 'Analytics Control Tower', href: '/reports', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['charts', 'overview'] },
+      { label: 'Hourly Sales & Revenue Trends', href: '/reports/sales', icon: FileChartColumn, permission: 'reports.view', keywords: ['turnover', 'gross'] },
+      { label: 'Product Margin Analysis', href: '/reports/products', icon: Tags, permission: 'reports.view', keywords: ['top sellers', 'abc'] },
+      { label: 'Tender Distribution Breakdown', href: '/reports/payments', icon: CreditCard, permission: 'reports.view', keywords: ['cash vs card', 'mpesa'] },
+      { label: 'Inventory Cost & Stock Valuation', href: '/reports/inventory', icon: Package, permission: 'reports.view', keywords: ['holding value', 'fifo'] },
+      { label: 'Theoretical vs Actual Food Cost', href: '/reports/food-costing', icon: CookingPot, permission: 'reports.view', keywords: ['variance', 'spoilage'] },
+      { label: 'Kitchen & Preparation Efficiency', href: '/reports/performance', icon: Clock, permission: 'reports.view', keywords: ['ticket time', 'speed'] },
+      { label: 'Custom Report Builder', href: '/reports/builder', icon: SlidersHorizontal, permission: 'reports.custom', keywords: ['adhoc', 'queries'] },
+      { label: 'Scheduled Report Deliveries', href: '/reports/saved', icon: BookOpen, permission: 'reports.view', keywords: ['automated', 'emails'] },
+      { label: 'Data Warehouse Export Center', href: '/reports/exports', icon: FileText, permission: 'reports.export', keywords: ['csv', 'excel', 'backup'] },
     ],
   },
   {
-    label: 'AI Copilot & Automations',
-    domain: 'FINANCE_BI',
+    label: 'Servora Intelligence AI',
+    domain: 'FINANCE_GROWTH',
     icon: BrainCircuit,
     items: [
-      { label: 'Servora AI Advisor', href: '/ai-assistant', code: 'AI01', icon: BrainCircuit, permission: 'ai.use', badge: 'AI', badgeType: 'info' },
-      { label: 'Revenue Forecasting', href: '/ai-assistant/sales', code: 'AI02', icon: ChartNoAxesCombined, permission: 'ai.use' },
-      { label: 'Cover Demand Predictor', href: '/ai-assistant/forecasting', code: 'AI03', icon: Activity, permission: 'ai.use' },
-      { label: 'Auto-PO Replenishment', href: '/ai-assistant/inventory', code: 'AI04', icon: Package, permission: 'ai.use' },
-      { label: 'Menu Boston Matrix', href: '/ai-assistant/menu-analysis', code: 'AI05', icon: Sparkles, permission: 'ai.use' },
-      { label: 'Workflow Rules Engine', href: '/automations', code: 'AI06', icon: Puzzle, permission: 'automations.manage' },
-      { label: 'Webhook Execution Logs', href: '/automations/runs', code: 'AI07', icon: History, permission: 'automations.view' },
-      { label: 'System Alert Center', href: '/notifications', code: 'AI08', icon: Bell, permission: 'notifications.view' },
+      { label: 'Copilot Assistant Console', href: '/ai-assistant', icon: BrainCircuit, permission: 'ai.use', badge: 'AI', badgeType: 'info', keywords: ['chat', 'copilot', 'advisor'] },
+      { label: 'Demand & Cover Forecasting', href: '/ai-assistant/forecasting', icon: Activity, permission: 'ai.use', keywords: ['footfall', 'covers', 'predictions'] },
+      { label: 'Predictive Purchasing Engine', href: '/ai-assistant/inventory', icon: Package, permission: 'ai.use', keywords: ['auto replenishment', 'smart po'] },
+      { label: 'Menu Engineering Matrix', href: '/ai-assistant/menu-analysis', icon: Sparkles, permission: 'ai.use', keywords: ['boston matrix', 'stars', 'dogs'] },
+      { label: 'Workflow Automations Engine', href: '/automations', icon: Puzzle, permission: 'automations.manage', keywords: ['triggers', 'rules'] },
+      { label: 'System Notifications Log', href: '/notifications', icon: Bell, permission: 'notifications.view', keywords: ['alerts', 'events'] },
     ],
   },
   {
-    label: 'Human Capital & Governance',
-    domain: 'GOVERNANCE',
+    label: 'Staff & Shift Management',
+    domain: 'ADMINISTRATION',
     icon: UserRound,
     items: [
-      { label: 'Employee Master Roster', href: '/staff', code: 'HR01', icon: Users, permission: 'staff.view' },
-      { label: 'RBAC Permission Matrix', href: '/staff/roles', code: 'HR02', icon: ShieldCheck, permission: 'staff.manage' },
-      { label: 'Shift Rota Planner', href: '/staff/schedules', code: 'HR03', icon: CalendarDays, permission: 'staff.view' },
-      { label: 'Clock-In Attendance', href: '/staff/attendance', code: 'HR04', icon: Clock, permission: 'staff.view' },
-      { label: 'Manager Shift Handover', href: '/staff/handover', code: 'HR05', icon: ClipboardList, permission: 'staff.view' },
-      { label: 'Drawer Custodian Rights', href: '/staff/cashier-assignments', code: 'HR06', icon: Wallet, permission: 'staff.manage' },
-      { label: 'Waiter Sales KPIs', href: '/staff/performance', code: 'HR07', icon: ChartNoAxesCombined, permission: 'reports.view' },
-      { label: 'Disciplinary & Incidents', href: '/staff/incidents', code: 'HR08', icon: FileText, permission: 'staff.manage' },
+      { label: 'Employee Directory & Roster', href: '/staff', icon: Users, permission: 'staff.view', keywords: ['team', 'workers'] },
+      { label: 'Role-Based Access Control (RBAC)', href: '/staff/roles', icon: ShieldCheck, permission: 'staff.manage', keywords: ['permissions', 'security'] },
+      { label: 'Weekly Shift Schedule Planner', href: '/staff/schedules', icon: CalendarDays, permission: 'staff.view', keywords: ['rota', 'planning'] },
+      { label: 'Biometric Clock-In / Attendance', href: '/staff/attendance', icon: Clock, permission: 'staff.view', keywords: ['timesheet', 'hours'] },
+      { label: 'Manager Shift Handover Notes', href: '/staff/handover', icon: ClipboardList, permission: 'staff.view', keywords: ['logbook', 'closing'] },
+      { label: 'Cash Drawer Custodians', href: '/staff/cashier-assignments', icon: Wallet, permission: 'staff.manage', keywords: ['till assignment', 'register'] },
+      { label: 'Server Performance & Tip Pool', href: '/staff/performance', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['waiter kpis', 'gratuity'] },
     ],
   },
   {
-    label: 'Enterprise Configuration',
-    domain: 'GOVERNANCE',
+    label: 'Organization & Settings',
+    domain: 'ADMINISTRATION',
     icon: Settings,
     items: [
-      { label: 'Legal Entity & KRA PIN', href: '/settings/business', code: 'CFG01', icon: Building2, permission: 'settings.view' },
-      { label: 'Multi-Branch Topology', href: '/settings/branches', code: 'CFG02', icon: Store, permission: 'branches.view' },
-      { label: 'Tax & eTIMS OSCU Setup', href: '/settings/financial', code: 'CFG03', icon: Wallet, permission: 'settings.manage' },
-      { label: 'Dining Service Models', href: '/settings/service-models', code: 'CFG04', icon: UtensilsCrossed, permission: 'settings.manage' },
-      { label: 'Thermal Receipt Designer', href: '/settings/receipts', code: 'CFG05', icon: Receipt, permission: 'settings.manage' },
-      { label: 'ESC/POS Printers & LAN', href: '/settings/printers', code: 'CFG06', icon: Monitor, permission: 'settings.manage' },
-      { label: 'KDS Station Routing', href: '/settings/kitchen', code: 'CFG07', icon: ChefHat, permission: 'settings.manage' },
-      { label: 'Payment Gateways', href: '/settings/integrations/payments', code: 'CFG08', icon: CreditCard, permission: 'integrations.manage' },
-      { label: 'SMS & WhatsApp Gateways', href: '/settings/integrations/messaging', code: 'CFG09', icon: Bell, permission: 'integrations.manage' },
-      { label: 'UberEats / Glovo Webhooks', href: '/settings/integrations/orders', code: 'CFG10', icon: ShoppingCart, permission: 'integrations.manage' },
-      { label: 'Alert Escalation Rules', href: '/settings/notifications', code: 'CFG11', icon: Bell, permission: 'settings.manage' },
-      { label: 'Immutable Security Audit', href: '/settings/audit-logs', code: 'CFG12', icon: ShieldCheck, permission: 'audit.view' },
-      { label: 'Offline Edge Sync Queue', href: '/settings/offline', code: 'CFG13', icon: RefreshCw, permission: 'settings.manage' },
-      { label: 'Authorized POS Terminals', href: '/settings/devices', code: 'CFG14', icon: Monitor, permission: 'settings.manage' },
-      { label: 'SaaS Subscription & Tier', href: '/settings/billing', code: 'CFG15', icon: Receipt, permission: 'billing.view' },
-      { label: '2FA & Password Policies', href: '/settings/security', code: 'CFG16', icon: ShieldCheck, permission: 'settings.security' },
+      { label: 'Business Profile & Legal Entity', href: '/settings/business', icon: Building2, permission: 'settings.view', keywords: ['kra pin', 'company'] },
+      { label: 'Multi-Location Branch Topology', href: '/settings/branches', icon: Store, permission: 'branches.view', keywords: ['outlets', 'depots'] },
+      { label: 'Tax Configurations & Fiscal Devices', href: '/settings/financial', icon: Wallet, permission: 'settings.manage', keywords: ['etims', 'oscu', 'vat'] },
+      { label: 'Hospitality Service Models', href: '/settings/service-models', icon: UtensilsCrossed, permission: 'settings.manage', keywords: ['dine-in', 'bar', 'counter'] },
+      { label: 'Receipt & Invoice Customizer', href: '/settings/receipts', icon: Receipt, permission: 'settings.manage', keywords: ['footer', 'logo'] },
+      { label: 'Network Hardware & POS Printers', href: '/settings/printers', icon: Monitor, permission: 'settings.manage', keywords: ['lan', 'thermal', 'kitchen printer'] },
+      { label: 'KDS Order Routing Rules', href: '/settings/kitchen', icon: ChefHat, permission: 'settings.manage', keywords: ['prep routing', 'split'] },
+      { label: 'Payment Gateway Integrations', href: '/settings/integrations/payments', icon: CreditCard, permission: 'integrations.manage', keywords: ['pesapal', 'stripe'] },
+      { label: 'Communication Gateways', href: '/settings/integrations/messaging', icon: Bell, permission: 'integrations.manage', keywords: ['sms api', 'infobip'] },
+      { label: 'Aggregator Webhooks (Uber / Glovo)', href: '/settings/integrations/orders', icon: ShoppingCart, permission: 'integrations.manage', keywords: ['api', 'delivery sync'] },
+      { label: 'Audit Trail & Immutable Logs', href: '/settings/audit-logs', icon: ShieldCheck, permission: 'audit.view', keywords: ['security log', 'compliance'] },
+      { label: 'Offline Edge Sync Queue', href: '/settings/offline', icon: RefreshCw, permission: 'settings.manage', keywords: ['local storage', 'sync'] },
+      { label: 'Registered POS Terminals', href: '/settings/devices', icon: Monitor, permission: 'settings.manage', keywords: ['android', 'hardware'] },
+      { label: 'Subscription Plan & Billing', href: '/settings/billing', icon: Receipt, permission: 'billing.view', keywords: ['saas', 'invoices'] },
+      { label: 'Security & Two-Factor Authentication', href: '/settings/security', icon: ShieldCheck, permission: 'settings.security', keywords: ['2fa', 'passwords'] },
     ],
   },
 ];
@@ -312,8 +305,10 @@ function groupIsActive(pathname: string, group: NavGroup) {
   return group.items.some((item) => routeIsActive(pathname, item.href));
 }
 
-function hasPermission(item: NavItem, permissions?: string[]) {
+function hasPermission(item: NavItem, permissions?: string[], userRole?: string) {
+  if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') return true;
   if (!permissions) return true;
+  if (permissions.includes('*')) return true;
   return item.permission ? permissions.includes(item.permission) : true;
 }
 
@@ -341,7 +336,7 @@ export default function Sidebar({
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>(['/pos', '/orders/open', '/kitchen']);
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
 
-  // Live Operational Telemetry Badges (KDS Queue, Low Stock, Open Orders)
+  // Live Operational Telemetry Badges
   const [liveCounts, setLiveCounts] = useState<{
     kitchenQueue: number;
     lowStock: number;
@@ -355,7 +350,6 @@ export default function Sidebar({
   // System latency state
   const [latency, setLatency] = useState<number | null>(null);
 
-  // Load saved Pinned Favorites & Recent History from localStorage
   useEffect(() => {
     try {
       const savedPins = localStorage.getItem('servora_pinned_nav');
@@ -368,7 +362,6 @@ export default function Sidebar({
     }
   }, []);
 
-  // Track Recently Visited Modules automatically on route change
   useEffect(() => {
     if (!pathname || pathname === '/dashboard' || pathname === '/') return;
     setRecentHrefs((prev) => {
@@ -392,7 +385,6 @@ export default function Sidebar({
     });
   };
 
-  // Close branch dropdown on outside click
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       if (
@@ -408,7 +400,6 @@ export default function Sidebar({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isBranchDropdownOpen]);
 
-  // Fetch registered branches + live operational badge counts
   useEffect(() => {
     let isMounted = true;
     const loadBranchesAndTelemetry = async () => {
@@ -475,7 +466,6 @@ export default function Sidebar({
     );
   };
 
-  // Keyboard shortcut: Ctrl+K or Cmd+K focuses T-Code / Module search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -490,7 +480,6 @@ export default function Sidebar({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isCollapsed, toggleCollapse]);
 
-  // Live API latency heartbeat
   useEffect(() => {
     const fetchLatency = async () => {
       const start = performance.now();
@@ -506,13 +495,12 @@ export default function Sidebar({
     return () => clearInterval(interval);
   }, []);
 
-  // Inject dynamic live counts into navigation items
   const enrichedGroups = useMemo(() => {
     return navigationGroups
       .map((group) => ({
         ...group,
         items: group.items
-          .filter((item) => hasPermission(item, allowedPermissions))
+          .filter((item) => hasPermission(item, allowedPermissions, userRole))
           .map((item) => {
             if (item.href === '/kitchen' || item.href === '/orders/open') {
               return liveCounts.kitchenQueue > 0
@@ -528,14 +516,13 @@ export default function Sidebar({
           }),
       }))
       .filter((group) => group.items.length > 0);
-  }, [allowedPermissions, liveCounts]);
+  }, [allowedPermissions, liveCounts, userRole]);
 
   const visibleStandaloneItems = useMemo(
-    () => standaloneItems.filter((item) => hasPermission(item, allowedPermissions)),
-    [allowedPermissions]
+    () => standaloneItems.filter((item) => hasPermission(item, allowedPermissions, userRole)),
+    [allowedPermissions, userRole]
   );
 
-  // Flat catalog of all accessible items for T-Code jump, Favorites, and Recents
   const allAccessibleItems = useMemo(() => {
     const map = new Map<string, NavItem>();
     visibleStandaloneItems.forEach((i) => map.set(i.href, i));
@@ -553,7 +540,6 @@ export default function Sidebar({
     [recentHrefs, allAccessibleItems]
   );
 
-  // Filter by module label OR SAP-style Transaction Code (e.g., "MM02", "POS01")
   const filteredGroups = useMemo(() => {
     if (!searchQuery.trim()) return enrichedGroups;
     const query = searchQuery.toLowerCase().trim();
@@ -564,22 +550,18 @@ export default function Sidebar({
         items: group.items.filter(
           (item) =>
             item.label.toLowerCase().includes(query) ||
-            item.code.toLowerCase().includes(query) ||
-            group.label.toLowerCase().includes(query)
+            item.href.toLowerCase().includes(query) ||
+            group.label.toLowerCase().includes(query) ||
+            item.keywords?.some((k) => k.toLowerCase().includes(query))
         ),
       }))
       .filter((group) => group.items.length > 0);
   }, [enrichedGroups, searchQuery]);
 
-  // First matching item for Enter-key instant T-Code execution
   const firstSearchMatch = useMemo(() => {
     if (!searchQuery.trim()) return null;
-    const q = searchQuery.toLowerCase().trim();
-    for (const item of allAccessibleItems.values()) {
-      if (item.code.toLowerCase() === q) return item;
-    }
     return filteredGroups[0]?.items[0] || null;
-  }, [searchQuery, allAccessibleItems, filteredGroups]);
+  }, [searchQuery, filteredGroups]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && firstSearchMatch) {
@@ -644,7 +626,7 @@ export default function Sidebar({
         key={item.href}
         href={item.href}
         onClick={closeMobileMenu}
-        title={isCollapsed ? `${item.label} [${item.code}]` : undefined}
+        title={isCollapsed ? item.label : undefined}
         aria-current={active ? 'page' : undefined}
         className={[
           'group relative flex min-w-0 items-center gap-2.5 rounded-lg text-xs font-medium transition-all duration-150',
@@ -667,16 +649,6 @@ export default function Sidebar({
           <>
             <span className="min-w-0 flex-1 truncate tracking-tight">{item.label}</span>
 
-            {/* T-Code subtle indicator on hover */}
-            <span
-              className={[
-                'hidden group-hover:inline-block font-mono text-[9px] px-1 rounded uppercase',
-                active ? 'text-white/80' : 'text-servora-pale/35',
-              ].join(' ')}
-            >
-              {item.code}
-            </span>
-
             {item.badge && (
               <span
                 className={[
@@ -694,7 +666,7 @@ export default function Sidebar({
                 onClick={(e) => togglePinFavorite(e, item.href)}
                 title={isPinned ? 'Unpin from Favorites' : 'Pin to Favorites'}
                 className={[
-                  'opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded transition-opacity shrink-0',
+                  'opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded transition-opacity shrink-0 cursor-pointer',
                   isPinned ? 'opacity-100 text-amber-400' : 'text-servora-pale/40 hover:text-amber-300',
                 ].join(' ')}
               >
@@ -728,7 +700,6 @@ export default function Sidebar({
           isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
       >
-        {/* Top Executive Header */}
         <div
           className={[
             'flex h-16 shrink-0 items-center border-b border-white/[0.08] bg-white transition-all duration-200',
@@ -757,7 +728,7 @@ export default function Sidebar({
             <button
               type="button"
               onClick={toggleCollapse}
-              className="hidden lg:flex items-center justify-center h-8 w-8 rounded-lg text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 transition-colors"
+              className="hidden lg:flex items-center justify-center h-8 w-8 rounded-lg text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 transition-colors cursor-pointer"
               title={isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
             >
               {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
@@ -767,19 +738,18 @@ export default function Sidebar({
           <button
             type="button"
             onClick={closeMobileMenu}
-            className="rounded-lg p-1.5 text-servora-navy hover:bg-gray-100 transition-colors lg:hidden"
+            className="rounded-lg p-1.5 text-servora-navy hover:bg-gray-100 transition-colors lg:hidden cursor-pointer"
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Corporate Entity & Multi-Branch Context Switcher */}
         {!isCollapsed ? (
           <div ref={branchDropdownRef} className="relative px-3 pt-3 pb-1">
             <button
               type="button"
               onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-              className="w-full flex items-center justify-between p-2 rounded-xl bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.08] transition-all text-left"
+              className="w-full flex items-center justify-between p-2 rounded-xl bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.08] transition-all text-left cursor-pointer"
             >
               <div className="flex items-center gap-2.5 min-w-0">
                 <div className="h-8 w-8 rounded-lg bg-servora-core/25 border border-servora-core/40 flex items-center justify-center text-servora-teal shrink-0">
@@ -800,7 +770,7 @@ export default function Sidebar({
               <div className="absolute left-3 right-3 top-16 z-30 bg-[#071739] border border-white/10 rounded-xl shadow-2xl p-1.5 space-y-1 backdrop-blur-md animate-in fade-in zoom-in-95">
                 <div className="flex items-center justify-between px-2 py-1 border-b border-white/[0.08] mb-1">
                   <span className="text-[10px] font-bold text-servora-pale/40 uppercase tracking-wider">
-                    Operating Nodes ({branchNodes.length})
+                    Operating Branches ({branchNodes.length})
                   </span>
                   <Link
                     href="/settings/branches"
@@ -824,7 +794,7 @@ export default function Sidebar({
                           type="button"
                           onClick={() => handleSelectBranch(b)}
                           className={[
-                            'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left',
+                            'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left cursor-pointer',
                             isSelected
                               ? 'bg-servora-core/25 text-white border border-servora-core/40'
                               : 'text-servora-pale/75 hover:bg-white/[0.08] hover:text-white',
@@ -833,7 +803,7 @@ export default function Sidebar({
                           <div className="min-w-0 flex-1 pr-2">
                             <span className="truncate block font-medium">{b.name}</span>
                             <span className="text-[9.5px] font-mono text-servora-pale/45 block">
-                              {b.code} {b.isMainBranch ? '• Primary Hub' : ''}
+                              {b.code} {b.isMainBranch ? '• Main Hub' : ''}
                             </span>
                           </div>
                           {isSelected && <Check size={13} className="text-servora-teal shrink-0" />}
@@ -879,7 +849,6 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* SAP / NetSuite T-Code Command Launcher & Search (Ctrl+K) */}
         {!isCollapsed && (
           <div className="px-3 py-2 shrink-0 space-y-1">
             <div className="relative">
@@ -893,14 +862,14 @@ export default function Sidebar({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search or T-Code (e.g. MM02)..."
+                placeholder="Jump to module (e.g. transfers, kds, pos)..."
                 className="w-full bg-white/[0.04] border border-white/[0.07] focus:border-servora-teal/50 focus:bg-white/[0.08] text-white placeholder-servora-pale/35 text-xs rounded-lg pl-8 pr-12 py-1.5 outline-none transition-all"
               />
               {searchQuery ? (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-servora-pale/40 hover:text-white"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-servora-pale/40 hover:text-white cursor-pointer"
                 >
                   <X size={12} />
                 </button>
@@ -914,7 +883,7 @@ export default function Sidebar({
             {searchQuery && firstSearchMatch && (
               <div className="flex items-center justify-between px-2 py-1 rounded bg-servora-core/20 border border-servora-core/30 text-[10px] text-servora-pale/90">
                 <span className="truncate">
-                  Jump to <strong>{firstSearchMatch.label}</strong> ({firstSearchMatch.code})
+                  Jump to <strong>{firstSearchMatch.label}</strong>
                 </span>
                 <span className="flex items-center gap-0.5 font-mono text-[9px] text-servora-teal shrink-0 ml-1">
                   Enter <CornerDownLeft size={10} />
@@ -924,19 +893,17 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Navigation Modules Tree */}
         <nav
           className={[
             'flex-1 space-y-1 overflow-y-auto py-1.5 overscroll-contain select-none custom-scrollbar transition-all',
             isCollapsed ? 'px-2' : 'px-3',
           ].join(' ')}
         >
-          {/* Mission Control Standalone */}
           {!searchQuery && (
             <div className="mb-2.5">
               {!isCollapsed && (
                 <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
-                  Mission Control
+                  Quick Terminals
                 </p>
               )}
               <div className="space-y-0.5">
@@ -945,7 +912,6 @@ export default function Sidebar({
             </div>
           )}
 
-          {/* Starred Favorites Dock (NetSuite / SAP Fiori Paradigm) */}
           {!searchQuery && !isCollapsed && pinnedItems.length > 0 && (
             <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
               <div className="mb-1 px-2.5 flex items-center justify-between">
@@ -960,7 +926,6 @@ export default function Sidebar({
             </div>
           )}
 
-          {/* Recently Visited Trail */}
           {!searchQuery && !isCollapsed && recentItems.length > 0 && (
             <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
               <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
@@ -972,17 +937,16 @@ export default function Sidebar({
             </div>
           )}
 
-          {/* Enterprise Tree Controls */}
           {!searchQuery && !isCollapsed && (
             <div className="pt-2 mb-1 px-2.5 flex items-center justify-between border-t border-white/[0.06]">
               <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
-                ERP Functional Domains
+                Navigation Modules
               </p>
               <button
                 type="button"
                 onClick={toggleExpandAll}
                 title={expandedGroups.length === enrichedGroups.length ? 'Collapse All' : 'Expand All'}
-                className="text-[10px] font-semibold text-servora-pale/40 hover:text-servora-teal flex items-center gap-1 transition-colors"
+                className="text-[10px] font-semibold text-servora-pale/40 hover:text-servora-teal flex items-center gap-1 transition-colors cursor-pointer"
               >
                 {expandedGroups.length === enrichedGroups.length ? (
                   <>
@@ -997,7 +961,6 @@ export default function Sidebar({
             </div>
           )}
 
-          {/* Grouped Functional Domains */}
           <div className="space-y-1">
             {filteredGroups.map((group, idx) => {
               const GroupIcon = group.icon;
@@ -1006,7 +969,6 @@ export default function Sidebar({
               const prevDomain = idx > 0 ? filteredGroups[idx - 1].domain : null;
               const showDomainDivider = !searchQuery && !isCollapsed && group.domain !== prevDomain;
 
-              // Count total active badges inside collapsed group
               const groupBadgeCount = group.items.reduce((acc, item) => {
                 const numeric = parseInt(item.badge || '0', 10);
                 return acc + (isNaN(numeric) ? 0 : numeric);
@@ -1033,7 +995,7 @@ export default function Sidebar({
                       title={isCollapsed ? group.label : undefined}
                       aria-expanded={expanded}
                       className={[
-                        'group flex w-full items-center gap-2.5 rounded-lg text-left text-xs font-semibold transition-all duration-150',
+                        'group flex w-full items-center gap-2.5 rounded-lg text-left text-xs font-semibold transition-all duration-150 cursor-pointer',
                         isCollapsed ? 'justify-center p-2.5' : 'px-2.5 py-2',
                         active && (!expanded || isCollapsed)
                           ? 'text-white bg-white/[0.06]'
@@ -1066,14 +1028,12 @@ export default function Sidebar({
                       )}
                     </button>
 
-                    {/* Submenu in expanded view */}
                     {expanded && !isCollapsed && (
                       <div className="mt-0.5 space-y-0.5 border-l border-white/[0.08] ml-4 pl-1 transition-all">
                         {group.items.map((item) => renderNavItem(item, true, true))}
                       </div>
                     )}
 
-                    {/* Flyout Submenu in Collapsed Mode */}
                     {isCollapsed && hoveredGroup === group.label && (
                       <div className="absolute left-full top-0 ml-2 z-50 w-60 rounded-xl bg-[#071739] border border-white/10 shadow-2xl p-2 space-y-1">
                         <div className="px-2.5 py-1 text-[11px] font-bold text-white border-b border-white/10 mb-1 flex items-center justify-between">
@@ -1094,9 +1054,6 @@ export default function Sidebar({
                                 <item.icon size={13} className="text-servora-teal shrink-0" />
                                 <span className="truncate">{item.label}</span>
                               </div>
-                              <span className="font-mono text-[9px] text-servora-pale/40 shrink-0">
-                                {item.code}
-                              </span>
                             </Link>
                           ))}
                         </div>
@@ -1112,9 +1069,8 @@ export default function Sidebar({
             <div className={`pt-3 border-t border-white/[0.08] mt-3 ${isCollapsed ? 'flex justify-center' : ''}`}>
               {renderNavItem(
                 {
-                  label: 'Executive Helpdesk',
+                  label: 'Help & Knowledgebase',
                   href: '/help',
-                  code: 'HLP01',
                   icon: CircleHelp,
                   permission: 'help.view',
                 },
@@ -1125,7 +1081,6 @@ export default function Sidebar({
           )}
         </nav>
 
-        {/* Corporate Telemetry & Sign Out Footer */}
         <div className="shrink-0 border-t border-white/[0.08] bg-black/15 p-2.5">
           {!isCollapsed ? (
             <div className="mb-2 flex items-center justify-between rounded-xl bg-white/[0.03] px-3 py-2 border border-white/[0.06]">
@@ -1139,7 +1094,7 @@ export default function Sidebar({
                     Enterprise SLA
                   </p>
                   <p className="text-[9.5px] text-servora-pale/40 truncate font-mono">
-                    {latency ? `${latency}ms latency` : 'Online • Sync Active'}
+                    {latency ? `${latency}ms latency` : 'Online • Synced'}
                   </p>
                 </div>
               </div>
@@ -1161,7 +1116,7 @@ export default function Sidebar({
             onClick={handleLogout}
             title={isCollapsed ? 'Sign Out' : undefined}
             className={[
-              'flex w-full items-center gap-2 rounded-xl bg-white/[0.03] hover:bg-red-500/15 text-servora-pale/75 hover:text-red-300 border border-white/[0.06] hover:border-red-500/30 text-xs font-semibold transition-all duration-150',
+              'flex w-full items-center gap-2 rounded-xl bg-white/[0.03] hover:bg-red-500/15 text-servora-pale/75 hover:text-red-300 border border-white/[0.06] hover:border-red-500/30 text-xs font-semibold transition-all duration-150 cursor-pointer',
               isCollapsed ? 'justify-center p-2.5' : 'justify-center px-3 py-2',
             ].join(' ')}
           >

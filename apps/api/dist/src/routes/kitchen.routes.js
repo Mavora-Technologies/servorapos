@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const kitchen_controller_1 = require("../controllers/kitchen.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/tickets', kitchen_controller_1.getTickets);
+router.get('/history', kitchen_controller_1.getHistory);
+router.patch('/tickets/:id/status', kitchen_controller_1.updateStatus);
+router.get('/performance', kitchen_controller_1.getPerformance);
+exports.default = router;

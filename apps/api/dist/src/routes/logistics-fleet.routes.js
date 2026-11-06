@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const logistics_fleet_controller_1 = require("../controllers/logistics-fleet.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', logistics_fleet_controller_1.getFleetDashboard);
+router.post('/vehicles', logistics_fleet_controller_1.createVehicle);
+router.post('/dispatch', logistics_fleet_controller_1.dispatchVehicle);
+exports.default = router;

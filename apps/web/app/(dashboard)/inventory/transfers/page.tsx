@@ -1,6 +1,8 @@
+// apps/web/app/%28dashboard%29/inventory/transfers/page.tsx
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Truck, 
@@ -96,9 +98,13 @@ interface FleetOption {
   driverName: string | null;
   driverPhone: string | null;
   isRefrigerated: boolean;
+  currentStatus?: string;
 }
 
-export default function StockTransfersPage() {
+function StockTransfersContent() {
+  const searchParams = useSearchParams();
+  const assignVehicleId = searchParams.get('assignVehicleId');
+
   const [transfers, setTransfers] = useState<TransferHeader[]>([]);
   const [summary, setSummary] = useState<TransferSummary | null>(null);
   const [branches, setBranches] = useState<BranchOption[]>([]);
@@ -157,8 +163,17 @@ export default function StockTransfersPage() {
           setDestinationBranchId('');
         }
       }
-      if (invRes?.data) setInventoryList(invRes.data);
-      if (fleetRes?.data) setFleetList(fleetRes.data);
+      if (invRes?.data && Array.isArray(invRes.data)) {
+        setInventoryList(invRes.data);
+      }
+      if (fleetRes?.data) {
+        const list = Array.isArray(fleetRes.data)
+          ? fleetRes.data
+          : Array.isArray(fleetRes.data.vehicles)
+          ? fleetRes.data.vehicles
+          : [];
+        setFleetList(list);
+      }
     } catch (err) {
       console.error('Failed to load transfers:', err);
     } finally {
@@ -212,7 +227,7 @@ export default function StockTransfersPage() {
       setDriverName('');
     } else {
       setIsCustomCarrier(false);
-      const fleetItem = fleetList.find((f) => String(f.id) === fleetIdStr);
+      const fleetItem = Array.isArray(fleetList) ? fleetList.find((f) => String(f.id) === fleetIdStr) : null;
       if (fleetItem) {
         setVehiclePlate(fleetItem.vehiclePlate);
         setDriverName(fleetItem.driverName || '');
@@ -223,16 +238,30 @@ export default function StockTransfersPage() {
     }
   };
 
+  // Auto-respond to ?assignVehicleId from Fleet Console
+  useEffect(() => {
+    if (assignVehicleId && transfers.length > 0 && fleetList.length > 0) {
+      const pendingTransfer = transfers.find((t) => t.status === 'PENDING');
+      if (pendingTransfer) {
+        openTransferDetails(pendingTransfer.id);
+        handleFleetSelect(assignVehicleId);
+      } else {
+        handleAddItemToRequest();
+        setIsNewModalOpen(true);
+      }
+    }
+  }, [assignVehicleId, transfers.length, fleetList.length]);
+
   const handleAddItemToRequest = () => {
     if (inventoryList.length === 0) return;
-    setRequestItems([
-      ...requestItems,
+    setRequestItems((prev) => [
+      ...prev,
       { inventoryItemId: inventoryList[0].id, requestedQuantity: 20 },
     ]);
   };
 
   const handleRemoveItemFromRequest = (idx: number) => {
-    setRequestItems(requestItems.filter((_, i) => i !== idx));
+    setRequestItems((prev) => prev.filter((_, i) => i !== idx));
   };
 
   const handleCreateTransfer = async (e: React.FormEvent) => {
@@ -409,15 +438,23 @@ export default function StockTransfersPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            handleAddItemToRequest();
-            setIsNewModalOpen(true);
-          }}
-          className="bg-servora-core text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs hover:bg-blue-700 transition-colors flex items-center gap-2"
-        >
-          <Plus size={15} /> Raise Stock Transport Order
-        </button>
+        <div className="flex items-center gap-2.5">
+          <Link
+            href="/inventory/transfers/fleet"
+            className="bg-slate-50 border border-gray-200 text-servora-navy text-xs font-semibold px-4 py-2.5 rounded-xl hover:bg-gray-100 transition-colors flex items-center gap-1.5"
+          >
+            <Truck size={14} /> Fleet Console
+          </Link>
+          <button
+            onClick={() => {
+              handleAddItemToRequest();
+              setIsNewModalOpen(true);
+            }}
+            className="bg-servora-core text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs hover:bg-blue-700 transition-colors flex items-center gap-2 cursor-pointer"
+          >
+            <Plus size={15} /> Raise Stock Transport Order
+          </button>
+        </div>
       </div>
 
       {/* Aggregate Telemetry Cards */}
@@ -484,7 +521,7 @@ export default function StockTransfersPage() {
             <button
               key={tab.id}
               onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
                 statusFilter === tab.id ? 'bg-white shadow-xs text-servora-navy font-bold' : 'text-gray-500 hover:text-gray-900'
               }`}
             >
@@ -570,7 +607,7 @@ export default function StockTransfersPage() {
                     <td className="py-3.5 px-4 text-right">
                       <button
                         onClick={() => openTransferDetails(t.id)}
-                        className="inline-flex items-center gap-1 px-3 py-1 bg-servora-pale text-servora-core rounded-lg font-bold text-xs hover:bg-blue-100 transition-colors"
+                        className="inline-flex items-center gap-1 px-3 py-1 bg-servora-pale text-servora-core rounded-lg font-bold text-xs hover:bg-blue-100 transition-colors cursor-pointer"
                       >
                         Inspect Manifest &rarr;
                       </button>
@@ -597,7 +634,7 @@ export default function StockTransfersPage() {
                   Route: <strong>{activeTransfer.sourceBranchName}</strong> &rarr; <strong>{activeTransfer.destinationBranchName}</strong>
                 </p>
               </div>
-              <button onClick={() => setActiveTransfer(null)} className="text-gray-400 hover:text-servora-navy">
+              <button onClick={() => setActiveTransfer(null)} className="text-gray-400 hover:text-servora-navy cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -609,7 +646,7 @@ export default function StockTransfersPage() {
                   <span className="text-[11px] font-bold uppercase text-servora-navy tracking-wider block">
                     Cold-Chain Logistics & Carrier Fleet Assignment
                   </span>
-                  {fleetList.length > 0 && (
+                  {Array.isArray(fleetList) && fleetList.length > 0 && (
                     <span className="text-[10px] text-servora-deepTeal">
                       {fleetList.length} Registered Carrier Vehicles
                     </span>
@@ -625,9 +662,9 @@ export default function StockTransfersPage() {
                       className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded-lg bg-white font-medium"
                     >
                       <option value="">Select registered fleet...</option>
-                      {fleetList.map((f) => (
+                      {Array.isArray(fleetList) && fleetList.map((f) => (
                         <option key={f.id} value={f.id}>
-                          {f.vehiclePlate} ({f.vehicleType.replace('_', ' ')}) - {f.driverName || 'No Driver'}
+                          {f.vehiclePlate} ({f.vehicleType ? f.vehicleType.replace('_', ' ') : 'Fleet'}) - {f.driverName || 'No Driver'} {f.currentStatus === 'IN_TRANSIT' ? '⚠️ (In Transit)' : ''}
                         </option>
                       ))}
                       <option value="CUSTOM">+ Specify Third-Party (3PL) Logistics</option>
@@ -795,7 +832,7 @@ export default function StockTransfersPage() {
               <button
                 type="button"
                 onClick={() => setActiveTransfer(null)}
-                className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl"
+                className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl cursor-pointer"
               >
                 Close
               </button>
@@ -804,7 +841,7 @@ export default function StockTransfersPage() {
                 {activeTransfer.status === 'PENDING' && (
                   <button
                     onClick={handleDispatch}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs cursor-pointer"
                   >
                     <Send size={13} /> Confirm & Dispatch Waybill
                   </button>
@@ -813,7 +850,7 @@ export default function StockTransfersPage() {
                 {activeTransfer.status === 'IN_TRANSIT' && (
                   <button
                     onClick={handleReceive}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-xs"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-colors shadow-xs cursor-pointer"
                   >
                     <Inbox size={13} /> Inspect & Credit Stock
                   </button>
@@ -833,7 +870,7 @@ export default function StockTransfersPage() {
                 <h3 className="text-sm font-bold text-servora-navy">Initiate Stock Transport Order (STO)</h3>
                 <p className="text-[11px] text-servora-deepTeal">Source replenishment stock from warehouse or outlet</p>
               </div>
-              <button onClick={() => setIsNewModalOpen(false)} className="text-gray-400 hover:text-servora-navy">
+              <button onClick={() => setIsNewModalOpen(false)} className="text-gray-400 hover:text-servora-navy cursor-pointer">
                 <X size={18} />
               </button>
             </div>
@@ -894,7 +931,7 @@ export default function StockTransfersPage() {
                   <button
                     type="button"
                     onClick={handleAddItemToRequest}
-                    className="text-xs font-semibold text-servora-core hover:underline flex items-center gap-1"
+                    className="text-xs font-semibold text-servora-core hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     <Plus size={13} /> Add Ingredient
                   </button>
@@ -937,7 +974,7 @@ export default function StockTransfersPage() {
                       <button
                         type="button"
                         onClick={() => handleRemoveItemFromRequest(idx)}
-                        className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg"
+                        className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg cursor-pointer"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -961,14 +998,14 @@ export default function StockTransfersPage() {
                 <button
                   type="button"
                   onClick={() => setIsNewModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors"
+                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 shadow-xs disabled:opacity-50 transition-colors"
+                  className="px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 shadow-xs disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   {isSubmitting ? 'Submitting...' : 'Create Transfer Order'}
                 </button>
@@ -978,5 +1015,17 @@ export default function StockTransfersPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function StockTransfersPage() {
+  return (
+    <Suspense fallback={
+      <div className="p-12 text-center text-xs font-medium text-servora-deepTeal animate-pulse">
+        Loading transfers console...
+      </div>
+    }>
+      <StockTransfersContent />
+    </Suspense>
   );
 }

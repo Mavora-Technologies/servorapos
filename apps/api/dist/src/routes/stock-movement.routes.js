@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const stock_movement_controller_1 = require("../controllers/stock-movement.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', stock_movement_controller_1.getStockMovements);
+router.post('/', stock_movement_controller_1.createManualMovement);
+router.post('/:id/reverse', stock_movement_controller_1.reverseStockMovement);
+exports.default = router;

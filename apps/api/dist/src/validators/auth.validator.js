@@ -1,0 +1,9 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.loginSchema = void 0;
+// apps/api/src/validators/auth.validator.ts
+const zod_1 = require("zod");
+exports.loginSchema = zod_1.z.object({
+    email: zod_1.z.string().email("Valid email is required"),
+    password: zod_1.z.string().min(1, "Password is required"),
+});

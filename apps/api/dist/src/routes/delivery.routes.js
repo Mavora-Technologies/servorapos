@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+// apps/api/src/routes/delivery.routes.ts
+const express_1 = require("express");
+const delivery_controller_1 = require("../controllers/delivery.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', delivery_controller_1.getDeliveries);
+router.post('/:id/dispatch', delivery_controller_1.assignDriver);
+router.patch('/:id/complete', delivery_controller_1.markDelivered);
+exports.default = router;

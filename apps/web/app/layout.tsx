@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     template: "%s | Servora POS by Mavora Technologies",
     default: "Servora POS | Best Restaurant Management & POS Software in Kenya",
   },
-  description: "Servora is a premium cloud-based restaurant operations and Point of Sale (POS) platform by Mavora Technologies[cite: 1]. Seamlessly manage multi-branch orders, inventory, recipe costing, KDS, and M-Pesa payments in Kenya[cite: 1].",
+  description: "Servora is a premium cloud-based restaurant operations and Point of Sale (POS) platform by Mavora Technologies. Seamlessly manage multi-branch orders, inventory, recipe costing, KDS, and M-Pesa payments in Kenya.",
   keywords: [
     // Local & Regional High-Intent Keywords (Kenya / East Africa)
     "Best restaurant POS in Kenya",
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Servora POS | Simplify Service. Grow Smarter.",
-    description: "The premium restaurant operations and POS platform for modern hospitality businesses in Kenya and beyond[cite: 1]. Featuring M-Pesa integration and real-time inventory tracking.",
+    description: "The premium restaurant operations and POS platform for modern hospitality businesses in Kenya and beyond. Featuring M-Pesa integration and real-time inventory tracking.",
     url: "https://servora.co",
     siteName: "Servora POS",
     images: [
@@ -85,7 +85,7 @@ export const metadata: Metadata = {
         url: "/android-chrome-512x512.jpg", 
         width: 512,
         height: 512,
-        alt: "Servora POS Logo - Mavora Technologies[cite: 1]",
+        alt: "Servora POS Logo - Mavora Technologies",
       },
     ],
     locale: "en_KE",
@@ -94,7 +94,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "Servora POS | Simplify Service. Grow Smarter.",
-    description: "The premium restaurant operations and POS platform for modern hospitality businesses built by Mavora Technologies[cite: 1].",
+    description: "The premium restaurant operations and POS platform for modern hospitality businesses built by Mavora Technologies.",
     images: ["/android-chrome-512x512.jpg"], 
   },
   icons: {
@@ -128,7 +128,7 @@ export default function RootLayout({
         "operatingSystem": "Cloud-based, Web, PWA, iOS, Android",
         "applicationCategory": "BusinessApplication",
         "genre": "Restaurant Point of Sale & Operations Management Software",
-        "description": "A premium multi-tenant restaurant operations and POS platform built by Mavora Technologies, featuring M-Pesa integration, inventory tracking, kitchen display system (KDS), and offline resilience[cite: 1].",
+        "description": "A premium multi-tenant restaurant operations and POS platform built by Mavora Technologies, featuring M-Pesa integration, inventory tracking, kitchen display system (KDS), and offline resilience.",
         "softwareVersion": "1.0",
         "releaseNotes": "https://servora.co/changelog",
         "countriesSupported": "KE, Global",

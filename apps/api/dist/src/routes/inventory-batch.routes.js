@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const inventory_batch_controller_1 = require("../controllers/inventory-batch.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', inventory_batch_controller_1.getInventoryBatches);
+router.post('/', inventory_batch_controller_1.createInventoryBatch);
+router.patch('/:id/qc-status', inventory_batch_controller_1.updateBatchQCStatus);
+router.post('/:id/discard', inventory_batch_controller_1.discardInventoryBatch);
+exports.default = router;
