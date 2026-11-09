@@ -3139,3 +3139,196 @@ export const reportSchedules = pgTable(
     index('report_schedules_active_idx').on(t.isActive),
   ]
 );
+
+// ============================================================================
+// CUSTOMERS & CRM DIRECTORY (CRM / SALES)
+// ============================================================================
+
+export const customers = pgTable(
+  'customers',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 255 }).notNull(),
+    email: varchar('email', { length: 255 }),
+    phone: varchar('phone', { length: 50 }).notNull(),
+    kraPin: varchar('kra_pin', { length: 50 }), // For B2B corporate tax invoices
+    companyName: varchar('company_name', { length: 255 }),
+    customerType: varchar('customer_type', { length: 50 }).default('RETAIL').notNull(), // RETAIL | CORPORATE | VIP | WHOLESALE
+    loyaltyPoints: integer('loyalty_points').default(0).notNull(),
+    totalSpent: decimal('total_spent', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    ordersCount: integer('orders_count').default(0).notNull(),
+    address: text('address'),
+    notes: text('notes'),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('customers_tenant_idx').on(t.tenantId),
+    index('customers_phone_idx').on(t.tenantId, t.phone),
+    index('customers_email_idx').on(t.tenantId, t.email),
+    index('customers_type_idx').on(t.tenantId, t.customerType),
+  ]
+);
+
+export const customerInteractions = pgTable(
+  'customer_interactions',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }),
+    interactionType: varchar('interaction_type', { length: 50 }).default('NOTE').notNull(), // NOTE | CALL | EMAIL | FEEDBACK | SUPPORT_TICKET
+    subject: varchar('subject', { length: 255 }).notNull(),
+    details: text('details').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('customer_interactions_customer_idx').on(t.customerId),
+    index('customer_interactions_tenant_idx').on(t.tenantId),
+  ]
+);
+
+// ============================================================================
+// LOYALTY, REWARDS & MEMBER INCENTIVES (CRM / HCM ENGAGEMENT)
+// ============================================================================
+
+export const loyaltyTiers = pgTable(
+  'loyalty_tiers',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 100 }).notNull(), // e.g., "Silver Member", "Gold VIP", "Platinum Elite"
+    minPoints: integer('min_points').default(0).notNull(),
+    earningMultiplier: numeric('earning_multiplier', { precision: 4, scale: 2 }).default('1.00').notNull(), // e.g. 1.5x points per KES spent
+    perks: jsonb('perks').$type<string[]>().default([]).notNull(), // e.g. ["Free Priority Seating", "Complimentary Dessert", "10% Discount"]
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('loyalty_tiers_tenant_idx').on(t.tenantId),
+  ]
+);
+
+export const customerLoyaltyProfiles = pgTable(
+  'customer_loyalty_profiles',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .unique()
+      .notNull(),
+    tierId: integer('tier_id')
+      .references(() => loyaltyTiers.id, { onDelete: 'set null' }),
+    currentPoints: integer('current_points').default(0).notNull(),
+    lifetimePointsEarned: integer('lifetime_points_earned').default(0).notNull(),
+    lifetimePointsRedeemed: integer('lifetime_points_redeemed').default(0).notNull(),
+    enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('cust_loyalty_tenant_idx').on(t.tenantId),
+    index('cust_loyalty_customer_idx').on(t.customerId),
+  ]
+);
+
+export const loyaltyPointTransactions = pgTable(
+  'loyalty_point_transactions',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .notNull(),
+    orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    transactionType: varchar('transaction_type', { length: 40 }).notNull(), // 'EARN_PURCHASE', 'REDEEM_REWARD', 'MANUAL_ADJUSTMENT', 'TIER_BONUS'
+    points: integer('points').notNull(), // Positive = Earn, Negative = Redeem
+    balanceAfter: integer('balance_after').notNull(),
+    description: text('description').notNull(),
+    processedById: integer('processed_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('loyalty_tx_tenant_idx').on(t.tenantId),
+    index('loyalty_tx_customer_idx').on(t.customerId),
+    index('loyalty_tx_created_idx').on(t.tenantId, t.createdAt),
+  ]
+);
+
+export const loyaltyRewardsCatalog = pgTable(
+  'loyalty_rewards_catalog',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 150 }).notNull(), // e.g. "Free Artisan Coffee", "KES 500 Discount Voucher"
+    description: text('description'),
+    pointsCost: integer('points_cost').notNull(),
+    rewardType: varchar('reward_type', { length: 50 }).default('DISCOUNT_FIXED').notNull(), // 'DISCOUNT_FIXED', 'PERCENTAGE_OFF', 'FREE_MENU_ITEM'
+    rewardValue: decimal('reward_value', { precision: 12, scale: 2 }).default('0.00').notNull(), // monetary value or %
+    menuItemId: integer('menu_item_id').references(() => menuItems.id, { onDelete: 'set null' }),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('loyalty_rewards_tenant_idx').on(t.tenantId),
+    index('loyalty_rewards_active_idx').on(t.tenantId, t.isActive),
+  ]
+);
+
+// ============================================================================
+// LOYALTY LEDGER & TRANSACTION AUDIT (CRM / AUDIT)
+// ============================================================================
+
+export const loyaltyTransactionsLedger = pgTable(
+  'loyalty_transactions_ledger',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .notNull(),
+    orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    rewardId: integer('reward_id').references(() => loyaltyRewardsCatalog.id, { onDelete: 'set null' }),
+    
+    // Transaction Classification & Financial Value
+    entryType: varchar('entry_type', { length: 50 }).notNull(), // 'ACCRUAL_PURCHASE', 'REDEMPTION_VOUCHER', 'MANUAL_ADJUSTMENT', 'EXPIRY_DEDUCTION', 'TIER_BONUS'
+    pointsDelta: integer('points_delta').notNull(), // Positive for earnings, Negative for burn/redemptions
+    monetaryValueKes: decimal('monetary_value_kes', { precision: 12, scale: 2 }).default('0.00').notNull(), // Equivalent spend or discount value
+    balanceBefore: integer('balance_before').notNull(),
+    balanceAfter: integer('balance_after').notNull(),
+    
+    channel: varchar('channel', { length: 30 }).default('POS_TERMINAL').notNull(), // 'POS_TERMINAL', 'WEB_PORTAL', 'MOBILE_APP', 'ADMIN_BACKOFFICE'
+    auditReference: varchar('audit_reference', { length: 100 }), // e.g. "TRX-LOY-2026-0091"
+    notes: text('notes'),
+    processedById: integer('processed_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('loyalty_ledger_tenant_idx').on(t.tenantId),
+    index('loyalty_ledger_customer_idx').on(t.customerId),
+    index('loyalty_ledger_type_idx').on(t.tenantId, t.entryType),
+    index('loyalty_ledger_created_idx').on(t.tenantId, t.createdAt),
+  ]
+);

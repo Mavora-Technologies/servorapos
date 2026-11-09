@@ -97,6 +97,10 @@ import performanceReportRoutes from './routes/performance-report.routes';
 import customReportBuilderRoutes from './routes/custom-report-builder.routes';
 import savedReportsRoutes from './routes/saved-reports.routes';
 import dataExportsRoutes from './routes/data-exports.routes';
+import customerRoutes from './routes/customer.routes';
+import loyaltyRoutes from './routes/loyalty.routes';
+import loyaltyTransactionsRoutes from './routes/loyalty-transactions.routes';
+
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
@@ -233,6 +237,11 @@ app.use('/api/v1/reports/builder', customReportBuilderRoutes);
 app.use('/api/v1/reports/saved', savedReportsRoutes);
 app.use('/api/v1/reports/exports', dataExportsRoutes);
 app.use('/api/v1/reports', reportsRoutes);
+
+// 11. Customer Growth
+app.use('/api/v1/customers', customerRoutes);
+app.use('/api/v1/loyalty/transactions', loyaltyTransactionsRoutes);
+app.use('/api/v1/loyalty', loyaltyRoutes);
 
 
 /* ==========================================================================
