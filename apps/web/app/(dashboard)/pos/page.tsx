@@ -4,9 +4,37 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Search, Plus, Minus, Trash2, ShoppingBag, CreditCard, Clock, Coffee, Utensils, Printer,
-  CheckCircle, X, Layers, ShoppingCart, Smartphone, AlertCircle,
-  Wallet, Unlock, Percent, RefreshCw
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  ShoppingBag,
+  CreditCard,
+  Clock,
+  Coffee,
+  Utensils,
+  Printer,
+  CheckCircle,
+  X,
+  Layers,
+  ShoppingCart,
+  Smartphone,
+  AlertCircle,
+  Wallet,
+  Unlock,
+  Percent,
+  RefreshCw,
+  Wine,
+  Truck,
+  Car,
+  QrCode,
+  ShieldCheck,
+  Split,
+  Wifi,
+  Receipt,
+  Users,
+  AlertTriangle,
+  ArrowRight,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -47,14 +75,15 @@ interface MenuItem {
   category: string;
   price: number;
   isAvailable: boolean;
+  sku?: string;
   image?: string;
-  taxRate?: number;
 }
 
 interface CartItem extends MenuItem {
   cartItemId: string;
   quantity: number;
-  discountPercent?: number;
+  modifiers?: string[];
+  notes?: string;
 }
 
 interface RestaurantTable {
@@ -72,10 +101,81 @@ interface CashDrawerSession {
   expectedClosingBalance: string;
 }
 
-type OrderType = 'Dine-In' | 'Takeaway' | 'Delivery';
+interface ServiceModel {
+  id: number;
+  name: string;
+  type: 'DINE_IN' | 'QUICK_SERVICE' | 'BAR_TAB' | 'TAKEAWAY' | 'DELIVERY' | 'DRIVE_THRU';
+  description: string | null;
+  requiresTable: boolean;
+  payBeforeOrder: boolean;
+  promptGuestCount: boolean;
+  allowSplitChecks: boolean;
+  allowTableTransfers: boolean;
+  autoSendToKitchen: boolean;
+  enableCoursePacing: boolean;
+  autoApplyServiceCharge: boolean;
+  serviceChargePercent: string;
+  packingChargeAmount: string;
+  maxTabCreditLimit: string;
+  isActive: boolean;
+}
+
+interface FinancialSettings {
+  baseCurrency: string;
+  isVatInclusive: boolean;
+  vatRate: string;
+  isCateringLevyEnabled: boolean;
+  cateringLevyRate: string;
+  isServiceChargeEnabled: boolean;
+  serviceChargeRate: string;
+  maxDrawerCashThreshold: string;
+  enableSafeDropAlerts: boolean;
+  taxPin: string | null;
+  etimsEnvironment: string;
+}
+
+interface ReceiptTemplate {
+  id: number;
+  name: string;
+  paperWidth: '80MM' | '58MM' | 'A4_INVOICE';
+  headerTitle: string;
+  headerSubtitle: string | null;
+  showLogo: boolean;
+  showBranchAddress: boolean;
+  showTaxPin: boolean;
+  showContactPhone: boolean;
+  showCashierName: boolean;
+  showServerName: boolean;
+  showTableNumber: boolean;
+  showCustomerDetails: boolean;
+  showOrderType: boolean;
+  showItemSku: boolean;
+  showItemModifiers: boolean;
+  showTaxSummary: boolean;
+  showEtimsQrCode: boolean;
+  showFiscalDeviceSerial: boolean;
+  showPaymentBreakdown: boolean;
+  showChangeDue: boolean;
+  footerMessage: string | null;
+  returnPolicy: string | null;
+  wifiDetails: string | null;
+}
+
 type PaymentMethod = 'Cash' | 'M-Pesa' | 'Card' | 'Split';
 type MobileTab = 'menu' | 'cart';
-type ThermalPaperSize = '80mm' | '58mm';
+
+const SERVICE_MODEL_ICONS: Record<string, any> = {
+  DINE_IN: Utensils,
+  QUICK_SERVICE: Store,
+  BAR_TAB: Wine,
+  TAKEAWAY: ShoppingBag,
+  DELIVERY: Truck,
+  DRIVE_THRU: Car,
+};
+
+function Store(props: any) {
+  return <ShoppingBag {...props} />;
+}
 
 export default function POSPage() {
   const searchParams = useSearchParams();
@@ -87,49 +187,64 @@ export default function POSPage() {
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [branch, setBranch] = useState<BranchProfile | null>(null);
 
+  // Catalog & Product Matrix
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>(['All']);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Cart & Order Attributes
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [orderType, setOrderType] = useState<OrderType>('Dine-In');
   const [tables, setTables] = useState<RestaurantTable[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string>(preselectedTableId || '');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [buyerKraPin, setBuyerKraPin] = useState('');
-
-  // Discount & Add-ons
+  const [guestCount, setGuestCount] = useState<number>(1);
   const [orderDiscountPercent, setOrderDiscountPercent] = useState<number>(0);
 
+  // Dynamic Engine Configurations
+  const [serviceModels, setServiceModels] = useState<ServiceModel[]>([]);
+  const [activeServiceModel, setActiveServiceModel] = useState<ServiceModel | null>(null);
+  const [financialSettings, setFinancialSettings] = useState<FinancialSettings | null>(null);
+  const [receiptTemplate, setReceiptTemplate] = useState<ReceiptTemplate | null>(null);
   const [activeSession, setActiveSession] = useState<CashDrawerSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Mobile layout state ('menu' or 'cart')
+  // Mobile layout state
   const [mobileTab, setMobileTab] = useState<MobileTab>('menu');
 
-  // Tender & Settlement States
+  // Tender & Checkout States
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [cashTendered, setCashTendered] = useState<string>('');
   const [mpesaPhone, setMpesaPhone] = useState('');
+  const [splitCashAmount, setSplitCashAmount] = useState<string>('');
+  const [splitMpesaAmount, setSplitMpesaAmount] = useState<string>('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
-  // Paper Format Selection (80mm vs 58mm)
-  const [paperSize, setPaperSize] = useState<ThermalPaperSize>('80mm');
-
-  // Completed Order Receipt State
+  // Completed Receipt State
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
-      const [authRes, menuRes, tablesRes, sessionRes] = await Promise.all([
+      const [
+        authRes,
+        menuRes,
+        tablesRes,
+        sessionRes,
+        serviceModelsRes,
+        finRes,
+        receiptRes,
+      ] = await Promise.all([
         fetchApi('/api/v1/auth/me').catch(() => null),
         fetchApi('/api/v1/menu/active').catch(() => ({ data: { items: [], categories: [] } })),
         fetchApi('/api/v1/restaurant/tables').catch(() => ({ data: [] })),
         fetchApi('/api/v1/cash-management/drawers').catch(() => ({ data: { activeSessions: [] } })),
+        fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
+        fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
+        fetchApi('/api/v1/settings/receipts').catch(() => ({ data: [] })),
       ]);
 
       if (authRes?.data) {
@@ -139,18 +254,46 @@ export default function POSPage() {
           setCurrentUser(authRes.data.user);
         }
       }
+
       if (menuRes?.data) {
         setMenuItems(menuRes.data.items || []);
         setCategories(['All', ...(menuRes.data.categories || [])]);
       }
+
       if (tablesRes?.data) {
         setTables(tablesRes.data);
       }
+
       if (sessionRes?.data?.activeSessions?.[0]) {
         setActiveSession(sessionRes.data.activeSessions[0]);
       }
+
+      // Configure Active Service Models
+      if (serviceModelsRes?.data && Array.isArray(serviceModelsRes.data)) {
+        const activeOnly = serviceModelsRes.data.filter((m: ServiceModel) => m.isActive);
+        setServiceModels(activeOnly);
+        const defaultModel =
+          activeOnly.find((m: ServiceModel) => m.type === 'DINE_IN') || activeOnly[0];
+        if (defaultModel) {
+          setActiveServiceModel(defaultModel);
+        }
+      }
+
+      // Financial & Tax Settings
+      if (finRes?.data?.settings) {
+        setFinancialSettings(finRes.data.settings);
+      }
+
+      // Thermal Receipt Template
+      if (receiptRes?.data && Array.isArray(receiptRes.data)) {
+        const defaultTpl =
+          receiptRes.data.find((t: ReceiptTemplate) => (t as any).isDefault) || receiptRes.data[0];
+        if (defaultTpl) {
+          setReceiptTemplate(defaultTpl);
+        }
+      }
     } catch (error) {
-      console.warn('POS: Awaiting live configuration payload.');
+      console.warn('POS: Initializing terminal state.', error);
     } finally {
       setIsLoading(false);
     }
@@ -160,10 +303,10 @@ export default function POSPage() {
     loadInitialData();
   }, []);
 
-  const currencySymbol = business?.currency || 'KES';
+  const currencySymbol = business?.currency || financialSettings?.baseCurrency || 'KES';
 
   const filteredItems = useMemo(() => {
-    return menuItems.filter(item => {
+    return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
       return matchesCategory && matchesSearch && item.isAvailable;
@@ -171,23 +314,34 @@ export default function POSPage() {
   }, [menuItems, selectedCategory, searchQuery]);
 
   const addToCart = (item: MenuItem) => {
-    setCart(prev => {
-      const existing = prev.find(c => c.id === item.id);
+    setCart((prev) => {
+      const existing = prev.find((c) => c.id === item.id);
       if (existing) {
-        return prev.map(c => c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+        return prev.map((c) => (c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
       }
-      return [...prev, { ...item, cartItemId: crypto.randomUUID(), quantity: 1, discountPercent: 0 }];
+      return [
+        ...prev,
+        {
+          ...item,
+          cartItemId: crypto.randomUUID(),
+          quantity: 1,
+        },
+      ];
     });
   };
 
   const updateQuantity = (cartItemId: string, delta: number) => {
-    setCart(prev => prev.map(item => {
-      if (item.cartItemId === cartItemId) {
-        const newQuantity = Math.max(0, item.quantity + delta);
-        return { ...item, quantity: newQuantity };
-      }
-      return item;
-    }).filter(item => item.quantity > 0));
+    setCart((prev) =>
+      prev
+        .map((item) => {
+          if (item.cartItemId === cartItemId) {
+            const newQuantity = Math.max(0, item.quantity + delta);
+            return { ...item, quantity: newQuantity };
+          }
+          return item;
+        })
+        .filter((item) => item.quantity > 0)
+    );
   };
 
   const clearCart = () => {
@@ -198,123 +352,210 @@ export default function POSPage() {
       setCustomerPhone('');
       setBuyerKraPin('');
       setOrderDiscountPercent(0);
+      setGuestCount(1);
     }
   };
 
-  // Enterprise Calculation Engine (16% VAT + 2% Catering Levy)
-  const rawSubtotal = useMemo(() => {
-    return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  }, [cart]);
+  // Real-Time Enterprise Financial Calculations
+  const calculations = useMemo(() => {
+    const rawSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const discountAmount = rawSubtotal * (orderDiscountPercent / 100);
+    const discountedGross = Math.max(0, rawSubtotal - discountAmount);
 
-  const discountAmount = useMemo(() => {
-    return (rawSubtotal * (orderDiscountPercent / 100));
-  }, [rawSubtotal, orderDiscountPercent]);
+    const isVatInclusive = financialSettings ? financialSettings.isVatInclusive : true;
+    const vatRate = financialSettings ? parseFloat(financialSettings.vatRate) / 100 : 0.16;
+    const isCateringLevyEnabled = financialSettings
+      ? financialSettings.isCateringLevyEnabled
+      : true;
+    const levyRate = isCateringLevyEnabled && financialSettings
+      ? parseFloat(financialSettings.cateringLevyRate) / 100
+      : 0.02;
 
-  const discountedGross = Math.max(0, rawSubtotal - discountAmount);
+    // Service Charge from Model or Financial Settings
+    const modelServiceChargePercent = activeServiceModel?.autoApplyServiceCharge
+      ? parseFloat(activeServiceModel.serviceChargePercent) / 100
+      : financialSettings?.isServiceChargeEnabled
+      ? parseFloat(financialSettings.serviceChargeRate) / 100
+      : 0;
 
-  const vatRate = 0.16;
-  const levyRate = 0.02;
-  const totalTaxFactor = 1 + vatRate + levyRate;
+    // Packaging Charge from Active Service Model
+    const packingChargeAmount = activeServiceModel
+      ? parseFloat(activeServiceModel.packingChargeAmount) || 0
+      : 0;
 
-  const netAmount = discountedGross / totalTaxFactor;
-  const vatAmount = netAmount * vatRate;
-  const levyAmount = netAmount * levyRate;
-  const grandTotal = discountedGross;
+    let netAmount = 0;
+    let vatAmount = 0;
+    let levyAmount = 0;
+    let serviceChargeAmount = 0;
+    let grandTotal = 0;
+
+    if (isVatInclusive) {
+      const combinedDivisor = 1 + vatRate + levyRate + modelServiceChargePercent;
+      netAmount = discountedGross / combinedDivisor;
+      vatAmount = netAmount * vatRate;
+      levyAmount = netAmount * levyRate;
+      serviceChargeAmount = netAmount * modelServiceChargePercent;
+      grandTotal = discountedGross + packingChargeAmount;
+    } else {
+      netAmount = discountedGross;
+      vatAmount = netAmount * vatRate;
+      levyAmount = netAmount * levyRate;
+      serviceChargeAmount = netAmount * modelServiceChargePercent;
+      grandTotal = netAmount + vatAmount + levyAmount + serviceChargeAmount + packingChargeAmount;
+    }
+
+    return {
+      rawSubtotal,
+      discountAmount,
+      netAmount,
+      vatAmount,
+      levyAmount,
+      serviceChargeAmount,
+      packingChargeAmount,
+      grandTotal,
+    };
+  }, [cart, orderDiscountPercent, financialSettings, activeServiceModel]);
 
   const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
+  // Cash Change Calculation
   const cashChangeDue = useMemo(() => {
-    const tendered = parseFloat(cashTendered) || 0;
-    return Math.max(0, tendered - grandTotal);
-  }, [cashTendered, grandTotal]);
+    if (paymentMethod === 'Cash') {
+      const tendered = parseFloat(cashTendered) || 0;
+      return Math.max(0, tendered - calculations.grandTotal);
+    }
+    if (paymentMethod === 'Split') {
+      const c = parseFloat(splitCashAmount) || 0;
+      const m = parseFloat(splitMpesaAmount) || 0;
+      return Math.max(0, c + m - calculations.grandTotal);
+    }
+    return 0;
+  }, [paymentMethod, cashTendered, splitCashAmount, splitMpesaAmount, calculations.grandTotal]);
+
+  // Safe Drop Alert Telemetry Check
+  const isSafeDropWarning = useMemo(() => {
+    if (!financialSettings?.enableSafeDropAlerts || !activeSession) return false;
+    const currentBalance = parseFloat(activeSession.expectedClosingBalance) || 0;
+    const threshold = parseFloat(financialSettings.maxDrawerCashThreshold) || 50000;
+    return currentBalance >= threshold * 0.9;
+  }, [financialSettings, activeSession]);
 
   const handleOpenPayment = () => {
     if (cart.length === 0) return;
-    if (orderType === 'Dine-In' && !selectedTableId) {
-      alert('Please assign a dining table for Dine-In service.');
+    if (activeServiceModel?.requiresTable && !selectedTableId) {
+      alert('This service model requires assigning a dining table before settlement.');
       return;
     }
-    setCashTendered(grandTotal.toFixed(2));
+    setCashTendered(calculations.grandTotal.toFixed(2));
     setMpesaPhone(customerPhone || '');
+    setSplitCashAmount((calculations.grandTotal / 2).toFixed(2));
+    setSplitMpesaAmount((calculations.grandTotal / 2).toFixed(2));
     setIsPaymentModalOpen(true);
   };
 
   const handleCompleteCheckout = async () => {
     setIsCheckingOut(true);
     try {
-      const tableObj = tables.find(t => String(t.id) === selectedTableId);
+      const tableObj = tables.find((t) => String(t.id) === selectedTableId);
 
       const result = await fetchApi('/api/v1/orders', {
         method: 'POST',
         body: JSON.stringify({
-          orderType,
+          orderType: activeServiceModel?.name || 'Dine-In',
+          serviceModelId: activeServiceModel?.id,
           tableId: selectedTableId ? parseInt(selectedTableId, 10) : undefined,
-          tableName: tableObj ? tableObj.tableLabel : orderType,
+          tableName: tableObj ? tableObj.tableLabel : activeServiceModel?.name,
           customerName: customerName.trim() || undefined,
           customerPhone: customerPhone.trim() || undefined,
           buyerKraPin: buyerKraPin.trim() || undefined,
-          subtotal: netAmount,
-          tax: vatAmount,
-          cateringLevy: levyAmount,
-          discountTotal: discountAmount,
-          total: grandTotal,
+          guestCount: activeServiceModel?.promptGuestCount ? guestCount : undefined,
+          subtotal: calculations.netAmount,
+          tax: calculations.vatAmount,
+          cateringLevy: calculations.levyAmount,
+          serviceCharge: calculations.serviceChargeAmount,
+          packingCharge: calculations.packingChargeAmount,
+          discountTotal: calculations.discountAmount,
+          total: calculations.grandTotal,
           paymentMethod,
-          cashTendered: paymentMethod === 'Cash' ? parseFloat(cashTendered) : grandTotal,
-          changeReturned: paymentMethod === 'Cash' ? cashChangeDue : 0,
-          items: cart.map(i => ({
+          cashTendered:
+            paymentMethod === 'Cash'
+              ? parseFloat(cashTendered)
+              : paymentMethod === 'Split'
+              ? parseFloat(splitCashAmount)
+              : calculations.grandTotal,
+          changeReturned: cashChangeDue,
+          items: cart.map((i) => ({
             menuItemId: parseInt(i.id, 10) || 1,
             name: i.name,
             quantity: i.quantity,
             unitPrice: i.price,
-            totalPrice: i.price * i.quantity
-          }))
-        })
+            totalPrice: i.price * i.quantity,
+            sku: i.sku,
+          })),
+        }),
       });
 
-      if (orderType === 'Dine-In' && selectedTableId) {
-        setTables(prev => prev.map(t => String(t.id) === selectedTableId ? { ...t, status: 'Occupied' } : t));
+      if (activeServiceModel?.requiresTable && selectedTableId) {
+        setTables((prev) =>
+          prev.map((t) => (String(t.id) === selectedTableId ? { ...t, status: 'Occupied' } : t))
+        );
       }
 
-      if (paymentMethod === 'M-Pesa' && (customerPhone || mpesaPhone)) {
+      // Trigger M-Pesa STK Push if M-Pesa was selected or split
+      if (
+        (paymentMethod === 'M-Pesa' || paymentMethod === 'Split') &&
+        (customerPhone || mpesaPhone)
+      ) {
+        const amountToPrompt =
+          paymentMethod === 'Split'
+            ? parseFloat(splitMpesaAmount)
+            : calculations.grandTotal;
+
         await fetchApi('/api/v1/payments/mpesa/stk-push', {
           method: 'POST',
           body: JSON.stringify({
             phoneNumber: mpesaPhone || customerPhone,
-            amount: grandTotal,
-            accountReference: result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
-            notes: `POS Settlement for ${customerName || 'Guest'}`,
-          })
+            amount: amountToPrompt,
+            accountReference:
+              result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
+            notes: `POS Tender for ${customerName || 'Guest'}`,
+          }),
         }).catch(() => {});
       }
 
       const generatedReceipt = {
         ...(result?.data || {}),
-        orderNumber: result?.data?.orderNumber || `SRV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+        orderNumber:
+          result?.data?.orderNumber ||
+          `INV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
         items: [...cart],
-        netAmount,
-        vatAmount,
-        levyAmount,
-        discountAmount,
-        grandTotal,
+        ...calculations,
         paymentMethod,
-        cashTendered: parseFloat(cashTendered) || grandTotal,
+        cashTendered:
+          paymentMethod === 'Cash'
+            ? parseFloat(cashTendered)
+            : paymentMethod === 'Split'
+            ? parseFloat(splitCashAmount)
+            : calculations.grandTotal,
         cashChangeDue,
-        tableName: tableObj ? tableObj.tableLabel : orderType,
+        tableName: tableObj ? tableObj.tableLabel : activeServiceModel?.name || 'Walk-in',
         customerName: customerName || 'Walk-in Guest',
         customerPhone: customerPhone || null,
         buyerKraPin: buyerKraPin || null,
         servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
-        drawerName: activeSession?.drawerName || 'Main Register',
+        drawerName: activeSession?.drawerName || 'Main Till',
         timestamp: new Date().toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' }),
-        businessName: business?.name || 'Restaurant Workspace',
-        legalName: business?.legalName || business?.name || '',
+        businessName: receiptTemplate?.headerTitle || business?.name || 'Restaurant Workspace',
+        headerSubtitle: receiptTemplate?.headerSubtitle || '',
         branchName: branch?.name || '',
         branchAddress: branch?.address || '',
         branchPhone: branch?.phone || business?.phone || '',
-        kraPin: branch?.kraPin || business?.kraPin || '',
-        etimsDeviceSerial: branch?.etimsDeviceSerial || null,
-        receiptFooter: branch?.receiptFooter || 'Thank you for your business. Karibu tena!',
-        internalAuditHash: `SHA256:${crypto.randomUUID().slice(0, 16).toUpperCase()}`
+        kraPin: financialSettings?.taxPin || branch?.kraPin || business?.kraPin || '',
+        etimsDeviceSerial:
+          branch?.etimsDeviceSerial || (financialSettings as any)?.etimsDeviceSerial || 'OSCU-SCU-2026-NBO',
+        footerMessage: receiptTemplate?.footerMessage || 'Thank you for your business. Karibu tena!',
+        returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
+        wifiDetails: receiptTemplate?.wifiDetails || null,
       };
 
       setCompletedOrder(generatedReceipt);
@@ -328,20 +569,17 @@ export default function POSPage() {
     }
   };
 
-  // High-Density Thermal Print Engine: Matched to 80mm (72mm print area) or 58mm (48mm print area)
-  const handlePrintReceipt = (selectedSize: ThermalPaperSize = paperSize) => {
+  // Thermal Print Engine dynamically adapting to the loaded template configuration
+  const handlePrintReceipt = () => {
     const receiptElement = receiptPrintRef.current;
     if (!receiptElement) {
       window.print();
       return;
     }
 
-    const is80mm = selectedSize === '80mm';
+    const is80mm = receiptTemplate?.paperWidth !== '58MM';
     const paperWidth = is80mm ? '80mm' : '58mm';
     const printableWidth = is80mm ? '72mm' : '48mm';
-    const baseFontSize = is80mm ? '13px' : '11px';
-    const headerFontSize = is80mm ? '15px' : '13px';
-    const totalFontSize = is80mm ? '16px' : '14px';
 
     const printFrame = document.createElement('iframe');
     printFrame.style.position = 'fixed';
@@ -374,75 +612,43 @@ export default function POSPage() {
               width: ${printableWidth} !important;
               background: #ffffff !important;
               -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              -webkit-text-size-adjust: 100% !important;
             }
             body {
-              /* Native Windows Font stack that maps 1:1 to thermal micro-pin grids */
-              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-              font-size: ${baseFontSize};
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+              font-size: ${is80mm ? '12px' : '10px'};
               line-height: 1.35;
               font-weight: 700;
               color: #000000 !important;
-              width: ${printableWidth} !important;
-              padding: 1.5mm 1mm 4mm 1mm !important;
+              padding: 2mm 1mm 4mm 1mm !important;
               box-sizing: border-box;
-              -webkit-font-smoothing: none !important;
-              text-rendering: geometricPrecision;
             }
             .header-title {
-              font-size: ${headerFontSize};
+              font-size: ${is80mm ? '15px' : '13px'};
               font-weight: 900;
               text-align: center;
               text-transform: uppercase;
-              margin-bottom: 2px;
             }
             .text-center { text-align: center; }
             .font-bold { font-weight: 800; }
             .font-black { font-weight: 900; }
-            .text-sm { font-size: ${baseFontSize}; }
-            .text-xs { font-size: ${is80mm ? '11.5px' : '10px'}; }
-            .text-lg { font-size: ${totalFontSize}; }
             .mono { font-family: Consolas, "Courier New", monospace !important; }
-            
             .flex-between {
               display: flex;
               justify-content: space-between;
               align-items: flex-start;
               width: 100%;
             }
-            .solid-divider {
-              border: none;
-              border-bottom: 2px solid #000000;
-              margin: 5px 0;
-              width: 100%;
-            }
             .dashed-divider {
               border: none;
               border-bottom: 1.5px dashed #000000;
               margin: 4px 0;
-              width: 100%;
             }
-            .item-row {
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-start;
-              width: 100%;
-              margin-bottom: 3px;
+            .solid-divider {
+              border: none;
+              border-bottom: 2px solid #000000;
+              margin: 5px 0;
             }
-            .item-name {
-              max-width: ${is80mm ? '70%' : '65%'};
-              word-break: break-word;
-            }
-            .item-price {
-              text-align: right;
-              font-weight: 800;
-              white-space: nowrap;
-            }
-            * {
-              color: #000000 !important;
-              box-sizing: border-box;
-            }
+            * { color: #000000 !important; box-sizing: border-box; }
           </style>
         </head>
         <body>
@@ -463,52 +669,10 @@ export default function POSPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] gap-3 font-sans">
-      
-      {/* Print Fallback Styles */}
-      <style jsx global>{`
-        @media print {
-          html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            height: auto !important;
-            overflow: visible !important;
-            background: #fff !important;
-            -webkit-font-smoothing: none !important;
-          }
-          body * {
-            visibility: hidden !important;
-          }
-          #thermal-receipt-printable,
-          #thermal-receipt-printable * {
-            visibility: visible !important;
-            color: #000000 !important;
-          }
-          #thermal-receipt-printable {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: ${paperSize === '80mm' ? '72mm' : '48mm'} !important;
-            max-width: ${paperSize === '80mm' ? '80mm' : '58mm'} !important;
-            margin: 0 auto !important;
-            padding: 1.5mm !important;
-            box-shadow: none !important;
-            border: none !important;
-            background: #fff !important;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
-            font-size: ${paperSize === '80mm' ? '13px' : '11px'} !important;
-            font-weight: 700 !important;
-            page-break-inside: avoid !important;
-          }
-          .print\\:hidden {
-            display: none !important;
-          }
-        }
-      `}</style>
-
-      {/* TOP CONTROL TELEMETRY BAR */}
+      {/* 1. TOP CONTROL TELEMETRY BAR & SAFE DROP ALERTS */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-blue-50 text-servora-core flex items-center justify-center">
+          <div className="w-8 h-8 rounded-xl bg-blue-50 text-servora-core flex items-center justify-center shrink-0">
             <Wallet size={16} />
           </div>
           <div>
@@ -519,7 +683,7 @@ export default function POSPage() {
               <span>{activeSession ? activeSession.drawerName : 'Unassigned Register'}</span>
               {activeSession && (
                 <span className="font-mono text-gray-500 font-medium">
-                  (Float: {currencySymbol} {parseFloat(activeSession.openingFloat).toLocaleString()})
+                  (Till: {currencySymbol} {parseFloat(activeSession.openingFloat).toLocaleString()})
                 </span>
               )}
             </div>
@@ -527,25 +691,33 @@ export default function POSPage() {
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+          {isSafeDropWarning && (
+            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold animate-pulse">
+              <AlertTriangle size={13} className="text-amber-600" />
+              <span>Safe Drop Recommended</span>
+            </div>
+          )}
+
           {!activeSession ? (
-            <Link 
-              href="/cash-management/drawers" 
+            <Link
+              href="/cash-management/drawers"
               className="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors flex items-center gap-1.5"
             >
               <AlertCircle size={13} /> Open Shift Float &rarr;
             </Link>
           ) : (
             <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-xl text-xs font-bold">
-              <Unlock size={12} /> Active &bull; Expected: {currencySymbol} {parseFloat(activeSession.expectedClosingBalance).toLocaleString()}
+              <Unlock size={12} /> Expected:{' '}
+              {currencySymbol} {parseFloat(activeSession.expectedClosingBalance).toLocaleString()}
             </div>
           )}
 
-          <button 
+          <button
             onClick={loadInitialData}
             title="Sync Workspace & Catalog"
-            className="p-1.5 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors"
+            className="p-1.5 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className={isLoading ? 'animate-spin text-servora-core' : ''} />
           </button>
         </div>
       </div>
@@ -577,18 +749,19 @@ export default function POSPage() {
 
       {/* MAIN SPLIT-VIEW VIEWPORT */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
-
         {/* LEFT COLUMN: ITEM CATALOG & LOOKUP */}
-        <div className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
-          mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
-        }`}>
+        <div
+          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
+            mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
+          }`}
+        >
           <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
                 <input
                   type="text"
-                  placeholder="Scan SKU or search dishes, drinks..."
+                  placeholder="Scan SKU or search dishes, beverages..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
@@ -596,7 +769,7 @@ export default function POSPage() {
               </div>
 
               {/* Table assignment selector for Dine-in orders */}
-              {orderType === 'Dine-In' && (
+              {activeServiceModel?.requiresTable && (
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
                   <Utensils size={13} className="text-servora-core" />
                   <select
@@ -605,7 +778,7 @@ export default function POSPage() {
                     className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
                   >
                     <option value="">Assign Table *</option>
-                    {tables.map(t => {
+                    {tables.map((t) => {
                       const isCurrentlySelected = String(t.id) === selectedTableId;
                       const isOccupied = t.status === 'Occupied';
                       return (
@@ -625,11 +798,11 @@ export default function POSPage() {
 
             {/* Category Ribbon */}
             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-              {categories.map(cat => (
+              {categories.map((cat) => (
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                     selectedCategory === cat
                       ? 'bg-servora-navy text-white shadow-xs'
                       : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
@@ -655,11 +828,11 @@ export default function POSPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                {filteredItems.map(item => (
+                {filteredItems.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => addToCart(item)}
-                    className="flex flex-col text-left bg-white p-3 rounded-xl border border-gray-200 shadow-xs hover:border-servora-core/40 hover:shadow-md transition-all active:scale-97 h-28 justify-between group"
+                    className="flex flex-col text-left bg-white p-3 rounded-xl border border-gray-200 shadow-xs hover:border-servora-core/40 hover:shadow-md transition-all active:scale-97 h-28 justify-between group cursor-pointer"
                   >
                     <div>
                       <span className="text-[9px] font-bold uppercase tracking-wider text-servora-deepTeal bg-slate-100 px-1.5 py-0.5 rounded-md inline-block mb-1">
@@ -685,37 +858,46 @@ export default function POSPage() {
         </div>
 
         {/* RIGHT COLUMN: ACTIVE CHECK & FISCAL LEDGER */}
-        <div className={`w-full lg:w-[420px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
-          mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
-        }`}>
-
-          {/* Fulfillment Mode Selectors */}
-          <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1">
-            {(['Dine-In', 'Takeaway', 'Delivery'] as OrderType[]).map(type => (
-              <button
-                key={type}
-                onClick={() => setOrderType(type)}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
-                  orderType === type
-                    ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
-                    : 'text-gray-500 hover:text-servora-navy'
-                }`}
-              >
-                {type === 'Dine-In' && <Coffee size={13} />}
-                {type === 'Takeaway' && <ShoppingBag size={13} />}
-                {type === 'Delivery' && <Clock size={13} />}
-                {type}
-              </button>
-            ))}
+        <div
+          className={`w-full lg:w-[420px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
+            mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
+          }`}
+        >
+          {/* Dynamic Service Model Revenue Center Selectors */}
+          <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
+            {serviceModels.length > 0 ? (
+              serviceModels.map((model) => {
+                const Icon = SERVICE_MODEL_ICONS[model.type] || Store;
+                const isSelected = activeServiceModel?.id === model.id;
+                return (
+                  <button
+                    key={model.id}
+                    onClick={() => setActiveServiceModel(model)}
+                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                      isSelected
+                        ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
+                        : 'text-gray-500 hover:text-servora-navy'
+                    }`}
+                  >
+                    <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
+                    <span className="truncate">{model.name}</span>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="py-1 px-2 text-xs font-bold text-servora-navy">Standard Dining</div>
+            )}
           </div>
 
           {/* Order Header Metadata */}
           <div className="p-3 border-b border-gray-200 bg-white space-y-2 shrink-0 text-xs">
-            {orderType === 'Dine-In' && (
+            {activeServiceModel?.requiresTable && (
               <div className="p-2 bg-blue-50/70 border border-blue-200 rounded-xl font-bold text-servora-core flex justify-between items-center text-xs">
-                <span className="flex items-center gap-1.5"><Utensils size={13} /> Seating Assignment:</span>
+                <span className="flex items-center gap-1.5">
+                  <Utensils size={13} /> Seating Assignment:
+                </span>
                 <span>
-                  {tables.find(t => String(t.id) === selectedTableId)?.tableLabel || '⚠️ Table Required'}
+                  {tables.find((t) => String(t.id) === selectedTableId)?.tableLabel || '⚠️ Table Required'}
                 </span>
               </div>
             )}
@@ -740,17 +922,33 @@ export default function POSPage() {
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Buyer KRA PIN (Optional eTIMS Tax Invoice)"
+                placeholder="Buyer KRA PIN (Optional eTIMS)"
                 value={buyerKraPin}
                 onChange={(e) => setBuyerKraPin(e.target.value.toUpperCase())}
                 className="flex-1 px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono uppercase focus:outline-none focus:border-servora-core text-xs"
               />
+
+              {activeServiceModel?.promptGuestCount && (
+                <div className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2">
+                  <Users size={12} className="text-gray-400" />
+                  <input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={guestCount}
+                    onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-8 bg-transparent text-xs font-bold text-servora-navy focus:outline-none font-mono text-center"
+                    title="Guest Cover Count"
+                  />
+                </div>
+              )}
+
               <div className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2">
                 <Percent size={11} className="text-gray-400" />
                 <select
                   value={orderDiscountPercent}
                   onChange={(e) => setOrderDiscountPercent(Number(e.target.value))}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none"
+                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
                 >
                   <option value="0">0%</option>
                   <option value="5">5%</option>
@@ -771,8 +969,11 @@ export default function POSPage() {
                 <p className="text-[11px] text-gray-400">Select dishes or beverages from catalog</p>
               </div>
             ) : (
-              cart.map(item => (
-                <div key={item.cartItemId} className="flex items-center justify-between bg-slate-50/60 border border-gray-200 p-2.5 rounded-xl shadow-xs">
+              cart.map((item) => (
+                <div
+                  key={item.cartItemId}
+                  className="flex items-center justify-between bg-slate-50/60 border border-gray-200 p-2.5 rounded-xl shadow-xs"
+                >
                   <div className="flex-1 pr-2">
                     <h4 className="text-xs font-bold text-servora-navy line-clamp-1">{item.name}</h4>
                     <p className="text-[11px] font-mono font-bold text-servora-core">
@@ -781,16 +982,18 @@ export default function POSPage() {
                   </div>
 
                   <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-gray-200 shadow-xs">
-                    <button 
-                      onClick={() => updateQuantity(item.cartItemId, -1)} 
-                      className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors"
+                    <button
+                      onClick={() => updateQuantity(item.cartItemId, -1)}
+                      className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                     >
                       {item.quantity === 1 ? <Trash2 size={12} /> : <Minus size={12} />}
                     </button>
-                    <span className="text-xs font-bold text-servora-navy w-5 text-center font-mono">{item.quantity}</span>
-                    <button 
-                      onClick={() => updateQuantity(item.cartItemId, 1)} 
-                      className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors"
+                    <span className="text-xs font-bold text-servora-navy w-5 text-center font-mono">
+                      {item.quantity}
+                    </span>
+                    <button
+                      onClick={() => updateQuantity(item.cartItemId, 1)}
+                      className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer"
                     >
                       <Plus size={12} />
                     </button>
@@ -800,31 +1003,86 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Enterprise Fiscal Summary & Action Buttons */}
+          {/* Dynamic Financial Summary & Action Buttons */}
           <div className="p-3.5 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2.5">
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-gray-500">
-                <span>Taxable Base (Net)</span>
-                <span className="font-mono">{currencySymbol} {netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>Taxable Net Base</span>
+                <span className="font-mono">
+                  {currencySymbol}{' '}
+                  {calculations.netAmount.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
               <div className="flex justify-between text-gray-500">
-                <span>KRA VAT (16%)</span>
-                <span className="font-mono">{currencySymbol} {vatAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>KRA VAT ({financialSettings?.vatRate || '16'}%)</span>
+                <span className="font-mono">
+                  {currencySymbol}{' '}
+                  {calculations.vatAmount.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
               </div>
-              <div className="flex justify-between text-gray-500">
-                <span>Tourism Catering Levy (2%)</span>
-                <span className="font-mono">{currencySymbol} {levyAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-              </div>
+
+              {calculations.levyAmount > 0 && (
+                <div className="flex justify-between text-gray-500">
+                  <span>Tourism Levy ({financialSettings?.cateringLevyRate || '2'}%)</span>
+                  <span className="font-mono">
+                    {currencySymbol}{' '}
+                    {calculations.levyAmount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {calculations.serviceChargeAmount > 0 && (
+                <div className="flex justify-between text-purple-700 font-medium">
+                  <span>Service Charge</span>
+                  <span className="font-mono">
+                    +{currencySymbol}{' '}
+                    {calculations.serviceChargeAmount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {calculations.packingChargeAmount > 0 && (
+                <div className="flex justify-between text-gray-600 font-medium">
+                  <span>Packaging Surcharge</span>
+                  <span className="font-mono">
+                    +{currencySymbol} {calculations.packingChargeAmount.toLocaleString()}
+                  </span>
+                </div>
+              )}
+
               {orderDiscountPercent > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
                   <span>Discount ({orderDiscountPercent}%)</span>
-                  <span className="font-mono">-{currencySymbol} {discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span className="font-mono">
+                    -{currencySymbol}{' '}
+                    {calculations.discountAmount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
               )}
+
               <div className="flex justify-between text-sm font-bold text-servora-navy pt-1.5 border-t border-gray-200">
-                <span>Grand Total Due</span>
+                <span>Total Due</span>
                 <span className="font-mono text-base text-servora-core">
-                  {currencySymbol} {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {currencySymbol}{' '}
+                  {calculations.grandTotal.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </div>
             </div>
@@ -833,22 +1091,21 @@ export default function POSPage() {
               <button
                 onClick={clearCart}
                 disabled={cart.length === 0}
-                className="py-2.5 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-rose-600 transition-colors disabled:opacity-40"
+                className="py-2.5 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-rose-600 transition-colors disabled:opacity-40 cursor-pointer"
               >
                 Clear Ticket
               </button>
               <button
                 onClick={handleOpenPayment}
                 disabled={cart.length === 0}
-                className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-97 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-97 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
               >
                 <CreditCard size={14} />
-                Charge {currencySymbol} {grandTotal.toLocaleString()}
+                Charge {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
               </button>
             </div>
           </div>
         </div>
-
       </div>
 
       {/* TENDER SETTLEMENT MODAL */}
@@ -857,40 +1114,56 @@ export default function POSPage() {
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-servora-navy">Tender Settlement & Payment Routing</h3>
-                <p className="text-[11px] text-gray-500">Order #{selectedTableId ? `Table ${tables.find(t => String(t.id) === selectedTableId)?.tableLabel}` : orderType}</p>
+                <h3 className="text-sm font-bold text-servora-navy">Tender Settlement & Routing</h3>
+                <p className="text-[11px] text-gray-500">
+                  {activeServiceModel?.name || 'Order'} &bull;{' '}
+                  {selectedTableId
+                    ? `Table ${tables.find((t) => String(t.id) === selectedTableId)?.tableLabel}`
+                    : 'Counter'}
+                </p>
               </div>
-              <button onClick={() => setIsPaymentModalOpen(false)} className="text-gray-400 hover:text-servora-navy">
+              <button
+                onClick={() => setIsPaymentModalOpen(false)}
+                className="text-gray-400 hover:text-servora-navy cursor-pointer"
+              >
                 <X size={18} />
               </button>
             </div>
 
             <div className="p-3.5 bg-slate-50 border border-gray-200 rounded-xl flex justify-between items-center">
-              <span className="text-xs font-bold text-servora-navy uppercase tracking-wider">Total Settlement Due</span>
+              <span className="text-xs font-bold text-servora-navy uppercase tracking-wider">
+                Total Settlement Due
+              </span>
               <span className="font-mono font-bold text-lg text-servora-core">
-                {currencySymbol} {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {currencySymbol}{' '}
+                {calculations.grandTotal.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              {(['Cash', 'M-Pesa', 'Card', 'Split'] as PaymentMethod[]).map(method => (
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['Cash', 'M-Pesa', 'Card', 'Split'] as PaymentMethod[]).map((method) => (
                 <button
                   key={method}
                   onClick={() => setPaymentMethod(method)}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                     paymentMethod === method
                       ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {method === 'M-Pesa' ? 'M-Pesa STK Push' : method}
+                  {method}
                 </button>
               ))}
             </div>
 
             {paymentMethod === 'Cash' && (
               <div className="p-3 bg-slate-50 border border-gray-200 rounded-xl space-y-2 text-xs">
-                <label className="block text-[11px] font-bold text-servora-navy">Cash Tendered ({currencySymbol}) *</label>
+                <label className="block text-[11px] font-bold text-servora-navy">
+                  Cash Tendered ({currencySymbol}) *
+                </label>
                 <input
                   type="number"
                   step="any"
@@ -901,7 +1174,11 @@ export default function POSPage() {
                 <div className="flex justify-between items-center pt-2 border-t border-gray-200 font-bold">
                   <span className="text-gray-500">Change Due to Guest:</span>
                   <span className="font-mono text-emerald-700 text-sm">
-                    {currencySymbol} {cashChangeDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {currencySymbol}{' '}
+                    {cashChangeDue.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
                   </span>
                 </div>
               </div>
@@ -922,17 +1199,55 @@ export default function POSPage() {
               </div>
             )}
 
+            {paymentMethod === 'Split' && (
+              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl space-y-2.5 text-xs">
+                <span className="font-bold text-purple-900 flex items-center gap-1.5">
+                  <Split size={13} /> Omnichannel Split Tender
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Cash Portioned</label>
+                    <input
+                      type="number"
+                      value={splitCashAmount}
+                      onChange={(e) => setSplitCashAmount(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg font-mono font-bold text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">M-Pesa Portioned</label>
+                    <input
+                      type="number"
+                      value={splitMpesaAmount}
+                      onChange={(e) => setSplitMpesaAmount(e.target.value)}
+                      className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg font-mono font-bold text-xs"
+                    />
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  placeholder="M-Pesa Mobile Number"
+                  value={mpesaPhone}
+                  onChange={(e) => setMpesaPhone(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg font-mono text-xs focus:outline-none"
+                />
+              </div>
+            )}
+
             <button
               onClick={handleCompleteCheckout}
-              disabled={isCheckingOut || (paymentMethod === 'Cash' && parseFloat(cashTendered) < grandTotal)}
-              className="w-full py-3 bg-servora-core hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex justify-center items-center gap-2 text-xs disabled:opacity-40"
+              disabled={
+                isCheckingOut ||
+                (paymentMethod === 'Cash' && parseFloat(cashTendered) < calculations.grandTotal)
+              }
+              className="w-full py-3 bg-servora-core hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex justify-center items-center gap-2 text-xs disabled:opacity-40 cursor-pointer"
             >
               {isCheckingOut ? (
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               ) : (
                 <>
                   <CheckCircle size={15} />
-                  Authorize Transaction & Generate Slip
+                  Authorize Transaction & Generate Thermal Slip
                 </>
               )}
             </button>
@@ -940,179 +1255,207 @@ export default function POSPage() {
         </div>
       )}
 
-      {/* STANDARD 80MM / 58MM FISCAL THERMAL RECEIPT MODAL */}
+      {/* DYNAMIC FISCAL THERMAL RECEIPT MODAL */}
       {completedOrder && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
-          
-          <div 
+          <div
             id="thermal-receipt-printable"
             className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
-              paperSize === '80mm' ? 'max-w-[340px]' : 'max-w-[280px]'
+              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
             }`}
           >
-            {/* Paper Size Quick Selector (Excluded from Printing) */}
-            <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl text-xs font-bold print:hidden">
-              <span className="text-[10px] text-gray-500 uppercase px-2">Paper Roll:</span>
-              <div className="flex gap-1">
-                <button
-                  type="button"
-                  onClick={() => setPaperSize('80mm')}
-                  className={`px-3 py-1 rounded-lg text-xs transition-all ${
-                    paperSize === '80mm' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-600 hover:text-black'
-                  }`}
-                >
-                  80mm Roll
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaperSize('58mm')}
-                  className={`px-3 py-1 rounded-lg text-xs transition-all ${
-                    paperSize === '58mm' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-600 hover:text-black'
-                  }`}
-                >
-                  58mm Roll
-                </button>
-              </div>
-            </div>
-
             {/* Printable Content Node */}
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
-              
               {/* Dynamic Corporate Tax Header */}
               <div className="text-center space-y-0.5">
+                {receiptTemplate?.showLogo !== false && (
+                  <div className="inline-block p-1 bg-black text-white font-bold text-[10px] rounded mb-0.5 tracking-widest">
+                    SERVORA
+                  </div>
+                )}
                 <h2 className="header-title">{completedOrder.businessName}</h2>
-                {completedOrder.legalName && completedOrder.legalName !== completedOrder.businessName && (
-                  <p className="text-xs font-bold">{completedOrder.legalName}</p>
+                {completedOrder.headerSubtitle && (
+                  <p className="text-[10px] text-gray-700">{completedOrder.headerSubtitle}</p>
                 )}
-                <p className="text-xs">
-                  {completedOrder.branchName} {completedOrder.branchAddress && `• ${completedOrder.branchAddress}`}
+                {receiptTemplate?.showBranchAddress !== false && (
+                  <p className="text-[10px]">
+                    {completedOrder.branchName} {completedOrder.branchAddress && `• ${completedOrder.branchAddress}`}
+                  </p>
+                )}
+                {receiptTemplate?.showContactPhone !== false && completedOrder.branchPhone && (
+                  <p className="text-[10px]">Tel: {completedOrder.branchPhone}</p>
+                )}
+                {receiptTemplate?.showTaxPin !== false && completedOrder.kraPin && (
+                  <p className="text-[10px] font-bold">KRA PIN: {completedOrder.kraPin}</p>
+                )}
+                <div className="pt-1 font-black text-sm">{completedOrder.orderNumber}</div>
+                <p className="text-[10px]">
+                  {completedOrder.timestamp} &bull; {completedOrder.tableName}
                 </p>
-                {completedOrder.kraPin && (
-                  <p className="text-xs mono font-bold">VAT PIN: {completedOrder.kraPin}</p>
-                )}
-                {completedOrder.etimsDeviceSerial && (
-                  <p className="text-xs mono font-bold">eTIMS CU Serial: {completedOrder.etimsDeviceSerial}</p>
-                )}
-                <div className="pt-1 font-black text-sm mono">
-                  {completedOrder.orderNumber}
-                </div>
-                <p className="text-xs">{completedOrder.timestamp} &bull; {completedOrder.tableName}</p>
               </div>
 
               <div className="dashed-divider"></div>
 
-              {/* Customer, Server & Taxpayer Attributes */}
-              <div className="text-xs space-y-0.5">
-                <div className="flex-between">
-                  <span>Guest:</span>
-                  <span className="font-bold">{completedOrder.customerName || 'Walk-in Guest'}</span>
-                </div>
-                <div className="flex-between">
-                  <span>Served by:</span>
-                  <span className="font-bold">{completedOrder.servedBy}</span>
-                </div>
+              {/* Staff & Guest Identity Attributes */}
+              <div className="text-[11px] space-y-0.5">
+                {receiptTemplate?.showCustomerDetails !== false && (
+                  <div className="flex-between">
+                    <span>Guest:</span>
+                    <span className="font-bold">{completedOrder.customerName}</span>
+                  </div>
+                )}
+                {receiptTemplate?.showServerName !== false && (
+                  <div className="flex-between">
+                    <span>Server:</span>
+                    <span className="font-bold">{completedOrder.servedBy}</span>
+                  </div>
+                )}
                 {completedOrder.buyerKraPin && (
-                  <div className="flex-between mono">
+                  <div className="flex-between font-bold">
                     <span>Buyer PIN:</span>
-                    <span className="font-bold">{completedOrder.buyerKraPin}</span>
+                    <span>{completedOrder.buyerKraPin}</span>
                   </div>
                 )}
               </div>
 
               <div className="dashed-divider"></div>
 
-              {/* Itemized Line Ledger */}
+              {/* Itemized Lines */}
               <div className="space-y-1">
                 {completedOrder.items.map((i: any) => (
-                  <div key={i.cartItemId} className="item-row text-xs">
-                    <span className="item-name font-bold">{i.quantity}x {i.name}</span>
-                    <span className="item-price mono font-bold">{(i.price * i.quantity).toLocaleString()}</span>
+                  <div key={i.cartItemId} className="flex-between text-[11px]">
+                    <span className="font-bold max-w-[70%] break-words">
+                      {i.quantity}x {i.name}
+                    </span>
+                    <span className="font-bold whitespace-nowrap">
+                      {(i.price * i.quantity).toLocaleString()}
+                    </span>
                   </div>
                 ))}
               </div>
 
               <div className="dashed-divider"></div>
 
-              {/* Fiscal Tax Matrix Breakdown (16% VAT + 2% Levy) */}
-              <div className="space-y-1 text-xs">
+              {/* Statutory Tax Breakdown */}
+              <div className="space-y-1 text-[11px]">
                 <div className="flex-between">
-                  <span>Taxable Base Net:</span>
-                  <span className="mono">{currencySymbol} {completedOrder.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  <span>Net Food & Beverage:</span>
+                  <span>
+                    {currencySymbol}{' '}
+                    {completedOrder.netAmount.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
                 </div>
-                <div className="flex-between">
-                  <span>KRA VAT (16%):</span>
-                  <span className="mono">{currencySymbol} {completedOrder.vatAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                <div className="flex-between">
-                  <span>Catering Levy (2%):</span>
-                  <span className="mono">{currencySymbol} {completedOrder.levyAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-                {completedOrder.discountAmount > 0 && (
-                  <div className="flex-between font-bold">
-                    <span>Total Discount:</span>
-                    <span className="mono">-{currencySymbol} {completedOrder.discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                  </div>
-                )}
-                
-                <div className="solid-divider"></div>
-                
-                <div className="flex-between font-black text-sm pt-0.5">
-                  <span>TOTAL PAID:</span>
-                  <span className="mono text-base">{currencySymbol} {completedOrder.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                </div>
-              </div>
-
-              <div className="dashed-divider"></div>
-
-              {/* Tender & Settlement Attribution */}
-              <div className="space-y-0.5 text-xs">
-                <div className="flex-between font-bold">
-                  <span>Tender Type:</span>
-                  <span className="uppercase">{completedOrder.paymentMethod}</span>
-                </div>
-                {completedOrder.paymentMethod === 'Cash' && (
+                {receiptTemplate?.showTaxSummary !== false && (
                   <>
                     <div className="flex-between">
-                      <span>Cash Tendered:</span>
-                      <span className="mono">{currencySymbol} {completedOrder.cashTendered.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span>KRA VAT:</span>
+                      <span>
+                        {currencySymbol}{' '}
+                        {completedOrder.vatAmount.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
                     </div>
-                    <div className="flex-between font-bold">
-                      <span>Change Returned:</span>
-                      <span className="mono font-black">{currencySymbol} {completedOrder.cashChangeDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
+                    {completedOrder.levyAmount > 0 && (
+                      <div className="flex-between">
+                        <span>Catering Levy:</span>
+                        <span>
+                          {currencySymbol}{' '}
+                          {completedOrder.levyAmount.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                        </span>
+                      </div>
+                    )}
                   </>
                 )}
+                {completedOrder.serviceChargeAmount > 0 && (
+                  <div className="flex-between">
+                    <span>Service Charge:</span>
+                    <span>
+                      {currencySymbol}{' '}
+                      {completedOrder.serviceChargeAmount.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                )}
+                {completedOrder.packingChargeAmount > 0 && (
+                  <div className="flex-between">
+                    <span>Packaging:</span>
+                    <span>{currencySymbol} {completedOrder.packingChargeAmount.toLocaleString()}</span>
+                  </div>
+                )}
+
+                <div className="solid-divider"></div>
+
+                <div className="flex-between font-black text-sm pt-0.5">
+                  <span>TOTAL DUE:</span>
+                  <span className="text-base">
+                    {currencySymbol}{' '}
+                    {completedOrder.grandTotal.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
               </div>
 
               <div className="dashed-divider"></div>
 
-              {/* Review & Non-Fiscal Audit Footer */}
-              <div className="text-center pt-1 space-y-1 text-xs">
-                <p className="font-bold">Thank you for your business. Karibu tena!</p>
-                <p className="text-xs">Review Us: How Did We Serve You?</p>
-                <div className="mono text-xs leading-tight select-none">
-                  ------------------------------------------
+              {/* Tender Attribution */}
+              <div className="space-y-0.5 text-[11px]">
+                <div className="flex-between font-bold">
+                  <span>Tender:</span>
+                  <span className="uppercase">{completedOrder.paymentMethod}</span>
                 </div>
-
-                <div className="pt-1 space-y-0.5">
-                  <p className="font-black text-xs">NON-FISCAL RECEIPT</p>
-                  <p className="text-xs uppercase">FINAL FISCAL RECEIPT PROVIDED UPON CHECK-OUT</p>
-                  <p className="mono text-[11px] mt-1">
-                    *** END OF NON-TAX INVOICE ***
-                  </p>
-                </div>
+                {completedOrder.cashChangeDue > 0 && (
+                  <div className="flex-between font-bold">
+                    <span>Change Returned:</span>
+                    <span>{currencySymbol} {completedOrder.cashChangeDue.toLocaleString()}</span>
+                  </div>
+                )}
               </div>
 
+              {/* eTIMS QR & Fiscal Sign-off */}
+              {receiptTemplate?.showEtimsQrCode !== false && (
+                <div className="text-center pt-2 space-y-1">
+                  <div className="w-16 h-16 mx-auto bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
+                    <QrCode size={48} className="text-black" />
+                  </div>
+                  <p className="text-[9px] font-bold">KRA eTIMS FISCAL INVOICE</p>
+                  {completedOrder.etimsDeviceSerial && (
+                    <p className="text-[8px] text-gray-700">SCU: {completedOrder.etimsDeviceSerial}</p>
+                  )}
+                </div>
+              )}
+
+              {/* Dynamic Footer, Wi-Fi & Policy */}
+              <div className="text-center pt-2 space-y-0.5 text-[10px]">
+                <p className="font-bold">{completedOrder.footerMessage}</p>
+                {completedOrder.wifiDetails && (
+                  <p className="text-[9px] font-medium">{completedOrder.wifiDetails}</p>
+                )}
+                {completedOrder.returnPolicy && (
+                  <p className="italic text-[8px] text-gray-600">{completedOrder.returnPolicy}</p>
+                )}
+              </div>
             </div>
 
-            {/* Action Bar (Strictly excluded from printing) */}
+            {/* Action Bar (Excluded from Printing) */}
             <div className="flex gap-2 pt-2 font-sans print:hidden">
               <button
                 type="button"
-                onClick={() => handlePrintReceipt(paperSize)}
+                onClick={handlePrintReceipt}
                 className="flex-1 py-2.5 bg-servora-navy text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
-                <Printer size={14} /> Print ({paperSize})
+                <Printer size={14} /> Print Receipt
               </button>
               <button
                 type="button"
@@ -1122,11 +1465,9 @@ export default function POSPage() {
                 Done
               </button>
             </div>
-
           </div>
         </div>
       )}
-
     </div>
   );
 }

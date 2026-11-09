@@ -68,6 +68,35 @@ import notificationRoutes from './routes/notification.routes';
 // Human Capital, Staff & Governance Routes
 import roleRoutes from './routes/role.routes';
 import staffRoutes from './routes/staff.routes';
+import scheduleRoutes from './routes/schedule.routes';
+import attendanceRoutes from './routes/attendance.routes';
+import handoverRoutes from './routes/handover.routes';
+import cashierAssignmentRoutes from './routes/cashier-assignment.routes';
+import performanceRoutes from './routes/performance.routes';
+import financialRoutes from './routes/financial.routes';
+import serviceModelRoutes from './routes/service-model.routes';
+import receiptRoutes from './routes/receipt.routes';
+import printerRoutes from './routes/printer.routes';
+import kitchenSettingsRoutes from './routes/kitchen-settings.routes';
+import paymentIntegrationRoutes from './routes/payment-integration.routes';
+import messagingRoutes from './routes/messaging-integration.routes';
+import orderIntegrationRoutes from './routes/order-integration.routes';
+import auditLogRoutes from './routes/audit-log.routes';
+import offlineSettingsRoutes from './routes/offline-settings.routes';
+import deviceRoutes from './routes/device.routes';
+import billingRoutes from './routes/billing.routes';
+import securitySettingsRoutes from './routes/security-settings.routes';
+import helpRoutes from './routes/help.routes';
+import reportsRoutes from './routes/reports.routes';
+import salesReportRoutes from './routes/sales-report.routes';
+import productReportRoutes from './routes/product-report.routes';
+import paymentReportRoutes from './routes/payment-report.routes';
+import inventoryReportRoutes from './routes/inventory-report.routes';
+import foodCostingReportRoutes from './routes/food-costing-report.routes';
+import performanceReportRoutes from './routes/performance-report.routes';
+import customReportBuilderRoutes from './routes/custom-report-builder.routes';
+import savedReportsRoutes from './routes/saved-reports.routes';
+import dataExportsRoutes from './routes/data-exports.routes';
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
@@ -173,6 +202,38 @@ app.use('/api/v1/notifications', notificationRoutes);
 // 9. Human Capital, RBAC Clearances & Staff Management
 app.use('/api/v1/staff/roles', roleRoutes);
 app.use('/api/v1/staff', staffRoutes);
+app.use('/api/v1/staff/schedules', scheduleRoutes);
+app.use('/api/v1/staff/attendance', attendanceRoutes);
+app.use('/api/v1/staff/handover', handoverRoutes);
+app.use('/api/v1/staff/cashier-assignments', cashierAssignmentRoutes);
+app.use('/api/v1/staff/performance', performanceRoutes);
+
+// 10 . Settings, Financials & Service Models, Receipts & Printers, Kitchen Configurations
+app.use('/api/v1/settings/financial', financialRoutes);
+app.use('/api/v1/settings/service-models', serviceModelRoutes);
+app.use('/api/v1/settings/receipts', receiptRoutes);
+app.use('/api/v1/settings/printers', printerRoutes);
+app.use('/api/v1/settings/kitchen', kitchenSettingsRoutes);
+app.use('/api/v1/settings/integrations/payments', paymentIntegrationRoutes);
+app.use('/api/v1/settings/integrations/messaging', messagingRoutes);
+app.use('/api/v1/settings/integrations/orders', orderIntegrationRoutes);
+app.use('/api/v1/settings/audit-logs', auditLogRoutes);
+app.use('/api/v1/settings/offline', offlineSettingsRoutes);
+app.use('/api/v1/settings/devices', deviceRoutes);
+app.use('/api/v1/settings/billing', billingRoutes);
+app.use('/api/v1/settings/security', securitySettingsRoutes);
+app.use('/api/v1/help', helpRoutes);
+app.use('/api/v1/reports/sales', salesReportRoutes);
+app.use('/api/v1/reports/products', productReportRoutes);
+app.use('/api/v1/reports/payments', paymentReportRoutes);
+app.use('/api/v1/reports/inventory', inventoryReportRoutes);
+app.use('/api/v1/reports/food-costing', foodCostingReportRoutes);
+app.use('/api/v1/reports/performance', performanceReportRoutes);
+app.use('/api/v1/reports/builder', customReportBuilderRoutes);
+app.use('/api/v1/reports/saved', savedReportsRoutes);
+app.use('/api/v1/reports/exports', dataExportsRoutes);
+app.use('/api/v1/reports', reportsRoutes);
+
 
 /* ==========================================================================
    GLOBAL ERROR HANDLING & SERVER LIFECYCLE
