@@ -199,7 +199,7 @@ const createStockTransfer = async (req, res) => {
     }
 };
 exports.createStockTransfer = createStockTransfer;
-// 4. Dispatch Transfer (Deducts stock from source warehouse, moves to in-transit)
+// 4. Dispatch Transfer (Deducts stock from source warehouse, synchronizes fleet vehicle, and opens transit waybill)
 const dispatchStockTransfer = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
@@ -245,7 +245,7 @@ const dispatchStockTransfer = async (req, res) => {
                 if (!inv.allowNegativeStock && newBalance < 0) {
                     throw new Error(`Insufficient stock for ${inv.name}. Available: ${currentStockNum} ${inv.unit}`);
                 }
-                // 1. Update transfer item line
+                // 1. Update transfer line item quantities
                 await tx
                     .update(schema_1.stockTransferItems)
                     .set({
@@ -253,7 +253,7 @@ const dispatchStockTransfer = async (req, res) => {
                     batchNumber: itemUpdate.batchNumber || null,
                 })
                     .where((0, drizzle_orm_1.eq)(schema_1.stockTransferItems.id, line.id));
-                // 2. Post Outward Material Document Ledger
+                // 2. Post Outward Material Movement Ledger Document
                 await tx.insert(schema_1.stockMovements).values({
                     tenantId: Number(tenantId),
                     branchId: Number(transfer.sourceBranchId),
@@ -269,12 +269,13 @@ const dispatchStockTransfer = async (req, res) => {
                     locationBin: 'Dispatched to In-Transit Fleet',
                     notes: `Outward Goods Issue: STO #${transfer.transferNumber}`,
                 });
-                // 3. Deduct source inventory stock
+                // 3. Deduct source warehouse inventory balance
                 await tx
                     .update(schema_1.inventoryItems)
                     .set({ currentStock: newBalance.toFixed(4), updatedAt: new Date() })
                     .where((0, drizzle_orm_1.eq)(schema_1.inventoryItems.id, inv.id));
             }
+            // 4. Update the transfer record with carrier details
             await tx
                 .update(schema_1.stockTransfers)
                 .set({
@@ -288,6 +289,38 @@ const dispatchStockTransfer = async (req, res) => {
                 updatedAt: new Date(),
             })
                 .where((0, drizzle_orm_1.eq)(schema_1.stockTransfers.id, transfer.id));
+            // 5. SYNCHRONIZE LOGISTICS FLEET ASSET & OPEN TRANSIT WAYBILL
+            if (payload.carrierVehiclePlate) {
+                const [matchedVehicle] = await tx
+                    .select({
+                    id: schema_1.logisticsFleet.id,
+                    vehiclePlate: schema_1.logisticsFleet.vehiclePlate,
+                    currentStatus: schema_1.logisticsFleet.currentStatus,
+                })
+                    .from(schema_1.logisticsFleet)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.tenantId, tenantId), (0, drizzle_orm_1.sql) `UPPER(REPLACE(${schema_1.logisticsFleet.vehiclePlate}, ' ', '')) = UPPER(REPLACE(${payload.carrierVehiclePlate}, ' ', ''))`))
+                    .limit(1);
+                if (matchedVehicle) {
+                    // Update vehicle status in the fleet registry
+                    await tx
+                        .update(schema_1.logisticsFleet)
+                        .set({ currentStatus: 'IN_TRANSIT', updatedAt: new Date() })
+                        .where((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.id, matchedVehicle.id));
+                    // Create tracking record in transfer_fleet_dispatches
+                    await tx
+                        .insert(schema_1.transferFleetDispatches)
+                        .values({
+                        tenantId,
+                        transferId: transfer.id,
+                        fleetVehicleId: matchedVehicle.id,
+                        dispatchedById: userId ? Number(userId) : null,
+                        dispatchStatus: 'IN_TRANSIT',
+                        departureTime: new Date(),
+                        dispatchTempProbe: payload.dispatchTempProbe !== undefined ? payload.dispatchTempProbe?.toString() : null,
+                        deliveryNotes: payload.notes || `Consignment dispatched for STO #${transfer.transferNumber}`,
+                    });
+                }
+            }
         });
         res.status(200).json({ status: 'success', message: 'Consignment successfully dispatched into in-transit fleet custody' });
     }
@@ -296,7 +329,7 @@ const dispatchStockTransfer = async (req, res) => {
     }
 };
 exports.dispatchStockTransfer = dispatchStockTransfer;
-// 5. Receive Transfer with In-Transit Shrinkage Write-off
+// 5. Receive Transfer (Balances inventory, writes off loss, and releases carrier vehicle)
 const receiveStockTransfer = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
@@ -344,7 +377,7 @@ const receiveStockTransfer = async (req, res) => {
                 const currentStockNum = parseFloat(inv.currentStock);
                 const newBalance = currentStockNum + recvQty;
                 const receivedValuation = recvQty * unitCostNum;
-                // 1. Update line quantities and shrinkage
+                // 1. Update line quantities and transit loss discrepancy
                 await tx
                     .update(schema_1.stockTransferItems)
                     .set({
@@ -353,7 +386,7 @@ const receiveStockTransfer = async (req, res) => {
                     notes: itemUpdate.notes || line.notes,
                 })
                     .where((0, drizzle_orm_1.eq)(schema_1.stockTransferItems.id, line.id));
-                // 2. Post Destination Inward Material Document
+                // 2. Post Destination Inward Material Movement Document
                 if (recvQty > 0) {
                     await tx.insert(schema_1.stockMovements).values({
                         tenantId: Number(tenantId),
@@ -370,13 +403,13 @@ const receiveStockTransfer = async (req, res) => {
                         locationBin: 'Branch Storage Receiving',
                         notes: `Inward Goods Receipt: STO #${transfer.transferNumber}`,
                     });
-                    // Credit destination inventory
+                    // Credit destination branch stock
                     await tx
                         .update(schema_1.inventoryItems)
                         .set({ currentStock: newBalance.toFixed(4), updatedAt: new Date() })
                         .where((0, drizzle_orm_1.eq)(schema_1.inventoryItems.id, inv.id));
                 }
-                // 3. Post Transit Shrinkage / Loss Scrap Entry if loss occurred
+                // 3. Post Transit Shrinkage / Waste Scrap entry if discrepancies occurred
                 if (lossQty > 0) {
                     await tx.insert(schema_1.stockMovements).values({
                         tenantId: Number(tenantId),
@@ -395,6 +428,7 @@ const receiveStockTransfer = async (req, res) => {
                     });
                 }
             }
+            // 4. Finalize transfer record
             await tx
                 .update(schema_1.stockTransfers)
                 .set({
@@ -406,8 +440,32 @@ const receiveStockTransfer = async (req, res) => {
                 updatedAt: new Date(),
             })
                 .where((0, drizzle_orm_1.eq)(schema_1.stockTransfers.id, transfer.id));
+            // 5. RELEASE FLEET VEHICLE BACK TO 'AVAILABLE' & CLOSE DISPATCH WAYBILL
+            if (transfer.carrierVehiclePlate) {
+                const [matchedVehicle] = await tx
+                    .select({ id: schema_1.logisticsFleet.id })
+                    .from(schema_1.logisticsFleet)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.tenantId, tenantId), (0, drizzle_orm_1.sql) `UPPER(REPLACE(${schema_1.logisticsFleet.vehiclePlate}, ' ', '')) = UPPER(REPLACE(${transfer.carrierVehiclePlate}, ' ', ''))`))
+                    .limit(1);
+                if (matchedVehicle) {
+                    // Restore vehicle status in the master fleet ledger
+                    await tx
+                        .update(schema_1.logisticsFleet)
+                        .set({ currentStatus: 'AVAILABLE', updatedAt: new Date() })
+                        .where((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.id, matchedVehicle.id));
+                    // Mark dispatch waybill as delivered
+                    await tx
+                        .update(schema_1.transferFleetDispatches)
+                        .set({
+                        dispatchStatus: 'DELIVERED',
+                        arrivalTime: new Date(),
+                        arrivalTempProbe: payload.arrivalTempProbe !== undefined ? payload.arrivalTempProbe?.toString() : null,
+                    })
+                        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.transferFleetDispatches.transferId, transfer.id), (0, drizzle_orm_1.eq)(schema_1.transferFleetDispatches.fleetVehicleId, matchedVehicle.id)));
+                }
+            }
         });
-        res.status(200).json({ status: 'success', message: 'Consignment received and inventory ledger balanced' });
+        res.status(200).json({ status: 'success', message: 'Consignment received, inventory ledger balanced, and fleet vehicle released' });
     }
     catch (error) {
         res.status(400).json({ status: 'error', message: error.message });
@@ -426,12 +484,16 @@ const getLogisticsFleetList = async (req, res) => {
             .select({
             id: schema_1.logisticsFleet.id,
             vehiclePlate: schema_1.logisticsFleet.vehiclePlate,
+            makeModel: schema_1.logisticsFleet.makeModel,
             vehicleType: schema_1.logisticsFleet.vehicleType,
             driverName: schema_1.logisticsFleet.driverName,
             driverPhone: schema_1.logisticsFleet.driverPhone,
+            maxPayloadKg: schema_1.logisticsFleet.maxPayloadKg,
             isRefrigerated: schema_1.logisticsFleet.isRefrigerated,
             minTargetTemp: schema_1.logisticsFleet.minTargetTemp,
             maxTargetTemp: schema_1.logisticsFleet.maxTargetTemp,
+            currentStatus: schema_1.logisticsFleet.currentStatus,
+            branchId: schema_1.logisticsFleet.branchId,
         })
             .from(schema_1.logisticsFleet)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.logisticsFleet.isActive, true)))

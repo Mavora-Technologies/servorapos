@@ -68,10 +68,12 @@ export const postAdjustPoints = async (req: AuthRequest, res: Response): Promise
     }
 
     const result = await loyaltyRepo.adjustCustomerPoints(tenantId, userId, parseResult.data);
+    const sign = parseResult.data.action === 'CREDIT' ? '+' : '-';
+    
     res.status(200).json({
       status: 'success',
       data: result,
-      message: `Successfully adjusted points (${parseResult.data.points > 0 ? '+' : ''}${parseResult.data.points}).`,
+      message: `Adjusted loyalty ledger (${sign}${parseResult.data.points} pts) for Reason: ${parseResult.data.reasonCode}.`,
     });
   } catch (error: any) {
     res.status(400).json({ status: 'error', message: error.message || 'Failed to adjust customer points' });

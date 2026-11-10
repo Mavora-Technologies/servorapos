@@ -59,6 +59,9 @@ import {
   CornerDownLeft,
   ChevronsDownUp,
   ChevronsUpDown as ExpandAllIcon,
+  Megaphone,
+  Target,
+  FileCode,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -226,7 +229,17 @@ const navigationGroups: NavGroup[] = [
       { label: 'Point Accrual Transactions', href: '/loyalty/transactions', icon: History, permission: 'loyalty.view', keywords: ['redemption', 'balance'] },
       { label: 'Vouchers & Gift Cards', href: '/loyalty/rewards', icon: BadgePercent, permission: 'loyalty.manage', keywords: ['coupons', 'discounts'] },
       { label: 'Guest Feedback & Reviews', href: '/customers/feedback', icon: ContactRound, permission: 'customers.view', keywords: ['csat', 'ratings'] },
-      { label: 'Targeted Marketing Broadcasts', href: '/marketing/campaigns', icon: Bell, permission: 'marketing.manage', keywords: ['sms', 'whatsapp'] },
+    ],
+  },
+  {
+    label: 'Marketing & Outreach',
+    domain: 'FINANCE_GROWTH',
+    icon: Megaphone,
+    items: [
+      { label: 'Marketing Control Center', href: '/marketing', icon: Megaphone, permission: 'marketing.view', badge: 'HQ', badgeType: 'info', keywords: ['growth', 'overview', 'roas', 'attribution'] },
+      { label: 'Campaigns & Broadcasts', href: '/marketing/campaigns', icon: Bell, permission: 'marketing.manage', badge: 'Live', badgeType: 'live', keywords: ['sms', 'email', 'broadcast', 'push'] },
+      { label: 'Message Copy Templates', href: '/marketing/templates', icon: FileCode, permission: 'marketing.manage', keywords: ['templates', 'merge tags', 'copy'] },
+      { label: 'Promo Codes & Vouchers', href: '/marketing/promotions', icon: Tags, permission: 'marketing.manage', keywords: ['discounts', 'coupons', 'codes'] },
     ],
   },
   {
@@ -862,7 +875,7 @@ export default function Sidebar({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Jump to module (e.g. transfers, kds, pos)..."
+                placeholder="Jump to module (e.g. marketing, kds, pos)..."
                 className="w-full bg-white/[0.04] border border-white/[0.07] focus:border-servora-teal/50 focus:bg-white/[0.08] text-white placeholder-servora-pale/35 text-xs rounded-lg pl-8 pr-12 py-1.5 outline-none transition-all"
               />
               {searchQuery ? (

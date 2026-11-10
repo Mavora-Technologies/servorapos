@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const loyalty_rewards_controller_1 = require("../controllers/loyalty-rewards.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', loyalty_rewards_controller_1.getRewardsCatalog);
+router.get('/metrics', loyalty_rewards_controller_1.getRewardsOverview);
+router.post('/', loyalty_rewards_controller_1.postReward);
+router.patch('/:id', loyalty_rewards_controller_1.patchReward);
+router.post('/redeem', loyalty_rewards_controller_1.postRedeemReward);
+exports.default = router;

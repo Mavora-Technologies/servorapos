@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const kitchen_settings_controller_1 = require("../controllers/kitchen-settings.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', kitchen_settings_controller_1.getKitchenSettings);
+router.post('/stations', kitchen_settings_controller_1.postKitchenStation);
+router.put('/stations/:id', kitchen_settings_controller_1.putKitchenStation);
+router.delete('/stations/:id', kitchen_settings_controller_1.deleteKitchenStation);
+router.put('/global', kitchen_settings_controller_1.putGlobalSettings);
+exports.default = router;

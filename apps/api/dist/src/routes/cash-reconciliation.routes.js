@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const cash_reconciliation_controller_1 = require("../controllers/cash-reconciliation.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/telemetry', cash_reconciliation_controller_1.getReconciliationTelemetry);
+router.get('/audit-list', cash_reconciliation_controller_1.getReconciliationAuditList);
+router.post('/sign-off', cash_reconciliation_controller_1.postAuditResolution);
+exports.default = router;

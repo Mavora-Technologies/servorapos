@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const financial_controller_1 = require("../controllers/financial.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', financial_controller_1.getSettings);
+router.put('/', financial_controller_1.putSettings);
+router.post('/tax-codes', financial_controller_1.postTaxCode);
+router.delete('/tax-codes/:id', financial_controller_1.deleteTaxCode);
+router.post('/etims/test-connection', financial_controller_1.testEtimsHandshake);
+exports.default = router;

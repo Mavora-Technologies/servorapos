@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const forecasting_controller_1 = require("../controllers/forecasting.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', forecasting_controller_1.getForecastOverview);
+router.patch('/modifier', forecasting_controller_1.patchForecastModifier);
+exports.default = router;

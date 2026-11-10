@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createTenantWithAdmin = void 0;
+// apps/api/src/repositories/tenant.repository.ts
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
@@ -28,8 +29,8 @@ const createTenantWithAdmin = async (businessName, adminData) => {
             code: 'MAIN',
         })
             .returning();
-        // 4. Insert Admin User with OWNER role matching schema enum
-        const [newAdmin] = await tx
+        // 4. Insert Admin User with ADMIN role matching schema enum
+        const [insertedAdmin] = await tx
             .insert(schema_1.users)
             .values({
             tenantId: newTenant.id,
@@ -38,16 +39,18 @@ const createTenantWithAdmin = async (businessName, adminData) => {
             lastName: adminData.lastName,
             email: adminData.email.toLowerCase().trim(),
             passwordHash,
-            role: 'OWNER', // Explicitly assign OWNER
+            role: 'ADMIN', // Matches 'ADMIN' in userRoleEnum
             isActive: true,
         })
-            .returning({
-            id: schema_1.users.id,
-            email: schema_1.users.email,
-            firstName: schema_1.users.firstName,
-            lastName: schema_1.users.lastName,
-            role: schema_1.users.role,
-        });
+            .returning(); // Returns the full inserted user record, avoiding object mapping type mismatch
+        // Shape the returned admin object precisely as needed
+        const newAdmin = {
+            id: insertedAdmin.id,
+            email: insertedAdmin.email,
+            firstName: insertedAdmin.firstName,
+            lastName: insertedAdmin.lastName,
+            role: insertedAdmin.role,
+        };
         return { tenant: newTenant, admin: newAdmin, branch: newBranch };
     });
 };

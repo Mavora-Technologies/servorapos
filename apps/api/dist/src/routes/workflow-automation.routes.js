@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const workflow_automation_controller_1 = require("../controllers/workflow-automation.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', workflow_automation_controller_1.getWorkflowRules);
+router.get('/metrics', workflow_automation_controller_1.getWorkflowOverview);
+router.get('/catalog', workflow_automation_controller_1.getAutomationCatalog);
+router.post('/', workflow_automation_controller_1.postWorkflowRule);
+router.patch('/:id', workflow_automation_controller_1.patchWorkflowRule);
+router.post('/:id/test-run', workflow_automation_controller_1.postTriggerTestRun);
+exports.default = router;

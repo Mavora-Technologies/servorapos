@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const custom_report_builder_controller_1 = require("../controllers/custom-report-builder.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/datasets', custom_report_builder_controller_1.getDatasetsMetadata);
+router.post('/preview', custom_report_builder_controller_1.postPreviewReport);
+router.post('/save', custom_report_builder_controller_1.postSaveCustomReport);
+router.get('/saved', custom_report_builder_controller_1.getSavedCustomReports);
+router.post('/export', custom_report_builder_controller_1.exportCustomReport);
+exports.default = router;

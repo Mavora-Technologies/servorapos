@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const order_integration_controller_1 = require("../controllers/order-integration.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', order_integration_controller_1.getOrderIntegrations);
+router.post('/', order_integration_controller_1.postOrderIntegration);
+router.put('/:id', order_integration_controller_1.putOrderIntegration);
+router.delete('/:id', order_integration_controller_1.deleteOrderIntegration);
+router.post('/test-sync', order_integration_controller_1.postTestSync);
+exports.default = router;

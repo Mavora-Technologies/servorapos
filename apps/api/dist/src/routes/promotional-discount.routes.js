@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const promotional_discount_controller_1 = require("../controllers/promotional-discount.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', promotional_discount_controller_1.getPromotions);
+router.get('/metrics', promotional_discount_controller_1.getPromotionsOverview);
+router.post('/', promotional_discount_controller_1.postPromotion);
+router.patch('/:id', promotional_discount_controller_1.patchPromotion);
+router.post('/validate', promotional_discount_controller_1.postValidatePromoCode);
+exports.default = router;

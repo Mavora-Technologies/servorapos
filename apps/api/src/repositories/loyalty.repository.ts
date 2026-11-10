@@ -4,6 +4,7 @@ import {
   loyaltyTiers,
   customerLoyaltyProfiles,
   loyaltyPointTransactions,
+  loyaltyTransactionsLedger,
   loyaltyRewardsCatalog,
   customers,
   users,
@@ -19,13 +20,20 @@ import {
 export const getLoyaltyDashboardMetrics = async (tenantId: number) => {
   const [summary] = await db
     .select({
-      totalEnrolledMembers: sql<number>`count(*)`,
+      totalEnrolledMembers: sql<number>`count(distinct ${customers.id})`,
       totalPointsCirculation: sql<number>`coalesce(sum(${customerLoyaltyProfiles.currentPoints}), 0)::numeric`,
       totalLifetimeEarned: sql<number>`coalesce(sum(${customerLoyaltyProfiles.lifetimePointsEarned}), 0)::numeric`,
       totalLifetimeRedeemed: sql<number>`coalesce(sum(${customerLoyaltyProfiles.lifetimePointsRedeemed}), 0)::numeric`,
     })
-    .from(customerLoyaltyProfiles)
-    .where(eq(customerLoyaltyProfiles.tenantId, tenantId));
+    .from(customers)
+    .leftJoin(
+      customerLoyaltyProfiles,
+      and(
+        eq(customers.id, customerLoyaltyProfiles.customerId),
+        eq(customers.tenantId, customerLoyaltyProfiles.tenantId)
+      )
+    )
+    .where(and(eq(customers.tenantId, tenantId), eq(customers.isActive, true)));
 
   const tiers = await db
     .select({
@@ -70,7 +78,8 @@ export const listLoyaltyMembers = async (tenantId: number, query: ListLoyaltyQue
   const offset = (page - 1) * limit;
 
   const conditions = [
-    eq(customerLoyaltyProfiles.tenantId, tenantId),
+    eq(customers.tenantId, tenantId),
+    eq(customers.isActive, true),
     query.tierId ? eq(customerLoyaltyProfiles.tierId, query.tierId) : undefined,
     query.search
       ? or(
@@ -84,16 +93,16 @@ export const listLoyaltyMembers = async (tenantId: number, query: ListLoyaltyQue
   const [countResult, memberRecords] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
-      .from(customerLoyaltyProfiles)
-      .innerJoin(customers, eq(customerLoyaltyProfiles.customerId, customers.id))
+      .from(customers)
+      .leftJoin(customerLoyaltyProfiles, eq(customers.id, customerLoyaltyProfiles.customerId))
       .where(and(...conditions)),
     db
       .select({
         profileId: customerLoyaltyProfiles.id,
-        currentPoints: customerLoyaltyProfiles.currentPoints,
-        lifetimePointsEarned: customerLoyaltyProfiles.lifetimePointsEarned,
-        lifetimePointsRedeemed: customerLoyaltyProfiles.lifetimePointsRedeemed,
-        enrolledAt: customerLoyaltyProfiles.enrolledAt,
+        currentPoints: sql<number>`coalesce(${customerLoyaltyProfiles.currentPoints}, ${customers.loyaltyPoints}, 0)`,
+        lifetimePointsEarned: sql<number>`coalesce(${customerLoyaltyProfiles.lifetimePointsEarned}, ${customers.loyaltyPoints}, 0)`,
+        lifetimePointsRedeemed: sql<number>`coalesce(${customerLoyaltyProfiles.lifetimePointsRedeemed}, 0)`,
+        enrolledAt: sql<string>`coalesce(${customerLoyaltyProfiles.enrolledAt}, ${customers.createdAt})`,
         customerId: customers.id,
         customerName: customers.name,
         customerPhone: customers.phone,
@@ -102,11 +111,11 @@ export const listLoyaltyMembers = async (tenantId: number, query: ListLoyaltyQue
         tierName: loyaltyTiers.name,
         tierId: loyaltyTiers.id,
       })
-      .from(customerLoyaltyProfiles)
-      .innerJoin(customers, eq(customerLoyaltyProfiles.customerId, customers.id))
+      .from(customers)
+      .leftJoin(customerLoyaltyProfiles, eq(customers.id, customerLoyaltyProfiles.customerId))
       .leftJoin(loyaltyTiers, eq(customerLoyaltyProfiles.tierId, loyaltyTiers.id))
       .where(and(...conditions))
-      .orderBy(desc(customerLoyaltyProfiles.currentPoints))
+      .orderBy(desc(sql`coalesce(${customerLoyaltyProfiles.currentPoints}, ${customers.loyaltyPoints}, 0)`))
       .limit(limit)
       .offset(offset),
   ]);
@@ -114,7 +123,13 @@ export const listLoyaltyMembers = async (tenantId: number, query: ListLoyaltyQue
   const total = Number(countResult[0]?.count || 0);
 
   return {
-    members: memberRecords,
+    members: memberRecords.map((m) => ({
+      ...m,
+      currentPoints: Number(m.currentPoints),
+      lifetimePointsEarned: Number(m.lifetimePointsEarned),
+      lifetimePointsRedeemed: Number(m.lifetimePointsRedeemed),
+      tierName: m.tierName || 'Base Member',
+    })),
     pagination: {
       page,
       limit,
@@ -126,7 +141,7 @@ export const listLoyaltyMembers = async (tenantId: number, query: ListLoyaltyQue
 
 export const adjustCustomerPoints = async (tenantId: number, userId: number, input: AdjustLoyaltyPointsInput) => {
   return await db.transaction(async (tx) => {
-    // 1. Find or create profile for customer
+    // 1. Locate or create profile for customer
     let [profile] = await tx
       .select()
       .from(customerLoyaltyProfiles)
@@ -139,24 +154,33 @@ export const adjustCustomerPoints = async (tenantId: number, userId: number, inp
       .limit(1);
 
     if (!profile) {
+      const [customerRow] = await tx
+        .select()
+        .from(customers)
+        .where(and(eq(customers.id, input.customerId), eq(customers.tenantId, tenantId)));
+
+      const startingPoints = customerRow?.loyaltyPoints || 0;
+
       const [newProf] = await tx
         .insert(customerLoyaltyProfiles)
         .values({
           tenantId,
           customerId: input.customerId,
-          currentPoints: 0,
-          lifetimePointsEarned: 0,
+          currentPoints: startingPoints,
+          lifetimePointsEarned: startingPoints,
           lifetimePointsRedeemed: 0,
         })
         .returning();
       profile = newProf;
     }
 
-    const newBalance = Math.max(0, profile.currentPoints + input.points);
-    const newEarned = input.points > 0 ? profile.lifetimePointsEarned + input.points : profile.lifetimePointsEarned;
-    const newRedeemed = input.points < 0 ? profile.lifetimePointsRedeemed + Math.abs(input.points) : profile.lifetimePointsRedeemed;
+    const signedDelta = input.action === 'CREDIT' ? Math.abs(input.points) : -Math.abs(input.points);
+    const balanceBefore = profile.currentPoints;
+    const newBalance = Math.max(0, balanceBefore + signedDelta);
+    const newEarned = signedDelta > 0 ? profile.lifetimePointsEarned + signedDelta : profile.lifetimePointsEarned;
+    const newRedeemed = signedDelta < 0 ? profile.lifetimePointsRedeemed + Math.abs(signedDelta) : profile.lifetimePointsRedeemed;
 
-    // 2. Automatically evaluate tier assignment based on lifetime earned points
+    // 2. Automated Tier Advancement Check
     const availableTiers = await tx
       .select()
       .from(loyaltyTiers)
@@ -170,7 +194,7 @@ export const adjustCustomerPoints = async (tenantId: number, userId: number, inp
       }
     }
 
-    // 3. Update Profile
+    // 3. Update customer_loyalty_profiles AND sync with customers.loyalty_points
     const [updatedProfile] = await tx
       .update(customerLoyaltyProfiles)
       .set({
@@ -183,19 +207,46 @@ export const adjustCustomerPoints = async (tenantId: number, userId: number, inp
       .where(eq(customerLoyaltyProfiles.id, profile.id))
       .returning();
 
-    // 4. Insert Ledger Transaction
+    await tx
+      .update(customers)
+      .set({
+        loyaltyPoints: newBalance,
+        updatedAt: new Date(),
+      })
+      .where(eq(customers.id, input.customerId));
+
+    const auditDescription = `[${input.reasonCode}] ${input.notes}${input.referenceNumber ? ` (Ref: ${input.referenceNumber})` : ''}`;
+
+    // 4. Record in loyaltyPointTransactions
     const [txRecord] = await tx
       .insert(loyaltyPointTransactions)
       .values({
         tenantId,
         customerId: input.customerId,
-        transactionType: input.transactionType,
-        points: input.points,
+        transactionType: 'MANUAL_ADJUSTMENT',
+        points: signedDelta,
         balanceAfter: newBalance,
-        description: input.description,
+        description: auditDescription,
         processedById: userId,
       })
       .returning();
+
+    // 5. Record in immutable loyaltyTransactionsLedger
+    await tx
+      .insert(loyaltyTransactionsLedger)
+      .values({
+        tenantId,
+        customerId: input.customerId,
+        entryType: 'MANUAL_ADJUSTMENT',
+        pointsDelta: signedDelta,
+        monetaryValueKes: '0.00',
+        balanceBefore,
+        balanceAfter: newBalance,
+        channel: 'ADMIN_BACKOFFICE',
+        auditReference: input.referenceNumber || `ADJ-${Date.now().toString().slice(-6)}`,
+        notes: auditDescription,
+        processedById: userId,
+      });
 
     return { profile: updatedProfile, transaction: txRecord };
   });

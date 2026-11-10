@@ -51,7 +51,7 @@ const getFleetDashboard = async (req, res) => {
             availableVehicles: vehicles.filter((v) => v.currentStatus === 'AVAILABLE').length,
             inTransitVehicles: vehicles.filter((v) => v.currentStatus === 'IN_TRANSIT').length,
             maintenanceVehicles: vehicles.filter((v) => v.currentStatus === 'MAINTENANCE').length,
-            coldChainVehicles: vehicles.filter((v) => v.temperatureControlled).length,
+            coldChainVehicles: vehicles.filter((v) => v.isRefrigerated).length,
         };
         res.status(200).json({
             status: 'success',
@@ -74,23 +74,25 @@ const createVehicle = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const { plateNumber, makeModel, vehicleType, driverName, driverPhone, maxPayloadKg, temperatureControlled, primaryBranchId, } = req.body;
-        if (!plateNumber || !makeModel || !driverName || !driverPhone) {
-            res.status(400).json({ status: 'error', message: 'Plate number, model, driver name, and phone are mandatory.' });
+        const { vehiclePlate, makeModel, vehicleType, driverName, driverPhone, maxPayloadKg, isRefrigerated, minTargetTemp, maxTargetTemp, branchId, } = req.body;
+        if (!vehiclePlate) {
+            res.status(400).json({ status: 'error', message: 'Vehicle registration plate is required.' });
             return;
         }
         const vehicle = await fleetRepo.createVehicle({
             tenantId,
-            primaryBranchId: primaryBranchId ? parseInt(primaryBranchId, 10) : null,
-            plateNumber: plateNumber.toUpperCase().trim(),
-            makeModel: makeModel.trim(),
-            vehicleType: vehicleType || 'VAN',
-            driverName: driverName.trim(),
-            driverPhone: driverPhone.trim(),
-            maxPayloadKg: maxPayloadKg ? parseFloat(maxPayloadKg).toFixed(2) : '1000.00',
-            temperatureControlled: Boolean(temperatureControlled),
+            branchId: branchId ? parseInt(branchId, 10) : null,
+            vehiclePlate: vehiclePlate.toUpperCase().trim(),
+            makeModel: makeModel?.trim() || 'Standard Fleet',
+            vehicleType: vehicleType || 'REEFER_VAN',
+            driverName: driverName?.trim(),
+            driverPhone: driverPhone?.trim(),
+            maxPayloadKg: maxPayloadKg ? parseFloat(maxPayloadKg).toFixed(2) : '1500.00',
+            isRefrigerated: Boolean(isRefrigerated),
+            minTargetTemp: minTargetTemp ? parseFloat(minTargetTemp).toFixed(2) : undefined,
+            maxTargetTemp: maxTargetTemp ? parseFloat(maxTargetTemp).toFixed(2) : undefined,
         });
-        res.status(201).json({ status: 'success', data: vehicle, message: 'Vehicle registered in fleet directory' });
+        res.status(201).json({ status: 'success', data: vehicle, message: 'Vehicle asset registered successfully' });
     }
     catch (error) {
         res.status(500).json({ status: 'error', message: error.message || 'Failed to register vehicle' });
@@ -100,28 +102,28 @@ exports.createVehicle = createVehicle;
 const dispatchVehicle = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const userId = req.user?.userId; // ✅ Matches '{ userId: number; tenantId: number; role: string; ... }'
+        const userId = req.user?.userId;
         if (!tenantId || !userId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const { transferId, vehicleId, departureOdometerKm, temperatureSetpointC, deliveryNotes } = req.body;
-        if (!transferId || !vehicleId) {
-            res.status(400).json({ status: 'error', message: 'Transfer ID and Vehicle ID are required for dispatch.' });
+        const { transferId, fleetVehicleId, departureOdometerKm, dispatchTempProbe, deliveryNotes } = req.body;
+        if (!transferId || !fleetVehicleId) {
+            res.status(400).json({ status: 'error', message: 'transferId and fleetVehicleId are required.' });
             return;
         }
         const result = await fleetRepo.dispatchVehicleForTransfer(tenantId, {
             transferId: parseInt(transferId, 10),
-            vehicleId: parseInt(vehicleId, 10),
+            fleetVehicleId: parseInt(fleetVehicleId, 10),
             dispatchedById: userId,
             departureOdometerKm: departureOdometerKm ? parseFloat(departureOdometerKm).toFixed(2) : undefined,
-            temperatureSetpointC: temperatureSetpointC ? parseFloat(temperatureSetpointC).toFixed(2) : undefined,
+            dispatchTempProbe: dispatchTempProbe ? parseFloat(dispatchTempProbe).toFixed(2) : undefined,
             deliveryNotes,
         });
-        res.status(200).json({ status: 'success', data: result, message: 'Consignment marked in-transit with assigned vehicle' });
+        res.status(200).json({ status: 'success', data: result, message: 'Consignment marked in transit' });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to dispatch vehicle' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to dispatch' });
     }
 };
 exports.dispatchVehicle = dispatchVehicle;

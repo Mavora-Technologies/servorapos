@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const billing_controller_1 = require("../controllers/billing.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', billing_controller_1.getBillingDetails);
+router.put('/subscription', billing_controller_1.putSubscription);
+router.get('/invoices', billing_controller_1.getInvoices);
+router.post('/payment-methods', billing_controller_1.postPaymentMethod);
+router.delete('/payment-methods/:id', billing_controller_1.deletePaymentMethod);
+router.post('/payment-methods/:id/set-default', billing_controller_1.postSetDefaultPaymentMethod);
+router.post('/invoices/settle', billing_controller_1.postSettleInvoice);
+exports.default = router;

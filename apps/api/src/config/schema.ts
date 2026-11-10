@@ -1752,6 +1752,10 @@ export const recipeIngredients = pgTable(
   ]
 );
 
+// ============================================================================
+// ENTERPRISE NOTIFICATIONS & ACTIONABLE ESCALATION FEED (WORKDAY / JOULE PARADIGM)
+// ============================================================================
+
 export const notifications = pgTable(
   'notifications',
   {
@@ -1761,20 +1765,39 @@ export const notifications = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'cascade' }),
     userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }), // Nullable = broadcast to tenant/branch
+    
+    // Core Classification & Urgency
     title: varchar('title', { length: 255 }).notNull(),
     detail: text('detail').notNull(),
     severity: varchar('severity', { length: 30 }).default('INFO').notNull(), // 'CRITICAL', 'WARNING', 'INFO', 'SUCCESS'
-    module: varchar('module', { length: 50 }).default('SYSTEM').notNull(), // 'INVENTORY', 'KDS', 'POS', 'FINANCE', 'AUTH'
-    entityType: varchar('entity_type', { length: 100 }), // e.g. 'inventory_items', 'orders'
-    entityId: varchar('entity_id', { length: 100 }), // e.g. item ID or order number
-    actionUrl: varchar('action_url', { length: 255 }), // Deep link to module, e.g. '/inventory/items'
+    module: varchar('module', { length: 50 }).default('SYSTEM').notNull(), // 'WORKFORCE_HCM', 'INVENTORY_SCM', 'KDS', 'POS', 'FINANCE', 'SECURITY'
+    category: varchar('category', { length: 50 }).default('ACTION_REQUIRED').notNull(), // 'ACTION_REQUIRED', 'FYI_STREAM', 'COMPLIANCE_AUDIT'
+    
+    // Deep Linking & Target Association
+    entityType: varchar('entity_type', { length: 100 }), // e.g. 'purchase_orders', 'shift_schedules', 'orders'
+    entityId: varchar('entity_id', { length: 100 }), // e.g. PO-AI-10293, orderId
+    actionUrl: varchar('action_url', { length: 255 }), // e.g. '/ai-assistant/inventory'
+    
+    // Enterprise Actionable Task Payload
+    actionPayload: jsonb('action_payload').$type<{
+      actionCode?: string; // e.g. 'APPROVE_OVERTIME', 'DISPATCH_PO', 'RESOLVE_TILL'
+      buttonLabel?: string;
+      apiEndpoint?: string;
+      resolutionNotes?: string;
+    }>(),
+    
+    // Lifecycle & Audit State
     isRead: boolean('is_read').default(false).notNull(),
+    isResolved: boolean('is_resolved').default(false).notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedByUserId: integer('resolved_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('notifications_tenant_idx').on(t.tenantId),
     index('notifications_unread_idx').on(t.tenantId, t.isRead),
     index('notifications_severity_idx').on(t.tenantId, t.severity),
+    index('notifications_category_idx').on(t.tenantId, t.category),
   ]
 );
 
@@ -3278,12 +3301,18 @@ export const loyaltyRewardsCatalog = pgTable(
     tenantId: integer('tenant_id')
       .references(() => tenants.id, { onDelete: 'cascade' })
       .notNull(),
-    name: varchar('name', { length: 150 }).notNull(), // e.g. "Free Artisan Coffee", "KES 500 Discount Voucher"
+    name: varchar('name', { length: 150 }).notNull(),
     description: text('description'),
     pointsCost: integer('points_cost').notNull(),
-    rewardType: varchar('reward_type', { length: 50 }).default('DISCOUNT_FIXED').notNull(), // 'DISCOUNT_FIXED', 'PERCENTAGE_OFF', 'FREE_MENU_ITEM'
-    rewardValue: decimal('reward_value', { precision: 12, scale: 2 }).default('0.00').notNull(), // monetary value or %
+    rewardType: varchar('reward_type', { length: 50 }).default('DISCOUNT_FIXED').notNull(), // 'DISCOUNT_FIXED', 'PERCENTAGE_OFF', 'FREE_MENU_ITEM', 'EXPERIENCE_PERK'
+    rewardValue: decimal('reward_value', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    maxDiscountCap: decimal('max_discount_cap', { precision: 12, scale: 2 }), // Cap for percentage discounts
     menuItemId: integer('menu_item_id').references(() => menuItems.id, { onDelete: 'set null' }),
+    minTierId: integer('min_tier_id').references(() => loyaltyTiers.id, { onDelete: 'set null' }), // Tier clearance requirement
+    maxRedemptionsPerMember: integer('max_redemptions_per_member'),
+    totalInventoryQuota: integer('total_inventory_quota'),
+    startDate: timestamp('start_date', { withTimezone: true }),
+    endDate: timestamp('end_date', { withTimezone: true }),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -3291,6 +3320,7 @@ export const loyaltyRewardsCatalog = pgTable(
   (t) => [
     index('loyalty_rewards_tenant_idx').on(t.tenantId),
     index('loyalty_rewards_active_idx').on(t.tenantId, t.isActive),
+    index('loyalty_rewards_tier_idx').on(t.minTierId),
   ]
 );
 
@@ -3330,5 +3360,593 @@ export const loyaltyTransactionsLedger = pgTable(
     index('loyalty_ledger_customer_idx').on(t.customerId),
     index('loyalty_ledger_type_idx').on(t.tenantId, t.entryType),
     index('loyalty_ledger_created_idx').on(t.tenantId, t.createdAt),
+  ]
+);
+
+// ============================================================================
+// CUSTOMER FEEDBACK, CSAT & VOICE AUDIT (CRM / SERVICE EXCELLENCE)
+// ============================================================================
+
+export const customerFeedback = pgTable(
+  'customer_feedback',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .notNull(),
+    orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    staffId: integer('staff_id').references(() => users.id, { onDelete: 'set null' }), // Attributed server/cashier
+
+    // Metrics & Classification
+    feedbackCategory: varchar('feedback_category', { length: 50 }).notNull(), // 'FOOD_QUALITY', 'SERVICE_SPEED', 'CLEANLINESS', 'ORDER_ACCURACY', 'STAFF_COURTESY', 'VALUE_PRICE'
+    rating: integer('rating').notNull(), // 1 to 5 Stars
+    npsScore: integer('nps_score'), // 0 to 10 (Net Promoter Score)
+    sentiment: varchar('sentiment', { length: 20 }).default('NEUTRAL').notNull(), // 'POSITIVE', 'NEUTRAL', 'NEGATIVE'
+
+    // Status & Closed-Loop SLA
+    channel: varchar('channel', { length: 30 }).default('TABLE_QR').notNull(), // 'TABLE_QR', 'POS_TERMINAL', 'ONLINE_RECEIPT', 'DIRECT_INQUIRY', 'MANAGER_INTERVIEW'
+    status: varchar('status', { length: 30 }).default('NEW').notNull(), // 'NEW', 'UNDER_REVIEW', 'ACTION_TAKEN', 'RESOLVED', 'CLOSED_DISMISSED'
+    title: varchar('title', { length: 200 }).notNull(),
+    comments: text('comments').notNull(),
+
+    // Escalation & Resolution Audit
+    actionTaken: text('action_taken'),
+    assignedToUserId: integer('assigned_to_user_id').references(() => users.id, { onDelete: 'set null' }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('feedback_tenant_idx').on(t.tenantId),
+    index('feedback_customer_idx').on(t.customerId),
+    index('feedback_branch_idx').on(t.branchId),
+    index('feedback_status_idx').on(t.tenantId, t.status),
+    index('feedback_rating_idx').on(t.tenantId, t.rating),
+  ]
+);
+
+// ============================================================================
+// MARKETING CAMPAIGNS & AUDIENCE ENGAGEMENT
+// ============================================================================
+
+export const marketingCampaigns = pgTable(
+  'marketing_campaigns',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 255 }).notNull(),
+    code: varchar('code', { length: 50 }).notNull(), // e.g., 'CMP-WEEKEND-BRUNCH'
+    objective: varchar('objective', { length: 100 }).default('REVENUE_GROWTH').notNull(), // 'REVENUE_GROWTH', 'CUSTOMER_RETENTION', 'LOYALTY_ACCRUAL', 'BRAND_AWARENESS'
+    channel: varchar('channel', { length: 50 }).default('SMS').notNull(), // 'SMS', 'EMAIL', 'PUSH_NOTIFICATION', 'OMNICHANNEL'
+    targetSegment: varchar('target_segment', { length: 100 }).default('ALL_CUSTOMERS').notNull(), // 'ALL_CUSTOMERS', 'VIP_MEMBERS', 'LAPSED_CUSTOMERS', 'HIGH_SPENDERS', 'CORPORATE'
+    status: varchar('status', { length: 50 }).default('DRAFT').notNull(), // 'DRAFT', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'PAUSED'
+    
+    // Financials & Offer Payload
+    budgetKes: decimal('budget_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    attributedRevenueKes: decimal('attributed_revenue_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    promoCode: varchar('promo_code', { length: 50 }),
+    discountPercentage: integer('discount_percentage'),
+    messageContent: text('message_content').notNull(),
+    
+    // Performance Funnel Telemetry
+    recipientsCount: integer('recipients_count').default(0).notNull(),
+    deliveredCount: integer('delivered_count').default(0).notNull(),
+    clickedCount: integer('clicked_count').default(0).notNull(),
+    convertedCount: integer('converted_count').default(0).notNull(),
+    
+    // Schedule Timeline
+    startDate: timestamp('start_date', { withTimezone: true }),
+    endDate: timestamp('end_date', { withTimezone: true }),
+    createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('campaigns_tenant_idx').on(t.tenantId),
+    index('campaigns_status_idx').on(t.tenantId, t.status),
+    index('campaigns_channel_idx').on(t.tenantId, t.channel),
+  ]
+);
+
+export const campaignRecipientsLog = pgTable(
+  'campaign_recipients_log',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    campaignId: integer('campaign_id')
+      .references(() => marketingCampaigns.id, { onDelete: 'cascade' })
+      .notNull(),
+    customerId: integer('customer_id')
+      .references(() => customers.id, { onDelete: 'cascade' })
+      .notNull(),
+    deliveryStatus: varchar('delivery_status', { length: 50 }).default('SENT').notNull(), // 'SENT', 'DELIVERED', 'FAILED', 'CLICKED', 'CONVERTED'
+    sentAt: timestamp('sent_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('campaign_recipients_campaign_idx').on(t.campaignId),
+    index('campaign_recipients_tenant_idx').on(t.tenantId),
+  ]
+);
+
+// ============================================================================
+// MARKETING TEMPLATES & REUSABLE MERGE-TAG COPIES
+// ============================================================================
+
+export const marketingTemplates = pgTable(
+  'marketing_templates',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    name: varchar('name', { length: 150 }).notNull(), // e.g., "Weekend Dining Reactivation", "VIP Birthday Milestone"
+    channel: varchar('channel', { length: 50 }).default('SMS').notNull(), // 'SMS', 'EMAIL', 'PUSH_NOTIFICATION'
+    objective: varchar('objective', { length: 100 }).default('REVENUE_GROWTH').notNull(),
+    subjectLine: varchar('subject_line', { length: 255 }), // Used for Email
+    bodyTemplate: text('body_template').notNull(), // Contains merge tags: {{customer.firstName}}, {{promo.code}}, {{promo.discountPercent}}
+    suggestedPromoPrefix: varchar('suggested_promo_prefix', { length: 20 }),
+    defaultDiscountPercentage: integer('default_discount_percentage'),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('mkt_templates_tenant_idx').on(t.tenantId),
+    index('mkt_templates_channel_idx').on(t.tenantId, t.channel),
+  ]
+);
+
+// ============================================================================
+// UNIQUE DYNAMIC PROMO CODES & POINT-OF-SALE DISCOUNTS
+// ============================================================================
+
+export const promotionalDiscounts = pgTable(
+  'promotional_discounts',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    campaignId: integer('campaign_id').references(() => marketingCampaigns.id, { onDelete: 'set null' }),
+    code: varchar('code', { length: 50 }).notNull(),
+    discountType: varchar('discount_type', { length: 50 }).default('PERCENTAGE').notNull(), // 'PERCENTAGE', 'FIXED_AMOUNT'
+    discountValue: decimal('discount_value', { precision: 12, scale: 2 }).notNull(),
+    minOrderSubtotalKes: decimal('min_order_subtotal_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    maxDiscountCapKes: decimal('max_discount_cap_kes', { precision: 12, scale: 2 }),
+    maxUsageCount: integer('max_usage_count').default(100).notNull(),
+    currentUsageCount: integer('current_usage_count').default(0).notNull(),
+    startDate: timestamp('start_date', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('promo_discounts_tenant_idx').on(t.tenantId),
+    index('promo_discounts_code_idx').on(t.tenantId, t.code),
+    index('promo_discounts_active_idx').on(t.tenantId, t.isActive),
+  ]
+);
+
+// ============================================================================
+// SERVORA COPILOT & AI AGENT CONVERSATIONS (ENTERPRISE HCM / ERP AI)
+// ============================================================================
+
+export const aiAssistantSessions = pgTable(
+  'ai_assistant_sessions',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    userId: integer('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    title: varchar('title', { length: 255 }).default('New Strategic Inquiry').notNull(),
+    scopeDomain: varchar('scope_domain', { length: 50 }).default('GENERAL_OPS').notNull(), // 'GENERAL_OPS', 'WORKFORCE_HCM', 'INVENTORY_SUPPLY', 'FINANCE_TREASURY', 'GUEST_CRM'
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('ai_sessions_tenant_idx').on(t.tenantId),
+    index('ai_sessions_user_idx').on(t.tenantId, t.userId),
+  ]
+);
+
+export const aiAssistantMessages = pgTable(
+  'ai_assistant_messages',
+  {
+    id: serial('id').primaryKey(),
+    sessionId: integer('session_id')
+      .references(() => aiAssistantSessions.id, { onDelete: 'cascade' })
+      .notNull(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    senderRole: varchar('sender_role', { length: 20 }).notNull(), // 'USER', 'ASSISTANT', 'SYSTEM_TELEMETRY'
+    content: text('content').notNull(),
+    
+    // Governed Agentic Payload
+    toolCallIntent: varchar('tool_call_intent', { length: 80 }), // e.g. 'ANALYZE_LABOR_EFFICIENCY', 'PREDICT_STOCK_RUNOUT', 'GENERATE_RETENTION_CAMPAIGN'
+    structuredData: jsonb('structured_data').$type<Record<string, any>>(),
+    suggestedActions: jsonb('suggested_actions').$type<Array<{ label: string; actionCode: string; payload?: any }>>(),
+    confidenceScore: decimal('confidence_score', { precision: 4, scale: 2 }), // e.g. 0.96
+    tokensUsed: integer('tokens_used').default(0),
+    latencyMs: integer('latency_ms').default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('ai_messages_session_idx').on(t.sessionId),
+    index('ai_messages_tenant_idx').on(t.tenantId),
+  ]
+);
+
+// ============================================================================
+// DEMAND FORECASTING & WORKFORCE CAPACITY PLANNING (HCM / PREDICTIVE WFM)
+// ============================================================================
+
+export const demandForecastSnapshots = pgTable(
+  'demand_forecast_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    forecastDate: timestamp('forecast_date', { withTimezone: true }).notNull(),
+    dayOfWeek: varchar('day_of_week', { length: 20 }).notNull(), // 'MONDAY', 'TUESDAY', etc.
+    
+    // Core Projected Demand Drivers
+    projectedCovers: integer('projected_covers').notNull(),
+    projectedGrossSalesKes: decimal('projected_gross_sales_kes', { precision: 12, scale: 2 }).notNull(),
+    historicalActualSalesKes: decimal('historical_actual_sales_kes', { precision: 12, scale: 2 }),
+    
+    // Workforce & Capacity Requirements
+    recommendedFohLaborHours: numeric('recommended_foh_labor_hours', { precision: 6, scale: 2 }).notNull(),
+    recommendedBohLaborHours: numeric('recommended_boh_labor_hours', { precision: 6, scale: 2 }).notNull(),
+    scheduledLaborHours: numeric('scheduled_labor_hours', { precision: 6, scale: 2 }).default('0.00').notNull(),
+    optimalStaffingHeadcount: integer('optimal_staffing_headcount').notNull(),
+    laborCostBudgetKes: decimal('labor_cost_budget_kes', { precision: 12, scale: 2 }).notNull(),
+    
+    // Statistical Accuracy & Event Weighting
+    confidenceScore: decimal('confidence_score', { precision: 4, scale: 2 }).default('0.92').notNull(), // e.g. 0.94 (94%)
+    weatherFactor: varchar('weather_factor', { length: 50 }).default('CLEAR_NORMAL').notNull(), // 'CLEAR_NORMAL', 'RAIN_HEAVY', 'HEATWAVE', 'COLD_SNAP'
+    localEventModifier: varchar('local_event_modifier', { length: 150 }), // e.g., 'Payday Weekend', 'Public Holiday', 'Soccer Derby'
+    varianceTolerancePct: numeric('variance_tolerance_pct', { precision: 5, scale: 2 }).default('5.00').notNull(),
+    
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('demand_forecast_tenant_idx').on(t.tenantId),
+    index('demand_forecast_branch_idx').on(t.branchId),
+    index('demand_forecast_date_idx').on(t.tenantId, t.forecastDate),
+  ]
+);
+
+export const hourlyForecastIntervals = pgTable(
+  'hourly_forecast_intervals',
+  {
+    id: serial('id').primaryKey(),
+    snapshotId: integer('snapshot_id')
+      .references(() => demandForecastSnapshots.id, { onDelete: 'cascade' })
+      .notNull(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    hourOfDay: integer('hour_of_day').notNull(), // 0 to 23
+    projectedGuestCheckouts: integer('projected_guest_checkouts').notNull(),
+    projectedSalesKes: decimal('projected_sales_kes', { precision: 12, scale: 2 }).notNull(),
+    requiredServers: integer('required_servers').notNull(),
+    requiredLineCooks: integer('required_line_cooks').notNull(),
+    peakLoadIndicator: boolean('peak_load_indicator').default(false).notNull(),
+  },
+  (t) => [
+    index('hourly_forecast_snapshot_idx').on(t.snapshotId),
+    index('hourly_forecast_hour_idx').on(t.snapshotId, t.hourOfDay),
+  ]
+);
+
+// ============================================================================
+// PREDICTIVE PURCHASING & REPLENISHMENT INTELLIGENCE (SCM / AI AGENT)
+// ============================================================================
+
+export const predictiveInventoryReplenishments = pgTable(
+  'predictive_inventory_replenishments',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    inventoryItemId: integer('inventory_item_id')
+      .references(() => inventoryItems.id, { onDelete: 'cascade' })
+      .notNull(),
+    supplierId: integer('supplier_id').references(() => suppliers.id, { onDelete: 'set null' }),
+    purchaseOrderId: integer('purchase_order_id').references(() => purchaseOrders.id, { onDelete: 'set null' }),
+
+    // Current Telemetry & Predictive Horizon
+    currentStockLevel: numeric('current_stock_level', { precision: 12, scale: 2 }).notNull(),
+    dailyBurnRate: numeric('daily_burn_rate', { precision: 12, scale: 2 }).notNull(),
+    daysOfInventoryRemaining: numeric('days_of_inventory_remaining', { precision: 6, scale: 1 }).notNull(),
+    forecastedRunoutDate: timestamp('forecasted_runout_date', { withTimezone: true }).notNull(),
+
+    // Restocking Recommendations & Economic Order Calculations
+    recommendedOrderQty: numeric('recommended_order_qty', { precision: 12, scale: 2 }).notNull(),
+    unitOfMeasure: varchar('unit_of_measure', { length: 30 }).default('KG').notNull(),
+    estimatedUnitCostKes: decimal('estimated_unit_cost_kes', { precision: 12, scale: 2 }).notNull(),
+    totalProjectedCostKes: decimal('total_projected_cost_kes', { precision: 12, scale: 2 }).notNull(),
+    supplierLeadTimeDays: integer('supplier_lead_time_days').default(3).notNull(),
+
+    // Urgency, Risk Classification & Action Status
+    urgencyLevel: varchar('urgency_level', { length: 30 }).default('MEDIUM').notNull(), // 'CRITICAL', 'HIGH', 'MEDIUM', 'STABLE'
+    approvalStatus: varchar('approval_status', { length: 30 }).default('PENDING_REVIEW').notNull(), // 'PENDING_REVIEW', 'APPROVED_PO_CREATED', 'REJECTED_DISMISSED', 'AUTO_DISPATCHED'
+    aiReasoningNote: text('ai_reasoning_note').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('pred_replenish_tenant_idx').on(t.tenantId),
+    index('pred_replenish_item_idx').on(t.inventoryItemId),
+    index('pred_replenish_urgency_idx').on(t.tenantId, t.urgencyLevel),
+    index('pred_replenish_status_idx').on(t.tenantId, t.approvalStatus),
+  ]
+);
+
+// ============================================================================
+// MENU ENGINEERING MATRIX & PROFITABILITY OPTIMIZATION (AI AGENT)
+// ============================================================================
+
+export const menuEngineeringSnapshots = pgTable(
+  'menu_engineering_snapshots',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    menuItemId: integer('menu_item_id')
+      .references(() => menuItems.id, { onDelete: 'cascade' })
+      .notNull(),
+
+    // Financial & Sales Volume Metrics
+    unitsSold: integer('units_sold').default(0).notNull(),
+    grossRevenueKes: decimal('gross_revenue_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    unitSellingPriceKes: decimal('unit_selling_price_kes', { precision: 12, scale: 2 }).notNull(),
+    unitFoodCostKes: decimal('unit_food_cost_kes', { precision: 12, scale: 2 }).notNull(),
+    contributionMarginKes: decimal('contribution_margin_kes', { precision: 12, scale: 2 }).notNull(),
+    foodCostPercentage: numeric('food_cost_percentage', { precision: 5, scale: 2 }).notNull(),
+
+    // Kasavana & Smith Classification Matrix
+    popularitySharePct: numeric('popularity_share_pct', { precision: 5, scale: 2 }).notNull(),
+    matrixClassification: varchar('matrix_classification', { length: 30 }).notNull(), // 'STAR', 'PLOWHORSE', 'PUZZLE', 'DOG'
+
+    // AI Strategic Recommendations
+    suggestedPriceAdjustmentKes: decimal('suggested_price_adjustment_kes', { precision: 12, scale: 2 }).default('0.00'),
+    aiRecommendationType: varchar('ai_recommendation_type', { length: 50 }).notNull(), // 'MAINTAIN_PRIME_SPOTLIGHT', 'REPRICE_UPWARD', 'PORTION_RE_ENGINEER', 'PROMOTIONAL_UPSELL', 'RETIRE_ITEM'
+    strategicActionNote: text('strategic_action_note').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('menu_eng_tenant_idx').on(t.tenantId),
+    index('menu_eng_item_idx').on(t.menuItemId),
+    index('menu_eng_class_idx').on(t.tenantId, t.matrixClassification),
+  ]
+);
+
+// ============================================================================
+// WORKFLOW AUTOMATION ENGINE & SYSTEM TRIGGERS (HCM / ERP ORCHESTRATION)
+// ============================================================================
+
+export const workflowRules = pgTable(
+  'workflow_rules',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 255 }).notNull(),
+    description: text('description'),
+    domain: varchar('domain', { length: 50 }).default('WORKFORCE_HCM').notNull(),
+    triggerEvent: varchar('trigger_event', { length: 80 }).notNull(),
+
+    // Evaluation Logic - support optional unit metadata
+    conditionLogic: jsonb('condition_logic').$type<{
+      field: string;
+      operator: 'GREATER_THAN' | 'LESS_THAN' | 'EQUALS' | 'CONTAINS';
+      value: any;
+      unit?: string;
+    }>().notNull(),
+
+    // Action Actuators
+    actionType: varchar('action_type', { length: 80 }).notNull(),
+    actionPayload: jsonb('action_payload').$type<Record<string, any>>().notNull(),
+
+    // State & Execution Telemetry
+    isActive: boolean('is_active').default(true).notNull(),
+    executionCount: integer('execution_count').default(0).notNull(),
+    lastTriggeredAt: timestamp('last_triggered_at', { withTimezone: true }),
+    createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('wf_rules_tenant_idx').on(t.tenantId),
+    index('wf_rules_domain_idx').on(t.tenantId, t.domain),
+    index('wf_rules_active_idx').on(t.tenantId, t.isActive),
+  ]
+);
+
+export const workflowExecutionLogs = pgTable(
+  'workflow_execution_logs',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    ruleId: integer('rule_id')
+      .references(() => workflowRules.id, { onDelete: 'cascade' })
+      .notNull(),
+    executionStatus: varchar('execution_status', { length: 30 }).default('SUCCESS').notNull(), // 'SUCCESS', 'FAILED', 'SKIPPED'
+    triggerPayloadSnapshot: jsonb('trigger_payload_snapshot').$type<Record<string, any>>(),
+    executionOutput: text('execution_output').notNull(),
+    executionDurationMs: integer('execution_duration_ms').default(0).notNull(),
+    executedAt: timestamp('executed_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('wf_logs_rule_idx').on(t.ruleId),
+    index('wf_logs_tenant_idx').on(t.tenantId),
+  ]
+);
+
+// ============================================================================
+// ENTERPRISE EXPENSE MANAGEMENT & EMPLOYEE DISBURSEMENTS (HCM / FIN)
+// ============================================================================
+
+export const expenseCategories = pgTable(
+  'expense_categories',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    code: varchar('code', { length: 50 }).notNull(), // e.g. "TRAVEL_MILEAGE", "UTILITIES_ELECTRIC", "KITCHEN_MAINTENANCE"
+    name: varchar('name', { length: 150 }).notNull(), // e.g. "Staff Transportation & Per Diem"
+    glAccountCode: varchar('gl_account_code', { length: 50 }).default('6100').notNull(), // General Ledger Account Code
+    requiresReceipt: boolean('requires_receipt').default(true).notNull(),
+    maxSingleLimit: decimal('max_single_limit', { precision: 12, scale: 2 }).default('50000.00').notNull(),
+    taxDeductible: boolean('tax_deductible').default(true).notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('exp_cat_tenant_code_idx').on(t.tenantId, t.code),
+    index('exp_cat_tenant_idx').on(t.tenantId),
+  ]
+);
+
+export const expenses = pgTable(
+  'expenses',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    categoryId: integer('category_id')
+      .notNull()
+      .references(() => expenseCategories.id, { onDelete: 'restrict' }),
+
+    // Expense Voucher & Metadata
+    voucherNumber: varchar('voucher_number', { length: 50 }).notNull(), // e.g. "EXP-2026-0001"
+    expenseType: varchar('expense_type', { length: 40 }).default('EMPLOYEE_REIMBURSEMENT').notNull(), // 'EMPLOYEE_REIMBURSEMENT', 'STORE_OPERATIONAL', 'PETTY_CASH_DISBURSEMENT'
+    claimantId: integer('claimant_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }), // Staff member claiming or logging expense
+    payeeName: varchar('payee_name', { length: 255 }), // Purveyor, utility provider, or employee name
+    expenseDate: date('expense_date').notNull(),
+
+    // Financials & Currency
+    currency: varchar('currency', { length: 10 }).default('KES').notNull(),
+    amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+    taxAmount: decimal('tax_amount', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    totalAmount: decimal('total_amount', { precision: 12, scale: 2 }).notNull(),
+    paymentMethod: varchar('payment_method', { length: 50 }).default('CASH_DRAWER').notNull(), // 'CASH_DRAWER', 'MPESA_B2C', 'BANK_WIRE', 'PETTY_CASH'
+
+    // Documentation & KRA Compliance
+    merchantTaxPin: varchar('merchant_tax_pin', { length: 50 }), // Supplier KRA PIN / ETR Invoice receipt number
+    receiptNumber: varchar('receipt_number', { length: 100 }),
+    receiptAttachmentUrl: text('receipt_attachment_url'),
+    description: text('description').notNull(),
+
+    // Multi-Tier Enterprise Approval Workflow
+    status: varchar('status', { length: 30 }).default('SUBMITTED').notNull(), // 'DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'PAID_DISBURSED'
+    approvedByUserId: integer('approved_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+
+    // Disbursement / Payment Settlement
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    paymentReference: varchar('payment_reference', { length: 100 }), // M-Pesa B2C Transaction Code or Bank Cheque / Wire Ref
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('expenses_tenant_voucher_idx').on(t.tenantId, t.voucherNumber),
+    index('expenses_tenant_status_idx').on(t.tenantId, t.status),
+    index('expenses_tenant_date_idx').on(t.tenantId, t.expenseDate),
+    index('expenses_claimant_idx').on(t.claimantId),
+  ]
+);
+
+// ============================================================================
+// FINANCIAL ADJUSTMENTS, GL WRITE-OFFS & MAKER-CHECKER AUDIT (FIN / HCM)
+// ============================================================================
+
+export const financialAdjustments = pgTable(
+  'financial_adjustments',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+
+    // Voucher Identification & Classification
+    adjustmentNumber: varchar('adjustment_number', { length: 50 }).notNull(), // e.g. "ADJ-2026-0001"
+    adjustmentType: varchar('adjustment_type', { length: 50 }).notNull(),
+    // 'TILL_VARIANCE_WRITE_OFF', 'PAYROLL_LABOR_DEDUCTION', 'TIP_POOL_CORRECTION', 'BANK_RECON_VARIANCE', 'VENDOR_AP_CREDIT', 'GUEST_AR_WRITE_DOWN'
+
+    // Related Relational Records (Optional Linkages)
+    shiftId: integer('shift_id').references(() => cashierShifts.id, { onDelete: 'set null' }),
+    attributedUserId: integer('attributed_user_id').references(() => users.id, { onDelete: 'set null' }), // Staff member impacted or accountable
+    createdById: integer('created_by_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }), // Maker
+
+    // Financial Value & General Ledger Mapping
+    amount: decimal('amount', { precision: 12, scale: 2 }).notNull(),
+    currency: varchar('currency', { length: 10 }).default('KES').notNull(),
+    adjustmentDirection: varchar('adjustment_direction', { length: 20 }).default('DEBIT').notNull(), // 'DEBIT' | 'CREDIT'
+    debitGlAccount: varchar('debit_gl_account', { length: 50 }).notNull(), // e.g. "5210 - Cash Over/Short Expense"
+    creditGlAccount: varchar('credit_gl_account', { length: 50 }).notNull(), // e.g. "1010 - Main Till Cash"
+
+    // Maker-Checker Lifecycle & Audit Approval
+    status: varchar('status', { length: 30 }).default('PENDING_APPROVAL').notNull(),
+    // 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'POSTED'
+    approvedByUserId: integer('approved_by_user_id').references(() => users.id, { onDelete: 'set null' }), // Checker
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    postedAt: timestamp('posted_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
+
+    // Compliance & Documentation
+    reasonCode: varchar('reason_code', { length: 80 }).notNull(), // e.g. 'DRAWER_DISCREPANCY', 'COUNTERFEIT_NOTE', 'BANK_FEE', 'SYSTEM_ROUNDING'
+    justificationNotes: text('justification_notes').notNull(),
+    supportingDocumentUrl: text('supporting_document_url'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('fin_adj_tenant_number_idx').on(t.tenantId, t.adjustmentNumber),
+    index('fin_adj_tenant_status_idx').on(t.tenantId, t.status),
+    index('fin_adj_tenant_type_idx').on(t.tenantId, t.adjustmentType),
+    index('fin_adj_tenant_created_idx').on(t.tenantId, t.createdAt),
   ]
 );

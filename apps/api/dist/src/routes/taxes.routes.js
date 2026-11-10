@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const taxes_controller_1 = require("../controllers/taxes.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/overview', taxes_controller_1.getTaxOverview);
+router.get('/invoices', taxes_controller_1.getFiscalInvoices);
+router.patch('/settings', taxes_controller_1.patchTaxSettings);
+router.post('/retry', taxes_controller_1.postRetryFiscalization);
+exports.default = router;

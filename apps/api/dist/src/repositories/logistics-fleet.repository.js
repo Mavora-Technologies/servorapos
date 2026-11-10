@@ -1,30 +1,32 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.dispatchVehicleForTransfer = exports.updateVehicleStatus = exports.createVehicle = exports.listActiveFleetDispatches = exports.listVehiclesByTenant = void 0;
+exports.dispatchVehicleForTransfer = exports.createVehicle = exports.listActiveFleetDispatches = exports.listVehiclesByTenant = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
 const listVehiclesByTenant = async (tenantId) => {
     return await db_1.db
         .select({
-        id: schema_1.logisticsVehicles.id,
-        plateNumber: schema_1.logisticsVehicles.plateNumber,
-        makeModel: schema_1.logisticsVehicles.makeModel,
-        vehicleType: schema_1.logisticsVehicles.vehicleType,
-        driverName: schema_1.logisticsVehicles.driverName,
-        driverPhone: schema_1.logisticsVehicles.driverPhone,
-        maxPayloadKg: schema_1.logisticsVehicles.maxPayloadKg,
-        temperatureControlled: schema_1.logisticsVehicles.temperatureControlled,
-        currentStatus: schema_1.logisticsVehicles.currentStatus,
-        primaryBranchId: schema_1.logisticsVehicles.primaryBranchId,
+        id: schema_1.logisticsFleet.id,
+        vehiclePlate: schema_1.logisticsFleet.vehiclePlate,
+        makeModel: schema_1.logisticsFleet.makeModel,
+        vehicleType: schema_1.logisticsFleet.vehicleType,
+        driverName: schema_1.logisticsFleet.driverName,
+        driverPhone: schema_1.logisticsFleet.driverPhone,
+        maxPayloadKg: schema_1.logisticsFleet.maxPayloadKg,
+        isRefrigerated: schema_1.logisticsFleet.isRefrigerated,
+        minTargetTemp: schema_1.logisticsFleet.minTargetTemp,
+        maxTargetTemp: schema_1.logisticsFleet.maxTargetTemp,
+        currentStatus: schema_1.logisticsFleet.currentStatus,
+        branchId: schema_1.logisticsFleet.branchId,
         branchName: schema_1.branches.name,
-        isActive: schema_1.logisticsVehicles.isActive,
-        updatedAt: schema_1.logisticsVehicles.updatedAt,
+        isActive: schema_1.logisticsFleet.isActive,
+        updatedAt: schema_1.logisticsFleet.updatedAt,
     })
-        .from(schema_1.logisticsVehicles)
-        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.primaryBranchId, schema_1.branches.id))
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.isActive, true)))
-        .orderBy((0, drizzle_orm_1.desc)(schema_1.logisticsVehicles.updatedAt));
+        .from(schema_1.logisticsFleet)
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.logisticsFleet.branchId, schema_1.branches.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.logisticsFleet.isActive, true)))
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.logisticsFleet.updatedAt));
 };
 exports.listVehiclesByTenant = listVehiclesByTenant;
 const listActiveFleetDispatches = async (tenantId) => {
@@ -36,15 +38,15 @@ const listActiveFleetDispatches = async (tenantId) => {
         dispatchStatus: schema_1.transferFleetDispatches.dispatchStatus,
         departureTime: schema_1.transferFleetDispatches.departureTime,
         arrivalTime: schema_1.transferFleetDispatches.arrivalTime,
-        temperatureSetpointC: schema_1.transferFleetDispatches.temperatureSetpointC,
-        plateNumber: schema_1.logisticsVehicles.plateNumber,
-        driverName: schema_1.logisticsVehicles.driverName,
-        driverPhone: schema_1.logisticsVehicles.driverPhone,
+        dispatchTempProbe: schema_1.transferFleetDispatches.dispatchTempProbe,
+        vehiclePlate: schema_1.logisticsFleet.vehiclePlate,
+        driverName: schema_1.logisticsFleet.driverName,
+        driverPhone: schema_1.logisticsFleet.driverPhone,
         sourceBranchName: (0, drizzle_orm_1.sql) `src_branch.name`,
         destBranchName: (0, drizzle_orm_1.sql) `dest_branch.name`,
     })
         .from(schema_1.transferFleetDispatches)
-        .innerJoin(schema_1.logisticsVehicles, (0, drizzle_orm_1.eq)(schema_1.transferFleetDispatches.vehicleId, schema_1.logisticsVehicles.id))
+        .innerJoin(schema_1.logisticsFleet, (0, drizzle_orm_1.eq)(schema_1.transferFleetDispatches.fleetVehicleId, schema_1.logisticsFleet.id))
         .innerJoin(schema_1.stockTransfers, (0, drizzle_orm_1.eq)(schema_1.transferFleetDispatches.transferId, schema_1.stockTransfers.id))
         .leftJoin((0, drizzle_orm_1.sql) `${schema_1.branches} as src_branch`, (0, drizzle_orm_1.sql) `src_branch.id = ${schema_1.stockTransfers.sourceBranchId}`)
         .leftJoin((0, drizzle_orm_1.sql) `${schema_1.branches} as dest_branch`, (0, drizzle_orm_1.sql) `dest_branch.id = ${schema_1.stockTransfers.destinationBranchId}`)
@@ -55,9 +57,19 @@ const listActiveFleetDispatches = async (tenantId) => {
 exports.listActiveFleetDispatches = listActiveFleetDispatches;
 const createVehicle = async (data) => {
     const [created] = await db_1.db
-        .insert(schema_1.logisticsVehicles)
+        .insert(schema_1.logisticsFleet)
         .values({
-        ...data,
+        tenantId: data.tenantId,
+        branchId: data.branchId ?? null,
+        vehiclePlate: data.vehiclePlate,
+        makeModel: data.makeModel,
+        vehicleType: data.vehicleType,
+        driverName: data.driverName || null,
+        driverPhone: data.driverPhone || null,
+        maxPayloadKg: data.maxPayloadKg,
+        isRefrigerated: data.isRefrigerated,
+        minTargetTemp: data.minTargetTemp || null,
+        maxTargetTemp: data.maxTargetTemp || null,
         currentStatus: 'AVAILABLE',
         isActive: true,
     })
@@ -65,48 +77,44 @@ const createVehicle = async (data) => {
     return created;
 };
 exports.createVehicle = createVehicle;
-const updateVehicleStatus = async (tenantId, vehicleId, status) => {
-    const [updated] = await db_1.db
-        .update(schema_1.logisticsVehicles)
-        .set({ currentStatus: status, updatedAt: new Date() })
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.id, vehicleId), (0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.tenantId, tenantId)))
-        .returning();
-    return updated;
-};
-exports.updateVehicleStatus = updateVehicleStatus;
 const dispatchVehicleForTransfer = async (tenantId, data) => {
     return await db_1.db.transaction(async (tx) => {
-        // 1. Check & set vehicle status to IN_TRANSIT
         const [vehicle] = await tx
             .select()
-            .from(schema_1.logisticsVehicles)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.id, data.vehicleId), (0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.tenantId, tenantId)))
+            .from(schema_1.logisticsFleet)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.id, data.fleetVehicleId), (0, drizzle_orm_1.eq)(schema_1.logisticsFleet.tenantId, tenantId)))
             .for('update');
         if (!vehicle)
             throw new Error('Vehicle not found.');
-        if (vehicle.currentStatus === 'IN_TRANSIT')
-            throw new Error('Vehicle is already assigned to an active route.');
+        if (vehicle.currentStatus === 'IN_TRANSIT') {
+            throw new Error(`Vehicle ${vehicle.vehiclePlate} is already in transit on another route.`);
+        }
         await tx
-            .update(schema_1.logisticsVehicles)
+            .update(schema_1.logisticsFleet)
             .set({ currentStatus: 'IN_TRANSIT', updatedAt: new Date() })
-            .where((0, drizzle_orm_1.eq)(schema_1.logisticsVehicles.id, vehicle.id));
-        // 2. Update stock transfer status to IN_TRANSIT
+            .where((0, drizzle_orm_1.eq)(schema_1.logisticsFleet.id, vehicle.id));
         await tx
             .update(schema_1.stockTransfers)
-            .set({ status: 'IN_TRANSIT', updatedAt: new Date() })
+            .set({
+            status: 'IN_TRANSIT',
+            carrierVehiclePlate: vehicle.vehiclePlate,
+            driverName: vehicle.driverName,
+            dispatchTempProbe: data.dispatchTempProbe || null,
+            dispatchedAt: new Date(),
+            updatedAt: new Date()
+        })
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.stockTransfers.id, data.transferId), (0, drizzle_orm_1.eq)(schema_1.stockTransfers.tenantId, tenantId)));
-        // 3. Create dispatch record
         const [dispatch] = await tx
             .insert(schema_1.transferFleetDispatches)
             .values({
             tenantId,
             transferId: data.transferId,
-            vehicleId: data.vehicleId,
+            fleetVehicleId: data.fleetVehicleId,
             dispatchedById: data.dispatchedById,
             dispatchStatus: 'IN_TRANSIT',
             departureTime: new Date(),
             departureOdometerKm: data.departureOdometerKm || null,
-            temperatureSetpointC: data.temperatureSetpointC || null,
+            dispatchTempProbe: data.dispatchTempProbe || null,
             deliveryNotes: data.deliveryNotes || null,
         })
             .returning();

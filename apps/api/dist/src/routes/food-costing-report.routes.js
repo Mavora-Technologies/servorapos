@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const food_costing_report_controller_1 = require("../controllers/food-costing-report.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', food_costing_report_controller_1.getFoodCostingReport);
+router.get('/export', food_costing_report_controller_1.exportFoodCostingReport);
+exports.default = router;

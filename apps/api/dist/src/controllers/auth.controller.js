@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMe = exports.login = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
-const schema_1 = require("../config/schema");
+const schema_1 = require("../config/schema"); // <-- Added roles here
 const auth_validator_1 = require("../validators/auth.validator");
 const auth_service_1 = require("../services/auth.service");
 const login = async (req, res) => {
@@ -44,6 +44,7 @@ const getMe = async (req, res) => {
             email: schema_1.users.email,
             role: schema_1.users.role,
             tenantId: schema_1.users.tenantId,
+            defaultBranchId: schema_1.users.defaultBranchId,
             businessName: schema_1.tenants.businessName,
             legalName: schema_1.tenants.legalName,
             kraPin: schema_1.tenants.kraPin,
@@ -60,8 +61,28 @@ const getMe = async (req, res) => {
             res.status(404).json({ status: 'error', message: 'User profile not found' });
             return;
         }
+        // Resolve dynamic permissions for the user's role
+        let effectivePermissions = [];
+        if (userRecord.role === 'SUPER_ADMIN' || userRecord.role === 'ADMIN') {
+            effectivePermissions = ['*'];
+        }
+        else if (userRecord.tenantId) {
+            const [roleRecord] = await db_1.db
+                .select({ permissions: schema_1.roles.permissions })
+                .from(schema_1.roles)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.roles.slug, userRecord.role), (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.roles.tenantId, userRecord.tenantId), (0, drizzle_orm_1.eq)(schema_1.roles.isSystemRole, true))))
+                .limit(1);
+            effectivePermissions =
+                roleRecord?.permissions && roleRecord.permissions.length > 0
+                    ? roleRecord.permissions
+                    : auth_service_1.DEFAULT_ROLE_PERMISSIONS[userRecord.role] ?? ['pos.access', 'help.view'];
+        }
+        // Resolve branch record
         let branchRecord = null;
         if (userRecord.tenantId) {
+            const branchQuery = userRecord.defaultBranchId
+                ? (0, drizzle_orm_1.eq)(schema_1.branches.id, userRecord.defaultBranchId)
+                : (0, drizzle_orm_1.eq)(schema_1.branches.tenantId, userRecord.tenantId);
             const [foundBranch] = await db_1.db
                 .select({
                 id: schema_1.branches.id,
@@ -76,7 +97,7 @@ const getMe = async (req, res) => {
                 receiptFooter: schema_1.branches.receiptFooter,
             })
                 .from(schema_1.branches)
-                .where((0, drizzle_orm_1.eq)(schema_1.branches.tenantId, userRecord.tenantId))
+                .where(branchQuery)
                 .limit(1);
             branchRecord = foundBranch;
         }
@@ -90,6 +111,7 @@ const getMe = async (req, res) => {
                     fullName: `${userRecord.firstName} ${userRecord.lastName}`.trim(),
                     email: userRecord.email,
                     role: userRecord.role,
+                    permissions: effectivePermissions,
                 },
                 business: {
                     id: userRecord.tenantId,

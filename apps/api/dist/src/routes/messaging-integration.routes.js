@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const messaging_integration_controller_1 = require("../controllers/messaging-integration.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', messaging_integration_controller_1.getMessagingSettings);
+router.post('/gateways', messaging_integration_controller_1.postIntegration);
+router.put('/gateways/:id', messaging_integration_controller_1.putIntegration);
+router.delete('/gateways/:id', messaging_integration_controller_1.deleteIntegration);
+router.post('/gateways/test-dispatch', messaging_integration_controller_1.postTestDispatch);
+router.post('/templates', messaging_integration_controller_1.postTemplate);
+router.put('/templates/:id', messaging_integration_controller_1.putTemplate);
+router.delete('/templates/:id', messaging_integration_controller_1.deleteTemplate);
+exports.default = router;

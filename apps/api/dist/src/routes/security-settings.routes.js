@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const security_settings_controller_1 = require("../controllers/security-settings.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', security_settings_controller_1.getSecurityOverview);
+router.put('/', security_settings_controller_1.putSecuritySettings);
+router.post('/sessions/revoke', security_settings_controller_1.postRevokeSession);
+router.post('/sessions/revoke-all', security_settings_controller_1.postRevokeAllSessions);
+exports.default = router;

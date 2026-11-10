@@ -1,0 +1,14 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const printer_controller_1 = require("../controllers/printer.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', printer_controller_1.getPrinters);
+router.post('/', printer_controller_1.postPrinter);
+router.put('/:id', printer_controller_1.putPrinter);
+router.delete('/:id', printer_controller_1.deletePrinter);
+router.post('/:id/ping', printer_controller_1.postPingPrinter);
+router.post('/test-print', printer_controller_1.postTestPrint);
+exports.default = router;

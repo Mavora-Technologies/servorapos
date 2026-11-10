@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const inventory_locations_controller_1 = require("../controllers/inventory-locations.controller");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', inventory_locations_controller_1.getLocationsTopology);
+router.post('/zones', inventory_locations_controller_1.createWarehouseZone);
+router.post('/bins', inventory_locations_controller_1.createWarehouseBin);
+exports.default = router;

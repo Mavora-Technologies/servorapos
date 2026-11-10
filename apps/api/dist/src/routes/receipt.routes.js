@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const receipt_controller_1 = require("../controllers/receipt.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', receipt_controller_1.getTemplates);
+router.post('/', receipt_controller_1.postTemplate);
+router.put('/:id', receipt_controller_1.putTemplate);
+router.delete('/:id', receipt_controller_1.deleteTemplate);
+router.post('/set-default', receipt_controller_1.setDefault);
+exports.default = router;

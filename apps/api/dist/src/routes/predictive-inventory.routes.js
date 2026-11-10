@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const predictive_inventory_controller_1 = require("../controllers/predictive-inventory.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', predictive_inventory_controller_1.getPredictiveInventoryOverview);
+router.post('/convert-po', predictive_inventory_controller_1.postConvertToPO);
+router.post('/dismiss', predictive_inventory_controller_1.postDismissRecommendation);
+exports.default = router;

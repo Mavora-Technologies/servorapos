@@ -100,7 +100,23 @@ import dataExportsRoutes from './routes/data-exports.routes';
 import customerRoutes from './routes/customer.routes';
 import loyaltyRoutes from './routes/loyalty.routes';
 import loyaltyTransactionsRoutes from './routes/loyalty-transactions.routes';
-
+import loyaltyRewardsRoutes from './routes/loyalty-rewards.routes';
+import customerFeedbackRoutes from './routes/customer-feedback.routes';
+import marketingHubRoutes from './routes/marketing-hub.routes';
+import marketingCampaignRoutes from './routes/marketing-campaign.routes';
+import marketingTemplateRoutes from './routes/marketing-template.routes';
+import promotionalDiscountRoutes from './routes/promotional-discount.routes';
+import aiAssistantRoutes from './routes/ai-assistant.routes';
+import forecastingRoutes from './routes/forecasting.routes';
+import predictiveInventoryRoutes from './routes/predictive-inventory.routes';
+import menuAnalysisRoutes from './routes/menu-analysis.routes';
+import workflowAutomationRoutes from './routes/workflow-automation.routes';
+import cashShiftsRoutes from './routes/cash-shifts.routes';
+import cashReconciliationRoutes from './routes/cash-reconciliation.routes';
+import expensesRoutes from './routes/expenses.routes';
+import payablesRoutes from './routes/payables.routes';
+import taxesRoutes from './routes/taxes.routes';
+import adjustmentsRoutes from './routes/adjustments.routes';
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
@@ -198,6 +214,13 @@ app.use('/api/v1/payments/mpesa', mpesaRoutes);
 app.use('/api/v1/payments/refunds', refundRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/cash-management/drawers', cashDrawerRoutes);
+app.use('/api/v1/cash-management/shifts', cashShiftsRoutes);
+app.use('/api/v1/cash-management/reconciliation', cashReconciliationRoutes);
+app.use('/api/v1/finance/expenses', expensesRoutes);
+app.use('/api/v1/finance/payables', payablesRoutes);
+app.use('/api/v1/finance/taxes', taxesRoutes);
+app.use('/api/v1/finance/adjustments', adjustmentsRoutes);
+
 
 // 8. Analytics & Real-Time Events
 app.use('/api/v1/analytics', analyticsRoutes);
@@ -238,10 +261,25 @@ app.use('/api/v1/reports/saved', savedReportsRoutes);
 app.use('/api/v1/reports/exports', dataExportsRoutes);
 app.use('/api/v1/reports', reportsRoutes);
 
-// 11. Customer Growth
+// 11. Customer Growth and Loyalty
+app.use('/api/v1/customers/feedback', customerFeedbackRoutes);
 app.use('/api/v1/customers', customerRoutes);
 app.use('/api/v1/loyalty/transactions', loyaltyTransactionsRoutes);
+app.use('/api/v1/loyalty/rewards', loyaltyRewardsRoutes);
 app.use('/api/v1/loyalty', loyaltyRoutes);
+
+// 12 marketing/CRM modules
+app.use('/api/v1/marketing/promotions', promotionalDiscountRoutes);
+app.use('/api/v1/marketing/templates', marketingTemplateRoutes);
+app.use('/api/v1/marketing/hub', marketingHubRoutes);
+app.use('/api/v1/marketing/campaigns', marketingCampaignRoutes);
+
+// 13. AI Assistants
+app.use('/api/v1/automations', workflowAutomationRoutes);
+app.use('/api/v1/ai-assistant/menu-analysis', menuAnalysisRoutes);
+app.use('/api/v1/ai-assistant/inventory', predictiveInventoryRoutes);
+app.use('/api/v1/ai-assistant/forecasting', forecastingRoutes);
+app.use('/api/v1/ai-assistant', aiAssistantRoutes);
 
 
 /* ==========================================================================

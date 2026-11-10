@@ -33,30 +33,69 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.patchReadAll = exports.patchNotificationRead = exports.getNotifications = void 0;
+exports.patchReadAll = exports.patchNotificationRead = exports.patchResolveAction = exports.getNotifications = void 0;
 const notificationRepo = __importStar(require("../repositories/notification.repository"));
 const getNotifications = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
         if (!tenantId) {
-            res.status(401).json({ status: 'error', message: 'Unauthorized' });
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const items = await notificationRepo.fetchTenantNotifications(tenantId);
-        const unreadCount = items.filter((i) => !i.isRead).length;
+        const { category, severity, module, isRead, search, page, limit } = req.query;
+        const [data, telemetry] = await Promise.all([
+            notificationRepo.fetchTenantNotifications(tenantId, {
+                category: category,
+                severity: severity,
+                module: module,
+                isRead: isRead,
+                search: search,
+                page: page ? parseInt(String(page), 10) : 1,
+                limit: limit ? parseInt(String(limit), 10) : 50,
+            }),
+            notificationRepo.fetchNotificationTelemetrySummary(tenantId),
+        ]);
         res.status(200).json({
             status: 'success',
             data: {
-                unreadCount,
-                notifications: items,
+                telemetry,
+                notifications: data.notifications,
+                pagination: {
+                    total: data.total,
+                    page: data.page,
+                    totalPages: data.totalPages,
+                },
             },
         });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch notifications' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch notification bus' });
     }
 };
 exports.getNotifications = getNotifications;
+const patchResolveAction = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const userId = req.user?.userId;
+        const { id } = req.params;
+        if (!tenantId || !userId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const notificationId = parseInt(Array.isArray(id) ? id[0] : id, 10);
+        const { resolutionNotes } = req.body;
+        const updated = await notificationRepo.resolveActionableNotification(tenantId, userId, notificationId, resolutionNotes);
+        res.status(200).json({
+            status: 'success',
+            data: updated,
+            message: 'Actionable item resolved and recorded in audit ledger.',
+        });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to resolve notification' });
+    }
+};
+exports.patchResolveAction = patchResolveAction;
 const patchNotificationRead = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
