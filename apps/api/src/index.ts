@@ -117,6 +117,7 @@ import expensesRoutes from './routes/expenses.routes';
 import payablesRoutes from './routes/payables.routes';
 import taxesRoutes from './routes/taxes.routes';
 import adjustmentsRoutes from './routes/adjustments.routes';
+import financeHubRoutes from './routes/finance-hub.routes';
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
@@ -216,6 +217,7 @@ app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/cash-management/drawers', cashDrawerRoutes);
 app.use('/api/v1/cash-management/shifts', cashShiftsRoutes);
 app.use('/api/v1/cash-management/reconciliation', cashReconciliationRoutes);
+app.use('/api/v1/finance', financeHubRoutes);
 app.use('/api/v1/finance/expenses', expensesRoutes);
 app.use('/api/v1/finance/payables', payablesRoutes);
 app.use('/api/v1/finance/taxes', taxesRoutes);

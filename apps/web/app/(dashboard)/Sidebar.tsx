@@ -23,6 +23,7 @@ import {
   Wallet,
   CreditCard,
   Truck,
+  Landmark,
   CalendarDays,
   ClipboardList,
   ChartNoAxesCombined,
@@ -213,6 +214,7 @@ const navigationGroups: NavGroup[] = [
       { label: 'Cash Drawer Registers', href: '/cash-management/drawers', icon: Wallet, permission: 'cash.view', keywords: ['till', 'float'] },
       { label: 'Cashier Till Shifts', href: '/cash-management/shifts', icon: Clock, permission: 'cash.view', keywords: ['opening float', 'handover'] },
       { label: 'End of Day Z-Report Reconciliation', href: '/cash-management/reconciliation', icon: ClipboardList, permission: 'cash.reconcile', keywords: ['z-out', 'closeout'] },
+      { label: 'Financial Control Cockpit', href: '/finance', icon: Landmark, permission: 'finance.view', keywords: ['treasury', 'overview', 'margins', 'p&l', 'cockpit'] },
       { label: 'Operational Expense Ledger', href: '/finance/expenses', icon: Receipt, permission: 'finance.view', keywords: ['petty cash', 'overhead'] },
       { label: 'Accounts Payable (AP)', href: '/finance/payables', icon: HandCoins, permission: 'finance.view', keywords: ['due dates', 'vendor pay'] },
       { label: 'Tax Compliance & eTIMS Ledger', href: '/finance/taxes', icon: FileText, permission: 'finance.manage', keywords: ['kra', 'vat'] },
@@ -381,7 +383,7 @@ export default function Sidebar({
       const updated = [pathname, ...prev.filter((h) => h !== pathname)].slice(0, 4);
       try {
         localStorage.setItem('servora_recent_nav', JSON.stringify(updated));
-      } catch {}
+      } catch { }
       return updated;
     });
   }, [pathname]);
@@ -393,7 +395,7 @@ export default function Sidebar({
       const updated = prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href];
       try {
         localStorage.setItem('servora_pinned_nav', JSON.stringify(updated));
-      } catch {}
+      } catch { }
       return updated;
     });
   };
