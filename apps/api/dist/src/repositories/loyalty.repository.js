@@ -172,21 +172,8 @@ const adjustCustomerPoints = async (tenantId, userId, input) => {
         })
             .where((0, drizzle_orm_1.eq)(schema_1.customers.id, input.customerId));
         const auditDescription = `[${input.reasonCode}] ${input.notes}${input.referenceNumber ? ` (Ref: ${input.referenceNumber})` : ''}`;
-        // 4. Record in loyaltyPointTransactions
+        // 4. Record in unified immutable loyaltyTransactionsLedger
         const [txRecord] = await tx
-            .insert(schema_1.loyaltyPointTransactions)
-            .values({
-            tenantId,
-            customerId: input.customerId,
-            transactionType: 'MANUAL_ADJUSTMENT',
-            points: signedDelta,
-            balanceAfter: newBalance,
-            description: auditDescription,
-            processedById: userId,
-        })
-            .returning();
-        // 5. Record in immutable loyaltyTransactionsLedger
-        await tx
             .insert(schema_1.loyaltyTransactionsLedger)
             .values({
             tenantId,
@@ -200,7 +187,8 @@ const adjustCustomerPoints = async (tenantId, userId, input) => {
             auditReference: input.referenceNumber || `ADJ-${Date.now().toString().slice(-6)}`,
             notes: auditDescription,
             processedById: userId,
-        });
+        })
+            .returning();
         return { profile: updatedProfile, transaction: txRecord };
     });
 };

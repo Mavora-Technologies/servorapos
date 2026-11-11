@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fiscalInvoices = exports.mpesaC2bCallbacks = exports.drawerSessions = exports.cashDrawers = exports.refunds = exports.mpesaTransactions = exports.bankStatementLines = exports.bankStatements = exports.payments = exports.cashierShifts = exports.deliveryAssignments = exports.transferFleetDispatches = exports.logisticsFleet = exports.logisticsVehicles = exports.stockTransferItems = exports.stockTransfers = exports.stockCountItems = exports.stockCounts = exports.stockMovements = exports.orderItems = exports.orders = exports.waitlistEntries = exports.reservations = exports.restaurantTables = exports.diningAreas = exports.wasteLogs = exports.warehouseLocations = exports.inventoryBatches = exports.unitConversions = exports.inventoryItems = exports.supplierReturnItems = exports.supplierReturns = exports.supplierInvoiceItems = exports.supplierInvoices = exports.goodsReceivedItems = exports.goodsReceivedNotes = exports.purchaseOrderItems = exports.purchaseOrders = exports.purchaseRequestItems = exports.purchaseRequests = exports.suppliers = exports.menuModifiers = exports.menuItems = exports.menuCategories = exports.userBranchMemberships = exports.roles = exports.users = exports.branches = exports.tenants = exports.userRoleEnum = void 0;
+exports.fiscalInvoices = exports.mpesaC2bCallbacks = exports.drawerSessions = exports.cashDrawers = exports.refunds = exports.mpesaTransactions = exports.bankStatementLines = exports.bankStatements = exports.payments = exports.cashierShifts = exports.deliveryAssignments = exports.transferFleetDispatches = exports.logisticsVehicles = exports.logisticsFleet = exports.stockTransferItems = exports.stockTransfers = exports.stockCountItems = exports.stockCounts = exports.stockMovements = exports.orderItems = exports.orders = exports.waitlistEntries = exports.reservations = exports.restaurantTables = exports.diningAreas = exports.wasteLogs = exports.warehouseLocations = exports.inventoryBatches = exports.unitConversions = exports.inventoryItems = exports.supplierReturnItems = exports.supplierReturns = exports.supplierInvoiceItems = exports.supplierInvoices = exports.goodsReceivedItems = exports.goodsReceivedNotes = exports.purchaseOrderItems = exports.purchaseOrders = exports.purchaseRequestItems = exports.purchaseRequests = exports.suppliers = exports.menuModifiers = exports.menuItems = exports.menuCategories = exports.userBranchMemberships = exports.roles = exports.users = exports.branches = exports.tenants = exports.userRoleEnum = void 0;
 exports.supportTicketMessages = exports.supportTickets = exports.userSessions = exports.securitySettings = exports.billingInvoices = exports.tenantSubscriptions = exports.billingPaymentMethods = exports.subscriptionPlans = exports.deviceEnrollmentTokens = exports.posDevices = exports.offlineSyncBatches = exports.offlineSettings = exports.auditLogs = exports.orderIntegrationLogs = exports.orderIntegrations = exports.messagingLogs = exports.messagingTemplates = exports.messagingIntegrations = exports.paymentWebhookLogs = exports.paymentIntegrations = exports.kitchenGlobalSettings = exports.kitchenStations = exports.networkPrinters = exports.receiptTemplates = exports.serviceModels = exports.taxCodes = exports.tenantFinancialSettings = exports.staffPerformanceReviews = exports.cashierAssignments = exports.shiftHandovers = exports.attendanceRecords = exports.workSchedules = exports.shiftTemplates = exports.warehouseBins = exports.warehouseZones = exports.notifications = exports.recipeIngredients = exports.recipes = exports.menuItemAvailability = exports.itemPricingRules = exports.comboBundleItems = exports.comboBundles = exports.modifierOptions = exports.modifierGroups = exports.orderItemsRelations = exports.ordersRelations = exports.menuItemsRelations = exports.menuCategoriesRelations = exports.branchesRelations = exports.tenantsRelations = void 0;
-exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.loyaltyPointTransactions = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = void 0;
+exports.financialAdjustments = exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const drizzle_orm_1 = require("drizzle-orm");
 // 1. Define explicit role enum
@@ -159,7 +159,7 @@ exports.menuItems = (0, pg_core_1.pgTable)('menu_items', {
     costEstimate: (0, pg_core_1.decimal)('cost_estimate', { precision: 12, scale: 2 }).default('0.00').notNull(),
     // Stock tracking policy per Section 16: RECIPE, STOCKED_PRODUCT, COMPOSITE, NON_TRACKED
     stockTrackingType: (0, pg_core_1.varchar)('stock_tracking_type', { length: 50 }).default('RECIPE').notNull(),
-    directInventoryItemId: (0, pg_core_1.integer)('direct_inventory_item_id'), // Used when stockTrackingType = STOCKED_PRODUCT
+    directInventoryItemId: (0, pg_core_1.integer)('direct_inventory_item_id').references(() => exports.inventoryItems.id, { onDelete: 'set null' }), // Used when stockTrackingType = STOCKED_PRODUCT
     kitchenStation: (0, pg_core_1.varchar)('kitchen_station', { length: 50 }).default('MAIN_KITCHEN').notNull(), // MAIN_KITCHEN, GRILL, BAR, PASTRY
     prepTimeMinutes: (0, pg_core_1.integer)('prep_time_minutes').default(15).notNull(),
     // Tax & KRA eTIMS classification
@@ -189,7 +189,7 @@ exports.menuModifiers = (0, pg_core_1.pgTable)('menu_modifiers', {
     groupName: (0, pg_core_1.varchar)('group_name', { length: 100 }).notNull(), // e.g., "Size", "Milk Option", "Extras"
     optionName: (0, pg_core_1.varchar)('option_name', { length: 100 }).notNull(), // e.g., "Large", "Oat Milk", "Extra Cheese"
     priceDelta: (0, pg_core_1.decimal)('price_delta', { precision: 12, scale: 2 }).default('0.00').notNull(),
-    linkedInventoryItemId: (0, pg_core_1.integer)('linked_inventory_item_id'), // Optional ingredient deduction for modifier
+    linkedInventoryItemId: (0, pg_core_1.integer)('linked_inventory_item_id').references(() => exports.inventoryItems.id, { onDelete: 'set null' }), // Optional ingredient deduction for modifier
     linkedQuantity: (0, pg_core_1.decimal)('linked_quantity', { precision: 12, scale: 4 }).default('0.0000'),
     isRequired: (0, pg_core_1.boolean)('is_required').default(false).notNull(),
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
@@ -746,7 +746,7 @@ exports.stockMovements = (0, pg_core_1.pgTable)('stock_movements', {
     locationBin: (0, pg_core_1.varchar)('location_bin', { length: 80 }), // e.g. "Walk-in Chiller Rack 2B"
     documentReference: (0, pg_core_1.varchar)('document_reference', { length: 100 }), // e.g. "GRN-2026-001", "PO-2026-002"
     // Storno audit trail linking
-    reversedMovementId: (0, pg_core_1.integer)('reversed_movement_id'),
+    reversedMovementId: (0, pg_core_1.integer)('reversed_movement_id').references(() => exports.stockMovements.id, { onDelete: 'set null' }),
     isReversed: (0, pg_core_1.boolean)('is_reversed').default(false).notNull(),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -853,29 +853,7 @@ exports.stockTransferItems = (0, pg_core_1.pgTable)('stock_transfer_items', {
     (0, pg_core_1.index)('sto_items_transfer_idx').on(t.transferId),
     (0, pg_core_1.index)('sto_items_inv_idx').on(t.inventoryItemId),
 ]);
-exports.logisticsVehicles = (0, pg_core_1.pgTable)('logistics_vehicles', {
-    id: (0, pg_core_1.serial)('id').primaryKey(),
-    tenantId: (0, pg_core_1.integer)('tenant_id')
-        .notNull()
-        .references(() => exports.tenants.id, { onDelete: 'cascade' }),
-    primaryBranchId: (0, pg_core_1.integer)('primary_branch_id').references(() => exports.branches.id, { onDelete: 'set null' }),
-    plateNumber: (0, pg_core_1.varchar)('plate_number', { length: 30 }).notNull(), // e.g., KDA 412X
-    makeModel: (0, pg_core_1.varchar)('make_model', { length: 100 }).notNull(), // e.g., Isuzu FRR / Toyota HiAce
-    vehicleType: (0, pg_core_1.varchar)('vehicle_type', { length: 40 }).notNull().default('VAN'), // 'REFRIGERATED_TRUCK', 'VAN', 'MOTORCYCLE', 'PICKUP'
-    driverName: (0, pg_core_1.varchar)('driver_name', { length: 120 }).notNull(),
-    driverPhone: (0, pg_core_1.varchar)('driver_phone', { length: 30 }).notNull(),
-    maxPayloadKg: (0, pg_core_1.numeric)('max_payload_kg', { precision: 10, scale: 2 }).notNull().default('1000.00'),
-    temperatureControlled: (0, pg_core_1.boolean)('temperature_controlled').notNull().default(false),
-    currentStatus: (0, pg_core_1.varchar)('current_status', { length: 30 }).notNull().default('AVAILABLE'), // 'AVAILABLE', 'IN_TRANSIT', 'MAINTENANCE', 'OFF_DUTY'
-    currentLocationLat: (0, pg_core_1.numeric)('current_location_lat', { precision: 10, scale: 7 }),
-    currentLocationLng: (0, pg_core_1.numeric)('current_location_lng', { precision: 10, scale: 7 }),
-    isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
-    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [
-    (0, pg_core_1.index)('logistics_vehicles_tenant_idx').on(t.tenantId),
-    (0, pg_core_1.index)('logistics_vehicles_status_idx').on(t.tenantId, t.currentStatus),
-]);
+// 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 // 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 exports.logisticsFleet = (0, pg_core_1.pgTable)('logistics_fleet', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -908,6 +886,8 @@ exports.logisticsFleet = (0, pg_core_1.pgTable)('logistics_fleet', {
     (0, pg_core_1.index)('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
     (0, pg_core_1.index)('fleet_status_idx').on(t.tenantId, t.currentStatus),
 ]);
+// Declared AFTER logisticsFleet to satisfy TypeScript block scoping
+exports.logisticsVehicles = exports.logisticsFleet;
 // 2. B2B INTER-BRANCH TRANSFERS DISPATCH WAYBILLS
 exports.transferFleetDispatches = (0, pg_core_1.pgTable)('transfer_fleet_dispatches', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -983,6 +963,10 @@ exports.cashierShifts = (0, pg_core_1.pgTable)('cashier_shifts', {
     closedAt: (0, pg_core_1.timestamp)('closed_at', { withTimezone: true }),
 }, (t) => [
     (0, pg_core_1.index)('cashier_shifts_tenant_status_idx').on(t.tenantId, t.status),
+    // Enforces at most 1 OPEN shift per cashier per tenant at the database level
+    (0, pg_core_1.uniqueIndex)('active_cashier_shift_unique_idx')
+        .on(t.tenantId, t.cashierId)
+        .where((0, drizzle_orm_1.sql) `${t.status} = 'OPEN'`),
 ]);
 exports.payments = (0, pg_core_1.pgTable)('payments', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1008,7 +992,7 @@ exports.payments = (0, pg_core_1.pgTable)('payments', {
     currency: (0, pg_core_1.varchar)('currency', { length: 10 }).default('KES').notNull(),
     amount: (0, pg_core_1.decimal)('amount', { precision: 12, scale: 4 }).notNull(),
     // Storno Audit
-    reversedPaymentId: (0, pg_core_1.integer)('reversed_payment_id'),
+    reversedPaymentId: (0, pg_core_1.integer)('reversed_payment_id').references(() => exports.payments.id, { onDelete: 'set null' }),
     isReversed: (0, pg_core_1.boolean)('is_reversed').default(false).notNull(),
     processedById: (0, pg_core_1.integer)('processed_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     reconciledAt: (0, pg_core_1.timestamp)('reconciled_at', { withTimezone: true }),
@@ -1137,11 +1121,12 @@ exports.cashDrawers = (0, pg_core_1.pgTable)('cash_drawers', {
     drawerCode: (0, pg_core_1.varchar)('drawer_code', { length: 50 }).notNull(), // e.g. "POS-TERM-01"
     name: (0, pg_core_1.varchar)('name', { length: 100 }).notNull(), // e.g. "Main Bar Cash Drawer"
     status: (0, pg_core_1.varchar)('status', { length: 30 }).default('CLOSED').notNull(), // 'OPEN', 'CLOSED'
-    currentBalance: (0, pg_core_1.decimal)('current_balance', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    currentBalance: (0, pg_core_1.decimal)('current_balance', { precision: 12, scale: 2 }).default('0.00').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
     (0, pg_core_1.index)('drawer_tenant_idx').on(t.tenantId),
+    (0, pg_core_1.uniqueIndex)('drawers_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.drawerCode),
 ]);
 exports.drawerSessions = (0, pg_core_1.pgTable)('drawer_sessions', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1844,7 +1829,7 @@ exports.networkPrinters = (0, pg_core_1.pgTable)('network_printers', {
     openCashDrawerOnPrint: (0, pg_core_1.boolean)('open_cash_drawer_on_print').default(false).notNull(),
     beepOnPrint: (0, pg_core_1.boolean)('beep_on_print').default(false).notNull(),
     beepCount: (0, pg_core_1.integer)('beep_count').default(1).notNull(),
-    backupPrinterId: (0, pg_core_1.integer)('backup_printer_id'), // Automatic failover redirect if device is unreachable
+    backupPrinterId: (0, pg_core_1.integer)('backup_printer_id').references(() => exports.networkPrinters.id, { onDelete: 'set null' }), // Automatic failover redirect if device is unreachable
     assignedStations: (0, pg_core_1.jsonb)('assigned_stations')
         .$type()
         .default([])
@@ -1877,14 +1862,14 @@ exports.kitchenStations = (0, pg_core_1.pgTable)('kitchen_stations', {
     targetPrepTimeMinutes: (0, pg_core_1.integer)('target_prep_time_minutes').default(15).notNull(), // Standard target cook duration
     warningTimeMinutes: (0, pg_core_1.integer)('warning_time_minutes').default(10).notNull(), // Amber alert threshold
     criticalTimeMinutes: (0, pg_core_1.integer)('critical_time_minutes').default(18).notNull(), // Flashing red overdue alert
-    assignedCategories: (0, pg_core_1.jsonb)('assigned_stations')
+    assignedCategories: (0, pg_core_1.jsonb)('assigned_categories')
         .$type()
         .default([])
         .notNull(), // e.g. ["Steaks & Grill", "Burgers", "Hot Sides"]
     autoBumpOnPrint: (0, pg_core_1.boolean)('auto_bump_on_print').default(false).notNull(),
     soundAlertOnNewTicket: (0, pg_core_1.boolean)('sound_alert_on_new_ticket').default(true).notNull(),
     allowTicketRecall: (0, pg_core_1.boolean)('allow_ticket_recall').default(true).notNull(),
-    backupStationId: (0, pg_core_1.integer)('backup_station_id'), // Automatic failover redirect if station terminal drops
+    backupStationId: (0, pg_core_1.integer)('backup_station_id').references(() => exports.kitchenStations.id, { onDelete: 'set null' }), // Automatic failover redirect if station terminal drops
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -2630,26 +2615,6 @@ exports.customerLoyaltyProfiles = (0, pg_core_1.pgTable)('customer_loyalty_profi
     (0, pg_core_1.index)('cust_loyalty_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('cust_loyalty_customer_idx').on(t.customerId),
 ]);
-exports.loyaltyPointTransactions = (0, pg_core_1.pgTable)('loyalty_point_transactions', {
-    id: (0, pg_core_1.serial)('id').primaryKey(),
-    tenantId: (0, pg_core_1.integer)('tenant_id')
-        .references(() => exports.tenants.id, { onDelete: 'cascade' })
-        .notNull(),
-    customerId: (0, pg_core_1.integer)('customer_id')
-        .references(() => exports.customers.id, { onDelete: 'cascade' })
-        .notNull(),
-    orderId: (0, pg_core_1.integer)('order_id').references(() => exports.orders.id, { onDelete: 'set null' }),
-    transactionType: (0, pg_core_1.varchar)('transaction_type', { length: 40 }).notNull(), // 'EARN_PURCHASE', 'REDEEM_REWARD', 'MANUAL_ADJUSTMENT', 'TIER_BONUS'
-    points: (0, pg_core_1.integer)('points').notNull(), // Positive = Earn, Negative = Redeem
-    balanceAfter: (0, pg_core_1.integer)('balance_after').notNull(),
-    description: (0, pg_core_1.text)('description').notNull(),
-    processedById: (0, pg_core_1.integer)('processed_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
-    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [
-    (0, pg_core_1.index)('loyalty_tx_tenant_idx').on(t.tenantId),
-    (0, pg_core_1.index)('loyalty_tx_customer_idx').on(t.customerId),
-    (0, pg_core_1.index)('loyalty_tx_created_idx').on(t.tenantId, t.createdAt),
-]);
 exports.loyaltyRewardsCatalog = (0, pg_core_1.pgTable)('loyalty_rewards_catalog', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
     tenantId: (0, pg_core_1.integer)('tenant_id')
@@ -2706,6 +2671,8 @@ exports.loyaltyTransactionsLedger = (0, pg_core_1.pgTable)('loyalty_transactions
     (0, pg_core_1.index)('loyalty_ledger_type_idx').on(t.tenantId, t.entryType),
     (0, pg_core_1.index)('loyalty_ledger_created_idx').on(t.tenantId, t.createdAt),
 ]);
+// Declared AFTER loyaltyTransactionsLedger to satisfy TypeScript block scoping
+exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger;
 // ============================================================================
 // CUSTOMER FEEDBACK, CSAT & VOICE AUDIT (CRM / SERVICE EXCELLENCE)
 // ============================================================================
@@ -3118,4 +3085,48 @@ exports.expenses = (0, pg_core_1.pgTable)('expenses', {
     (0, pg_core_1.index)('expenses_tenant_status_idx').on(t.tenantId, t.status),
     (0, pg_core_1.index)('expenses_tenant_date_idx').on(t.tenantId, t.expenseDate),
     (0, pg_core_1.index)('expenses_claimant_idx').on(t.claimantId),
+]);
+// ============================================================================
+// FINANCIAL ADJUSTMENTS, GL WRITE-OFFS & MAKER-CHECKER AUDIT (FIN / HCM)
+// ============================================================================
+exports.financialAdjustments = (0, pg_core_1.pgTable)('financial_adjustments', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .notNull()
+        .references(() => exports.tenants.id, { onDelete: 'cascade' }),
+    branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'set null' }),
+    // Voucher Identification & Classification
+    adjustmentNumber: (0, pg_core_1.varchar)('adjustment_number', { length: 50 }).notNull(), // e.g. "ADJ-2026-0001"
+    adjustmentType: (0, pg_core_1.varchar)('adjustment_type', { length: 50 }).notNull(),
+    // 'TILL_VARIANCE_WRITE_OFF', 'PAYROLL_LABOR_DEDUCTION', 'TIP_POOL_CORRECTION', 'BANK_RECON_VARIANCE', 'VENDOR_AP_CREDIT', 'GUEST_AR_WRITE_DOWN'
+    // Related Relational Records (Optional Linkages)
+    shiftId: (0, pg_core_1.integer)('shift_id').references(() => exports.cashierShifts.id, { onDelete: 'set null' }),
+    attributedUserId: (0, pg_core_1.integer)('attributed_user_id').references(() => exports.users.id, { onDelete: 'set null' }), // Staff member impacted or accountable
+    createdById: (0, pg_core_1.integer)('created_by_id')
+        .notNull()
+        .references(() => exports.users.id, { onDelete: 'restrict' }), // Maker
+    // Financial Value & General Ledger Mapping
+    amount: (0, pg_core_1.decimal)('amount', { precision: 12, scale: 2 }).notNull(),
+    currency: (0, pg_core_1.varchar)('currency', { length: 10 }).default('KES').notNull(),
+    adjustmentDirection: (0, pg_core_1.varchar)('adjustment_direction', { length: 20 }).default('DEBIT').notNull(), // 'DEBIT' | 'CREDIT'
+    debitGlAccount: (0, pg_core_1.varchar)('debit_gl_account', { length: 50 }).notNull(), // e.g. "5210 - Cash Over/Short Expense"
+    creditGlAccount: (0, pg_core_1.varchar)('credit_gl_account', { length: 50 }).notNull(), // e.g. "1010 - Main Till Cash"
+    // Maker-Checker Lifecycle & Audit Approval
+    status: (0, pg_core_1.varchar)('status', { length: 30 }).default('PENDING_APPROVAL').notNull(),
+    // 'DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED', 'POSTED'
+    approvedByUserId: (0, pg_core_1.integer)('approved_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }), // Checker
+    approvedAt: (0, pg_core_1.timestamp)('approved_at', { withTimezone: true }),
+    postedAt: (0, pg_core_1.timestamp)('posted_at', { withTimezone: true }),
+    rejectionReason: (0, pg_core_1.text)('rejection_reason'),
+    // Compliance & Documentation
+    reasonCode: (0, pg_core_1.varchar)('reason_code', { length: 80 }).notNull(), // e.g. 'DRAWER_DISCREPANCY', 'COUNTERFEIT_NOTE', 'BANK_FEE', 'SYSTEM_ROUNDING'
+    justificationNotes: (0, pg_core_1.text)('justification_notes').notNull(),
+    supportingDocumentUrl: (0, pg_core_1.text)('supporting_document_url'),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+    (0, pg_core_1.uniqueIndex)('fin_adj_tenant_number_idx').on(t.tenantId, t.adjustmentNumber),
+    (0, pg_core_1.index)('fin_adj_tenant_status_idx').on(t.tenantId, t.status),
+    (0, pg_core_1.index)('fin_adj_tenant_type_idx').on(t.tenantId, t.adjustmentType),
+    (0, pg_core_1.index)('fin_adj_tenant_created_idx').on(t.tenantId, t.createdAt),
 ]);

@@ -3,7 +3,6 @@ import { db } from '../config/db';
 import {
   loyaltyTiers,
   customerLoyaltyProfiles,
-  loyaltyPointTransactions,
   loyaltyTransactionsLedger,
   loyaltyRewardsCatalog,
   customers,
@@ -217,22 +216,8 @@ export const adjustCustomerPoints = async (tenantId: number, userId: number, inp
 
     const auditDescription = `[${input.reasonCode}] ${input.notes}${input.referenceNumber ? ` (Ref: ${input.referenceNumber})` : ''}`;
 
-    // 4. Record in loyaltyPointTransactions
+    // 4. Record in unified immutable loyaltyTransactionsLedger
     const [txRecord] = await tx
-      .insert(loyaltyPointTransactions)
-      .values({
-        tenantId,
-        customerId: input.customerId,
-        transactionType: 'MANUAL_ADJUSTMENT',
-        points: signedDelta,
-        balanceAfter: newBalance,
-        description: auditDescription,
-        processedById: userId,
-      })
-      .returning();
-
-    // 5. Record in immutable loyaltyTransactionsLedger
-    await tx
       .insert(loyaltyTransactionsLedger)
       .values({
         tenantId,
@@ -246,7 +231,8 @@ export const adjustCustomerPoints = async (tenantId: number, userId: number, inp
         auditReference: input.referenceNumber || `ADJ-${Date.now().toString().slice(-6)}`,
         notes: auditDescription,
         processedById: userId,
-      });
+      })
+      .returning();
 
     return { profile: updatedProfile, transaction: txRecord };
   });

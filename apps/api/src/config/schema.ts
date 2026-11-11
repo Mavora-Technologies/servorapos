@@ -13,8 +13,9 @@ import {
   uniqueIndex,
   index,
   pgEnum,
+  AnyPgColumn,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // 1. Define explicit role enum
 export const userRoleEnum = pgEnum('user_role', [
@@ -206,7 +207,10 @@ export const menuItems = pgTable(
     costEstimate: decimal('cost_estimate', { precision: 12, scale: 2 }).default('0.00').notNull(),
     // Stock tracking policy per Section 16: RECIPE, STOCKED_PRODUCT, COMPOSITE, NON_TRACKED
     stockTrackingType: varchar('stock_tracking_type', { length: 50 }).default('RECIPE').notNull(),
-    directInventoryItemId: integer('direct_inventory_item_id'), // Used when stockTrackingType = STOCKED_PRODUCT
+    directInventoryItemId: integer('direct_inventory_item_id').references(
+      (): AnyPgColumn => inventoryItems.id,
+      { onDelete: 'set null' }
+    ), // Used when stockTrackingType = STOCKED_PRODUCT
     kitchenStation: varchar('kitchen_station', { length: 50 }).default('MAIN_KITCHEN').notNull(), // MAIN_KITCHEN, GRILL, BAR, PASTRY
     prepTimeMinutes: integer('prep_time_minutes').default(15).notNull(),
     // Tax & KRA eTIMS classification
@@ -241,7 +245,10 @@ export const menuModifiers = pgTable(
     groupName: varchar('group_name', { length: 100 }).notNull(), // e.g., "Size", "Milk Option", "Extras"
     optionName: varchar('option_name', { length: 100 }).notNull(), // e.g., "Large", "Oat Milk", "Extra Cheese"
     priceDelta: decimal('price_delta', { precision: 12, scale: 2 }).default('0.00').notNull(),
-    linkedInventoryItemId: integer('linked_inventory_item_id'), // Optional ingredient deduction for modifier
+    linkedInventoryItemId: integer('linked_inventory_item_id').references(
+      (): AnyPgColumn => inventoryItems.id,
+      { onDelete: 'set null' }
+    ), // Optional ingredient deduction for modifier
     linkedQuantity: decimal('linked_quantity', { precision: 12, scale: 4 }).default('0.0000'),
     isRequired: boolean('is_required').default(false).notNull(),
     isAvailable: boolean('is_available').default(true).notNull(),
@@ -937,7 +944,10 @@ export const stockMovements = pgTable(
     documentReference: varchar('document_reference', { length: 100 }), // e.g. "GRN-2026-001", "PO-2026-002"
 
     // Storno audit trail linking
-    reversedMovementId: integer('reversed_movement_id'),
+    reversedMovementId: integer('reversed_movement_id').references(
+      (): AnyPgColumn => stockMovements.id,
+      { onDelete: 'set null' }
+    ),
     isReversed: boolean('is_reversed').default(false).notNull(),
 
     notes: text('notes'),
@@ -1073,35 +1083,7 @@ export const stockTransferItems = pgTable(
   ]
 );
 
-
-export const logisticsVehicles = pgTable(
-  'logistics_vehicles',
-  {
-    id: serial('id').primaryKey(),
-    tenantId: integer('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    primaryBranchId: integer('primary_branch_id').references(() => branches.id, { onDelete: 'set null' }),
-    plateNumber: varchar('plate_number', { length: 30 }).notNull(), // e.g., KDA 412X
-    makeModel: varchar('make_model', { length: 100 }).notNull(), // e.g., Isuzu FRR / Toyota HiAce
-    vehicleType: varchar('vehicle_type', { length: 40 }).notNull().default('VAN'), // 'REFRIGERATED_TRUCK', 'VAN', 'MOTORCYCLE', 'PICKUP'
-    driverName: varchar('driver_name', { length: 120 }).notNull(),
-    driverPhone: varchar('driver_phone', { length: 30 }).notNull(),
-    maxPayloadKg: numeric('max_payload_kg', { precision: 10, scale: 2 }).notNull().default('1000.00'),
-    temperatureControlled: boolean('temperature_controlled').notNull().default(false),
-    currentStatus: varchar('current_status', { length: 30 }).notNull().default('AVAILABLE'), // 'AVAILABLE', 'IN_TRANSIT', 'MAINTENANCE', 'OFF_DUTY'
-    currentLocationLat: numeric('current_location_lat', { precision: 10, scale: 7 }),
-    currentLocationLng: numeric('current_location_lng', { precision: 10, scale: 7 }),
-    isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [
-    index('logistics_vehicles_tenant_idx').on(t.tenantId),
-    index('logistics_vehicles_status_idx').on(t.tenantId, t.currentStatus),
-  ]
-);
-
+// 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 // 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 export const logisticsFleet = pgTable(
   'logistics_fleet',
@@ -1111,29 +1093,29 @@ export const logisticsFleet = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
-    
+
     // Core Plate & Type
     vehiclePlate: varchar('vehicle_plate', { length: 50 }).notNull(), // e.g. "KDE 321B"
     makeModel: varchar('make_model', { length: 100 }).default('Standard Fleet').notNull(),
     vehicleType: varchar('vehicle_type', { length: 50 }).default('REEFER_VAN').notNull(), // 'REEFER_VAN', 'BOX_TRUCK', 'PICKUP', 'MOTORBIKE'
-    
+
     // Driver Details
     driverName: varchar('driver_name', { length: 120 }),
     driverPhone: varchar('driver_phone', { length: 30 }),
-    
+
     // Payload & Capacity
     maxPayloadKg: numeric('max_payload_kg', { precision: 10, scale: 2 }).default('1500.00').notNull(),
-    
+
     // Cold-Chain Controls
     isRefrigerated: boolean('is_refrigerated').default(false).notNull(),
     minTargetTemp: decimal('min_target_temp', { precision: 5, scale: 2 }), // e.g. 2.00
     maxTargetTemp: decimal('max_target_temp', { precision: 5, scale: 2 }), // e.g. 8.00
-    
+
     // Live Operational Telemetry
     currentStatus: varchar('current_status', { length: 30 }).default('AVAILABLE').notNull(), // 'AVAILABLE', 'IN_TRANSIT', 'MAINTENANCE', 'OFF_DUTY'
     currentLocationLat: numeric('current_location_lat', { precision: 10, scale: 7 }),
     currentLocationLng: numeric('current_location_lng', { precision: 10, scale: 7 }),
-    
+
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -1144,6 +1126,9 @@ export const logisticsFleet = pgTable(
     index('fleet_status_idx').on(t.tenantId, t.currentStatus),
   ]
 );
+
+// Declared AFTER logisticsFleet to satisfy TypeScript block scoping
+export const logisticsVehicles = logisticsFleet;
 
 // 2. B2B INTER-BRANCH TRANSFERS DISPATCH WAYBILLS
 export const transferFleetDispatches = pgTable(
@@ -1234,6 +1219,10 @@ export const cashierShifts = pgTable(
   },
   (t) => [
     index('cashier_shifts_tenant_status_idx').on(t.tenantId, t.status),
+    // Enforces at most 1 OPEN shift per cashier per tenant at the database level
+    uniqueIndex('active_cashier_shift_unique_idx')
+      .on(t.tenantId, t.cashierId)
+      .where(sql`${t.status} = 'OPEN'`),
   ]
 );
 
@@ -1269,7 +1258,10 @@ export const payments = pgTable(
     amount: decimal('amount', { precision: 12, scale: 4 }).notNull(),
 
     // Storno Audit
-    reversedPaymentId: integer('reversed_payment_id'),
+    reversedPaymentId: integer('reversed_payment_id').references(
+      (): AnyPgColumn => payments.id,
+      { onDelete: 'set null' }
+    ),
     isReversed: boolean('is_reversed').default(false).notNull(),
 
     processedById: integer('processed_by_id').references(() => users.id, { onDelete: 'set null' }),
@@ -1435,12 +1427,13 @@ export const cashDrawers = pgTable(
     drawerCode: varchar('drawer_code', { length: 50 }).notNull(), // e.g. "POS-TERM-01"
     name: varchar('name', { length: 100 }).notNull(), // e.g. "Main Bar Cash Drawer"
     status: varchar('status', { length: 30 }).default('CLOSED').notNull(), // 'OPEN', 'CLOSED'
-    currentBalance: decimal('current_balance', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    currentBalance: decimal('current_balance', { precision: 12, scale: 2 }).default('0.00').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('drawer_tenant_idx').on(t.tenantId),
+    uniqueIndex('drawers_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.drawerCode),
   ]
 );
 
@@ -1765,19 +1758,19 @@ export const notifications = pgTable(
       .references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'cascade' }),
     userId: integer('user_id').references(() => users.id, { onDelete: 'set null' }), // Nullable = broadcast to tenant/branch
-    
+
     // Core Classification & Urgency
     title: varchar('title', { length: 255 }).notNull(),
     detail: text('detail').notNull(),
     severity: varchar('severity', { length: 30 }).default('INFO').notNull(), // 'CRITICAL', 'WARNING', 'INFO', 'SUCCESS'
     module: varchar('module', { length: 50 }).default('SYSTEM').notNull(), // 'WORKFORCE_HCM', 'INVENTORY_SCM', 'KDS', 'POS', 'FINANCE', 'SECURITY'
     category: varchar('category', { length: 50 }).default('ACTION_REQUIRED').notNull(), // 'ACTION_REQUIRED', 'FYI_STREAM', 'COMPLIANCE_AUDIT'
-    
+
     // Deep Linking & Target Association
     entityType: varchar('entity_type', { length: 100 }), // e.g. 'purchase_orders', 'shift_schedules', 'orders'
     entityId: varchar('entity_id', { length: 100 }), // e.g. PO-AI-10293, orderId
     actionUrl: varchar('action_url', { length: 255 }), // e.g. '/ai-assistant/inventory'
-    
+
     // Enterprise Actionable Task Payload
     actionPayload: jsonb('action_payload').$type<{
       actionCode?: string; // e.g. 'APPROVE_OVERTIME', 'DISPATCH_PO', 'RESOLVE_TILL'
@@ -1785,7 +1778,7 @@ export const notifications = pgTable(
       apiEndpoint?: string;
       resolutionNotes?: string;
     }>(),
-    
+
     // Lifecycle & Audit State
     isRead: boolean('is_read').default(false).notNull(),
     isResolved: boolean('is_resolved').default(false).notNull(),
@@ -2297,7 +2290,10 @@ export const networkPrinters = pgTable(
     openCashDrawerOnPrint: boolean('open_cash_drawer_on_print').default(false).notNull(),
     beepOnPrint: boolean('beep_on_print').default(false).notNull(),
     beepCount: integer('beep_count').default(1).notNull(),
-    backupPrinterId: integer('backup_printer_id'), // Automatic failover redirect if device is unreachable
+    backupPrinterId: integer('backup_printer_id').references(
+      (): AnyPgColumn => networkPrinters.id,
+      { onDelete: 'set null' }
+    ), // Automatic failover redirect if device is unreachable
     assignedStations: jsonb('assigned_stations')
       .$type<string[]>()
       .default([])
@@ -2336,14 +2332,17 @@ export const kitchenStations = pgTable(
     targetPrepTimeMinutes: integer('target_prep_time_minutes').default(15).notNull(), // Standard target cook duration
     warningTimeMinutes: integer('warning_time_minutes').default(10).notNull(), // Amber alert threshold
     criticalTimeMinutes: integer('critical_time_minutes').default(18).notNull(), // Flashing red overdue alert
-    assignedCategories: jsonb('assigned_stations')
+    assignedCategories: jsonb('assigned_categories')
       .$type<string[]>()
       .default([])
       .notNull(), // e.g. ["Steaks & Grill", "Burgers", "Hot Sides"]
     autoBumpOnPrint: boolean('auto_bump_on_print').default(false).notNull(),
     soundAlertOnNewTicket: boolean('sound_alert_on_new_ticket').default(true).notNull(),
     allowTicketRecall: boolean('allow_ticket_recall').default(true).notNull(),
-    backupStationId: integer('backup_station_id'), // Automatic failover redirect if station terminal drops
+    backupStationId: integer('backup_station_id').references(
+      (): AnyPgColumn => kitchenStations.id,
+      { onDelete: 'set null' }
+    ), // Automatic failover redirect if station terminal drops
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -3269,31 +3268,6 @@ export const customerLoyaltyProfiles = pgTable(
   ]
 );
 
-export const loyaltyPointTransactions = pgTable(
-  'loyalty_point_transactions',
-  {
-    id: serial('id').primaryKey(),
-    tenantId: integer('tenant_id')
-      .references(() => tenants.id, { onDelete: 'cascade' })
-      .notNull(),
-    customerId: integer('customer_id')
-      .references(() => customers.id, { onDelete: 'cascade' })
-      .notNull(),
-    orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
-    transactionType: varchar('transaction_type', { length: 40 }).notNull(), // 'EARN_PURCHASE', 'REDEEM_REWARD', 'MANUAL_ADJUSTMENT', 'TIER_BONUS'
-    points: integer('points').notNull(), // Positive = Earn, Negative = Redeem
-    balanceAfter: integer('balance_after').notNull(),
-    description: text('description').notNull(),
-    processedById: integer('processed_by_id').references(() => users.id, { onDelete: 'set null' }),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (t) => [
-    index('loyalty_tx_tenant_idx').on(t.tenantId),
-    index('loyalty_tx_customer_idx').on(t.customerId),
-    index('loyalty_tx_created_idx').on(t.tenantId, t.createdAt),
-  ]
-);
-
 export const loyaltyRewardsCatalog = pgTable(
   'loyalty_rewards_catalog',
   {
@@ -3341,14 +3315,14 @@ export const loyaltyTransactionsLedger = pgTable(
       .notNull(),
     orderId: integer('order_id').references(() => orders.id, { onDelete: 'set null' }),
     rewardId: integer('reward_id').references(() => loyaltyRewardsCatalog.id, { onDelete: 'set null' }),
-    
+
     // Transaction Classification & Financial Value
     entryType: varchar('entry_type', { length: 50 }).notNull(), // 'ACCRUAL_PURCHASE', 'REDEMPTION_VOUCHER', 'MANUAL_ADJUSTMENT', 'EXPIRY_DEDUCTION', 'TIER_BONUS'
     pointsDelta: integer('points_delta').notNull(), // Positive for earnings, Negative for burn/redemptions
     monetaryValueKes: decimal('monetary_value_kes', { precision: 12, scale: 2 }).default('0.00').notNull(), // Equivalent spend or discount value
     balanceBefore: integer('balance_before').notNull(),
     balanceAfter: integer('balance_after').notNull(),
-    
+
     channel: varchar('channel', { length: 30 }).default('POS_TERMINAL').notNull(), // 'POS_TERMINAL', 'WEB_PORTAL', 'MOBILE_APP', 'ADMIN_BACKOFFICE'
     auditReference: varchar('audit_reference', { length: 100 }), // e.g. "TRX-LOY-2026-0091"
     notes: text('notes'),
@@ -3362,6 +3336,9 @@ export const loyaltyTransactionsLedger = pgTable(
     index('loyalty_ledger_created_idx').on(t.tenantId, t.createdAt),
   ]
 );
+
+// Declared AFTER loyaltyTransactionsLedger to satisfy TypeScript block scoping
+export const loyaltyPointTransactions = loyaltyTransactionsLedger;
 
 // ============================================================================
 // CUSTOMER FEEDBACK, CSAT & VOICE AUDIT (CRM / SERVICE EXCELLENCE)
@@ -3427,20 +3404,20 @@ export const marketingCampaigns = pgTable(
     channel: varchar('channel', { length: 50 }).default('SMS').notNull(), // 'SMS', 'EMAIL', 'PUSH_NOTIFICATION', 'OMNICHANNEL'
     targetSegment: varchar('target_segment', { length: 100 }).default('ALL_CUSTOMERS').notNull(), // 'ALL_CUSTOMERS', 'VIP_MEMBERS', 'LAPSED_CUSTOMERS', 'HIGH_SPENDERS', 'CORPORATE'
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(), // 'DRAFT', 'SCHEDULED', 'ACTIVE', 'COMPLETED', 'PAUSED'
-    
+
     // Financials & Offer Payload
     budgetKes: decimal('budget_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
     attributedRevenueKes: decimal('attributed_revenue_kes', { precision: 12, scale: 2 }).default('0.00').notNull(),
     promoCode: varchar('promo_code', { length: 50 }),
     discountPercentage: integer('discount_percentage'),
     messageContent: text('message_content').notNull(),
-    
+
     // Performance Funnel Telemetry
     recipientsCount: integer('recipients_count').default(0).notNull(),
     deliveredCount: integer('delivered_count').default(0).notNull(),
     clickedCount: integer('clicked_count').default(0).notNull(),
     convertedCount: integer('converted_count').default(0).notNull(),
-    
+
     // Schedule Timeline
     startDate: timestamp('start_date', { withTimezone: true }),
     endDate: timestamp('end_date', { withTimezone: true }),
@@ -3574,7 +3551,7 @@ export const aiAssistantMessages = pgTable(
       .notNull(),
     senderRole: varchar('sender_role', { length: 20 }).notNull(), // 'USER', 'ASSISTANT', 'SYSTEM_TELEMETRY'
     content: text('content').notNull(),
-    
+
     // Governed Agentic Payload
     toolCallIntent: varchar('tool_call_intent', { length: 80 }), // e.g. 'ANALYZE_LABOR_EFFICIENCY', 'PREDICT_STOCK_RUNOUT', 'GENERATE_RETENTION_CAMPAIGN'
     structuredData: jsonb('structured_data').$type<Record<string, any>>(),
@@ -3605,25 +3582,25 @@ export const demandForecastSnapshots = pgTable(
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
     forecastDate: timestamp('forecast_date', { withTimezone: true }).notNull(),
     dayOfWeek: varchar('day_of_week', { length: 20 }).notNull(), // 'MONDAY', 'TUESDAY', etc.
-    
+
     // Core Projected Demand Drivers
     projectedCovers: integer('projected_covers').notNull(),
     projectedGrossSalesKes: decimal('projected_gross_sales_kes', { precision: 12, scale: 2 }).notNull(),
     historicalActualSalesKes: decimal('historical_actual_sales_kes', { precision: 12, scale: 2 }),
-    
+
     // Workforce & Capacity Requirements
     recommendedFohLaborHours: numeric('recommended_foh_labor_hours', { precision: 6, scale: 2 }).notNull(),
     recommendedBohLaborHours: numeric('recommended_boh_labor_hours', { precision: 6, scale: 2 }).notNull(),
     scheduledLaborHours: numeric('scheduled_labor_hours', { precision: 6, scale: 2 }).default('0.00').notNull(),
     optimalStaffingHeadcount: integer('optimal_staffing_headcount').notNull(),
     laborCostBudgetKes: decimal('labor_cost_budget_kes', { precision: 12, scale: 2 }).notNull(),
-    
+
     // Statistical Accuracy & Event Weighting
     confidenceScore: decimal('confidence_score', { precision: 4, scale: 2 }).default('0.92').notNull(), // e.g. 0.94 (94%)
     weatherFactor: varchar('weather_factor', { length: 50 }).default('CLEAR_NORMAL').notNull(), // 'CLEAR_NORMAL', 'RAIN_HEAVY', 'HEATWAVE', 'COLD_SNAP'
     localEventModifier: varchar('local_event_modifier', { length: 150 }), // e.g., 'Payday Weekend', 'Public Holiday', 'Soccer Derby'
     varianceTolerancePct: numeric('variance_tolerance_pct', { precision: 5, scale: 2 }).default('5.00').notNull(),
-    
+
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

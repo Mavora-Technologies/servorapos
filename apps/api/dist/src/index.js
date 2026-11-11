@@ -111,6 +111,8 @@ const cash_reconciliation_routes_1 = __importDefault(require("./routes/cash-reco
 const expenses_routes_1 = __importDefault(require("./routes/expenses.routes"));
 const payables_routes_1 = __importDefault(require("./routes/payables.routes"));
 const taxes_routes_1 = __importDefault(require("./routes/taxes.routes"));
+const adjustments_routes_1 = __importDefault(require("./routes/adjustments.routes"));
+const finance_hub_routes_1 = __importDefault(require("./routes/finance-hub.routes"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 8000;
 const allowedOrigins = [
@@ -197,9 +199,11 @@ app.use('/api/v1/payments', payment_routes_1.default);
 app.use('/api/v1/cash-management/drawers', cash_drawer_routes_1.default);
 app.use('/api/v1/cash-management/shifts', cash_shifts_routes_1.default);
 app.use('/api/v1/cash-management/reconciliation', cash_reconciliation_routes_1.default);
+app.use('/api/v1/finance', finance_hub_routes_1.default);
 app.use('/api/v1/finance/expenses', expenses_routes_1.default);
 app.use('/api/v1/finance/payables', payables_routes_1.default);
 app.use('/api/v1/finance/taxes', taxes_routes_1.default);
+app.use('/api/v1/finance/adjustments', adjustments_routes_1.default);
 // 8. Analytics & Real-Time Events
 app.use('/api/v1/analytics', analytics_routes_1.default);
 app.use('/api/v1/notifications', notification_routes_1.default);

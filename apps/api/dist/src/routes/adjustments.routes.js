@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const auth_middleware_1 = require("../middleware/auth.middleware");
+const adjustments_controller_1 = require("../controllers/adjustments.controller");
+const router = (0, express_1.Router)();
+router.use(auth_middleware_1.requireAuth);
+router.get('/', adjustments_controller_1.getAdjustments);
+router.get('/metrics', adjustments_controller_1.getAdjustmentsOverview);
+router.post('/', adjustments_controller_1.postCreateAdjustment);
+router.patch('/:id/review', adjustments_controller_1.patchReviewAdjustment);
+exports.default = router;

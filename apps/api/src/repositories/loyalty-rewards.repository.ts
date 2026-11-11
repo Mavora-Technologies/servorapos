@@ -5,7 +5,6 @@ import {
   loyaltyTiers,
   menuItems,
   customerLoyaltyProfiles,
-  loyaltyPointTransactions,
   loyaltyTransactionsLedger,
   customers,
 } from '../config/schema';
@@ -29,13 +28,13 @@ export const getRewardsDashboardMetrics = async (tenantId: number) => {
   const [redemptionsSummary] = await db
     .select({
       totalRedemptionsLogged: sql<number>`count(*)`,
-      totalPointsBurned: sql<number>`coalesce(sum(case when ${loyaltyPointTransactions.points} < 0 then abs(${loyaltyPointTransactions.points}) else 0 end), 0)::numeric`,
+      totalPointsBurned: sql<number>`coalesce(sum(case when ${loyaltyTransactionsLedger.pointsDelta} < 0 then abs(${loyaltyTransactionsLedger.pointsDelta}) else 0 end), 0)::numeric`,
     })
-    .from(loyaltyPointTransactions)
+    .from(loyaltyTransactionsLedger)
     .where(
       and(
-        eq(loyaltyPointTransactions.tenantId, tenantId),
-        eq(loyaltyPointTransactions.transactionType, 'REDEEM_REWARD')
+        eq(loyaltyTransactionsLedger.tenantId, tenantId),
+        eq(loyaltyTransactionsLedger.entryType, 'REDEMPTION_VOUCHER')
       )
     );
 
@@ -286,37 +285,25 @@ export const executeRewardRedemption = async (
 
     const auditDesc = `[REDEMPTION] Claimed "${reward.name}" (-${reward.pointsCost} pts)${input.notes ? ` - ${input.notes}` : ''}`;
 
-    // 4. Record point transaction
+    // 4. Append to unified immutable loyaltyTransactionsLedger
     const [ptTx] = await tx
-      .insert(loyaltyPointTransactions)
+      .insert(loyaltyTransactionsLedger)
       .values({
         tenantId,
         customerId: input.customerId,
         orderId: input.orderId || null,
-        transactionType: 'REDEEM_REWARD',
-        points: -reward.pointsCost,
+        rewardId: reward.id,
+        entryType: 'REDEMPTION_VOUCHER',
+        pointsDelta: -reward.pointsCost,
+        monetaryValueKes: reward.rewardValue,
+        balanceBefore: currentPoints,
         balanceAfter: newBalance,
-        description: auditDesc,
+        channel: 'POS_TERMINAL',
+        auditReference: `RDM-${Date.now().toString().slice(-6)}`,
+        notes: auditDesc,
         processedById: userId,
       })
       .returning();
-
-    // 5. Append to general audit ledger
-    await tx.insert(loyaltyTransactionsLedger).values({
-      tenantId,
-      customerId: input.customerId,
-      orderId: input.orderId || null,
-      rewardId: reward.id,
-      entryType: 'REDEMPTION_VOUCHER',
-      pointsDelta: -reward.pointsCost,
-      monetaryValueKes: reward.rewardValue,
-      balanceBefore: currentPoints,
-      balanceAfter: newBalance,
-      channel: 'POS_TERMINAL',
-      auditReference: `RDM-${Date.now().toString().slice(-6)}`,
-      notes: auditDesc,
-      processedById: userId,
-    });
 
     return {
       success: true,

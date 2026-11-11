@@ -16,10 +16,10 @@ const getRewardsDashboardMetrics = async (tenantId) => {
     const [redemptionsSummary] = await db_1.db
         .select({
         totalRedemptionsLogged: (0, drizzle_orm_1.sql) `count(*)`,
-        totalPointsBurned: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.loyaltyPointTransactions.points} < 0 then abs(${schema_1.loyaltyPointTransactions.points}) else 0 end), 0)::numeric`,
+        totalPointsBurned: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.loyaltyTransactionsLedger.pointsDelta} < 0 then abs(${schema_1.loyaltyTransactionsLedger.pointsDelta}) else 0 end), 0)::numeric`,
     })
-        .from(schema_1.loyaltyPointTransactions)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.loyaltyPointTransactions.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.loyaltyPointTransactions.transactionType, 'REDEEM_REWARD')));
+        .from(schema_1.loyaltyTransactionsLedger)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.loyaltyTransactionsLedger.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.loyaltyTransactionsLedger.entryType, 'REDEMPTION_VOUCHER')));
     return {
         totalCatalogItems: Number(summary?.totalRewards || 0),
         activeRewards: Number(summary?.activeRewards || 0),
@@ -234,22 +234,10 @@ const executeRewardRedemption = async (tenantId, userId, input) => {
         })
             .where((0, drizzle_orm_1.eq)(schema_1.customers.id, input.customerId));
         const auditDesc = `[REDEMPTION] Claimed "${reward.name}" (-${reward.pointsCost} pts)${input.notes ? ` - ${input.notes}` : ''}`;
-        // 4. Record point transaction
+        // 4. Append to unified immutable loyaltyTransactionsLedger
         const [ptTx] = await tx
-            .insert(schema_1.loyaltyPointTransactions)
+            .insert(schema_1.loyaltyTransactionsLedger)
             .values({
-            tenantId,
-            customerId: input.customerId,
-            orderId: input.orderId || null,
-            transactionType: 'REDEEM_REWARD',
-            points: -reward.pointsCost,
-            balanceAfter: newBalance,
-            description: auditDesc,
-            processedById: userId,
-        })
-            .returning();
-        // 5. Append to general audit ledger
-        await tx.insert(schema_1.loyaltyTransactionsLedger).values({
             tenantId,
             customerId: input.customerId,
             orderId: input.orderId || null,
@@ -263,7 +251,8 @@ const executeRewardRedemption = async (tenantId, userId, input) => {
             auditReference: `RDM-${Date.now().toString().slice(-6)}`,
             notes: auditDesc,
             processedById: userId,
-        });
+        })
+            .returning();
         return {
             success: true,
             reward,
