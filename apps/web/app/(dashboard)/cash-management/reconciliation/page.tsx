@@ -13,14 +13,12 @@ import {
   ShieldAlert,
   ChevronRight,
   RefreshCw,
-  Search,
   Calendar,
-  Lock,
-  ArrowUpRight,
-  FileCheck,
   ShieldCheck,
   X,
-  FileSpreadsheet,
+  Printer,
+  Coins,
+  Receipt,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -34,12 +32,19 @@ interface DailyTelemetry {
     expectedDrawerCashKes: number;
     actualPhysicalCashKes: number;
     netVarianceKes: number;
+    posCashSalesKes: number;
   };
   multiTenderBreakdown: {
     mpesaClearedKes: number;
     mpesaVolumeCount: number;
     cardTerminalKes: number;
     bankTransferKes: number;
+  };
+  zReportSummary?: {
+    grossOrdersTotalKes: number;
+    ordersCount: number;
+    vatCollectedKes: number;
+    cateringLevyKes: number;
   };
 }
 
@@ -49,11 +54,17 @@ interface AuditRecord {
   branchName: string;
   cashierId: number;
   cashierName: string;
+  drawerName: string | null;
+  drawerCode: string | null;
   openingFloat: number;
+  posSalesDoneSoFar: number;
+  safeDropsTotal: number;
   expectedCash: number;
   countedCash: number | null;
   variance: number | null;
+  denominations: Record<string, number> | null;
   status: 'OPEN' | 'CLOSED';
+  isAuditSignedOff: boolean;
   varianceNotes: string | null;
   openedAt: string;
   closedAt: string | null;
@@ -166,14 +177,14 @@ export default function CashReconciliationPage() {
             >
               Cash Management <ChevronRight size={12} />
             </Link>
-            <span className="text-xs font-bold text-servora-navy">Treasury Reconciliation</span>
+            <span className="text-xs font-bold text-servora-navy">Z-Report & Treasury Reconciliation</span>
           </div>
           <h1 className="text-xl font-bold text-servora-navy flex items-center gap-2">
             <Scale className="text-servora-core" size={24} />
-            Daily Cash Reconciliation & Multi-Tender Balancing
+            End-of-Day Z-Report & Multi-Tender Reconciliation
           </h1>
           <p className="text-xs text-servora-deepTeal mt-0.5">
-            SAP/Oracle-standard dual-custody audit matching physical till deposits, M-Pesa C2B settlement, and merchant bank clearing accounts.
+            Dual-custody audit matching physical till deposits, live POS cash sales, M-Pesa IPN clearing, and GL variance vouchers.
           </p>
         </div>
 
@@ -189,9 +200,16 @@ export default function CashReconciliationPage() {
           </div>
 
           <button
+            onClick={() => window.print()}
+            className="px-3 py-2 bg-servora-navy text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer print:hidden"
+          >
+            <Printer size={14} /> Print Z-Report
+          </button>
+
+          <button
             onClick={loadReconciliationData}
             title="Refresh Ledger"
-            className="p-2 bg-slate-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-servora-navy transition-colors cursor-pointer shadow-xs"
+            className="p-2 bg-slate-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-servora-navy transition-colors cursor-pointer shadow-xs print:hidden"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin text-servora-core' : ''} />
           </button>
@@ -211,15 +229,33 @@ export default function CashReconciliationPage() {
         </div>
       )}
 
-      {/* 2. MULTI-TENDER CLEARING SUMMARY RIBBON */}
+      {/* 2. MULTI-TENDER & Z-REPORT FISCAL SUMMARY RIBBON */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Tender Cleared</span>
-            <p className="text-xl font-bold font-mono text-emerald-700 mt-0.5">
-              KES {grandTotalCleared.toLocaleString()}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Gross POS Sales</span>
+            <p className="text-xl font-bold font-mono text-servora-navy mt-0.5">
+              KES {telemetry?.zReportSummary ? telemetry.zReportSummary.grossOrdersTotalKes.toLocaleString() : '0'}
             </p>
-            <span className="text-[10px] text-gray-500 font-medium">All Channels Combined</span>
+            <span className="text-[10px] text-gray-500 font-medium">
+              {telemetry?.zReportSummary?.ordersCount || 0} Settled Checks &bull; VAT KES{' '}
+              {telemetry?.zReportSummary?.vatCollectedKes.toLocaleString() || '0'}
+            </span>
+          </div>
+          <div className="p-2.5 bg-blue-50 text-servora-core rounded-xl">
+            <Receipt size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Expected Drawer Cash</span>
+            <p className="text-xl font-bold font-mono text-servora-core mt-0.5">
+              KES {telemetry ? telemetry.cashReconciliation.expectedDrawerCashKes.toLocaleString() : '0'}
+            </p>
+            <span className="text-[10px] text-emerald-600 font-medium">
+              Includes +KES {telemetry?.cashReconciliation.posCashSalesKes.toLocaleString() || '0'} Cash Sales
+            </span>
           </div>
           <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
             <DollarSign size={18} />
@@ -228,28 +264,15 @@ export default function CashReconciliationPage() {
 
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">M-Pesa IPN Cleared</span>
-            <p className="text-xl font-bold font-mono text-green-700 mt-0.5">
-              KES {telemetry ? telemetry.multiTenderBreakdown.mpesaClearedKes.toLocaleString() : '0'}
-            </p>
-            <span className="text-[10px] text-gray-500 font-medium">
-              {telemetry ? telemetry.multiTenderBreakdown.mpesaVolumeCount : 0} Verified Callbacks
-            </span>
-          </div>
-          <div className="p-2.5 bg-green-50 text-green-600 rounded-xl">
-            <Smartphone size={18} />
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Till Physical Cash</span>
-            <p className="text-xl font-bold font-mono text-servora-navy mt-0.5">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Reconciled Vault Cash</span>
+            <p className="text-xl font-bold font-mono text-emerald-700 mt-0.5">
               KES {telemetry ? telemetry.cashReconciliation.actualPhysicalCashKes.toLocaleString() : '0'}
             </p>
-            <span className="text-[10px] text-gray-500 font-medium">Vault Deposit Total</span>
+            <span className="text-[10px] text-gray-500 font-medium">
+              {telemetry?.shiftCounts.closedReconciled || 0} Closed Shifts &bull; {telemetry?.shiftCounts.pendingActive || 0} Open
+            </span>
           </div>
-          <div className="p-2.5 bg-blue-50 text-servora-core rounded-xl">
+          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
             <Scale size={18} />
           </div>
         </div>
@@ -280,7 +303,8 @@ export default function CashReconciliationPage() {
               Settlement Channel Breakdown & Clearing Audit
             </h3>
             <p className="text-[11px] text-gray-400">
-              Audit for operational date <strong className="text-servora-navy font-mono">{selectedDate}</strong>
+              Audit for operational date <strong className="text-servora-navy font-mono">{selectedDate}</strong> &bull; Total Cleared:{' '}
+              <strong className="text-emerald-700 font-mono">KES {grandTotalCleared.toLocaleString()}</strong>
             </p>
           </div>
           <span className="text-xs font-mono font-bold text-servora-core bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200">
@@ -305,13 +329,13 @@ export default function CashReconciliationPage() {
           <div className="p-3.5 bg-slate-50 rounded-xl border border-gray-100 space-y-1">
             <div className="flex items-center gap-1.5 text-gray-500 font-bold text-[11px]">
               <Smartphone size={14} className="text-green-600" />
-              <span>M-Pesa C2B Buy Goods</span>
+              <span>M-Pesa C2B & STK</span>
             </div>
             <p className="text-base font-bold font-mono text-green-700">
               KES {telemetry ? telemetry.multiTenderBreakdown.mpesaClearedKes.toLocaleString() : '0'}
             </p>
             <span className="text-[10px] text-gray-400 block font-mono">
-              {telemetry?.multiTenderBreakdown.mpesaVolumeCount || 0} Real-Time Callbacks
+              {telemetry?.multiTenderBreakdown.mpesaVolumeCount || 0} Verified Callbacks
             </span>
           </div>
 
@@ -371,14 +395,14 @@ export default function CashReconciliationPage() {
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="border-b border-gray-200 text-[10px] uppercase font-bold text-gray-400 tracking-wider bg-slate-50">
-                <th className="py-2.5 px-3">Till Shift</th>
-                <th className="py-2.5 px-3">Cashier / Custodian</th>
-                <th className="py-2.5 px-3">Branch Outlet</th>
+                <th className="py-2.5 px-3">Till Shift & Register</th>
+                <th className="py-2.5 px-3">Cashier Custodian</th>
+                <th className="py-2.5 px-3 text-right">Float + Sales</th>
                 <th className="py-2.5 px-3 text-right">Expected Drawer</th>
                 <th className="py-2.5 px-3 text-right">Physical Count</th>
                 <th className="py-2.5 px-3 text-right">Cash Variance</th>
                 <th className="py-2.5 px-3">Audit Clearance</th>
-                <th className="py-2.5 px-3">Supervisor Audit Sign-Off</th>
+                <th className="py-2.5 px-3">Supervisor Sign-Off</th>
                 <th className="py-2.5 px-3 text-right">Action</th>
               </tr>
             </thead>
@@ -390,7 +414,7 @@ export default function CashReconciliationPage() {
                       <Scale size={36} className="mx-auto opacity-20 text-servora-navy" />
                       <p className="font-bold text-servora-navy not-italic">No Reconciliation Shifts Found</p>
                       <p className="text-xs text-gray-500 not-italic">
-                        No drawer sessions match the selected date and status filters. Zero mock data is generated for un-operated days.
+                        No drawer sessions match the selected date and status filters.
                       </p>
                     </div>
                   </td>
@@ -403,16 +427,24 @@ export default function CashReconciliationPage() {
 
                   return (
                     <tr key={r.shiftId} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="py-3 px-3 font-mono font-bold text-servora-navy">
-                        #{r.shiftId}
+                      <td className="py-3 px-3">
+                        <span className="font-mono font-bold text-servora-navy block">
+                          Shift #{r.shiftId} {r.drawerCode ? `[${r.drawerCode}]` : ''}
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          {r.drawerName || r.branchName || 'Main Outlet'}
+                        </span>
                       </td>
                       <td className="py-3 px-3 font-bold text-servora-navy">
                         {r.cashierName}
                       </td>
-                      <td className="py-3 px-3 text-gray-600 font-medium">
-                        {r.branchName || 'Main Outlet'}
+                      <td className="py-3 px-3 text-right font-mono text-[11px]">
+                        <div className="text-gray-600">Float: {r.openingFloat.toLocaleString()}</div>
+                        <div className="text-emerald-700 font-bold">
+                          Sales: +{r.posSalesDoneSoFar.toLocaleString()}
+                        </div>
                       </td>
-                      <td className="py-3 px-3 text-right font-mono font-bold text-servora-navy">
+                      <td className="py-3 px-3 text-right font-mono font-bold text-servora-core">
                         KES {r.expectedCash.toLocaleString()}
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-purple-700">
@@ -452,17 +484,24 @@ export default function CashReconciliationPage() {
                             <ShieldCheck size={12} /> {r.supervisorName}
                           </span>
                         ) : (
-                          <span className="text-gray-400">Pending Supervisor Review</span>
+                          <span className="text-gray-400">Pending Review</span>
                         )}
                       </td>
                       <td className="py-3 px-3 text-right whitespace-nowrap">
-                        {r.status === 'CLOSED' && (
+                        {r.status === 'CLOSED' ? (
                           <button
                             onClick={() => handleOpenAuditModal(r)}
                             className="px-2.5 py-1 bg-slate-50 border border-gray-200 hover:bg-gray-100 font-bold rounded-lg transition-colors cursor-pointer text-[11px] text-servora-navy"
                           >
-                            Review & Sign-Off
+                            {r.isAuditSignedOff ? 'Audited ✓' : 'Review & Sign-Off'}
                           </button>
+                        ) : (
+                          <Link
+                            href="/cash-management/shifts"
+                            className="px-2.5 py-1 bg-blue-50 text-servora-core font-bold rounded-lg text-[11px] hover:bg-blue-100"
+                          >
+                            Close Till &rarr;
+                          </Link>
                         )}
                       </td>
                     </tr>
@@ -477,11 +516,13 @@ export default function CashReconciliationPage() {
       {/* 5. MODAL: SUPERVISOR DUAL-CUSTODY AUDIT SIGN-OFF */}
       {selectedShiftForAudit && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
                 <h3 className="text-sm font-bold text-servora-navy">Supervisor Treasury Audit & Sign-Off</h3>
-                <p className="text-[11px] text-gray-400">Shift #{selectedShiftForAudit.shiftId} &bull; Custodian: {selectedShiftForAudit.cashierName}</p>
+                <p className="text-[11px] text-gray-400">
+                  Shift #{selectedShiftForAudit.shiftId} &bull; Custodian: {selectedShiftForAudit.cashierName}
+                </p>
               </div>
               <button onClick={() => setSelectedShiftForAudit(null)} className="text-gray-400 hover:text-black cursor-pointer">
                 <X size={18} />
@@ -491,8 +532,16 @@ export default function CashReconciliationPage() {
             <form onSubmit={handleSignOffAudit} className="space-y-3.5 text-xs">
               <div className="p-3 bg-slate-50 rounded-xl border border-gray-100 font-mono space-y-1">
                 <div className="flex justify-between text-gray-500">
+                  <span>Opening Float + POS Sales:</span>
+                  <span>
+                    KES {(selectedShiftForAudit.openingFloat + selectedShiftForAudit.posSalesDoneSoFar).toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between text-gray-500">
                   <span>Expected Register Balance:</span>
-                  <span className="font-bold text-servora-navy">KES {selectedShiftForAudit.expectedCash.toLocaleString()}</span>
+                  <span className="font-bold text-servora-navy">
+                    KES {selectedShiftForAudit.expectedCash.toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex justify-between text-gray-500">
                   <span>Counted Physical Cash:</span>
@@ -507,6 +556,24 @@ export default function CashReconciliationPage() {
                   </span>
                 </div>
               </div>
+
+              {/* Show Cashier's Denominational Breakdown if recorded */}
+              {selectedShiftForAudit.denominations &&
+                Object.keys(selectedShiftForAudit.denominations).length > 0 && (
+                  <div className="p-3 bg-blue-50/40 rounded-xl border border-blue-100 space-y-1.5">
+                    <span className="text-[10px] font-bold uppercase text-servora-navy flex items-center gap-1">
+                      <Coins size={12} className="text-servora-core" /> Recorded Note & Coin Tally
+                    </span>
+                    <div className="grid grid-cols-3 gap-1.5 text-[11px] font-mono">
+                      {Object.entries(selectedShiftForAudit.denominations).map(([denom, qty]) => (
+                        <div key={denom} className="bg-white px-2 py-1 rounded border border-gray-200 flex justify-between">
+                          <span className="text-gray-500">{denom === 'coins' ? 'Coins' : `KES ${denom}`}:</span>
+                          <span className="font-bold">{qty}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               <div>
                 <label className="block text-[11px] font-bold text-servora-navy mb-1">
@@ -548,7 +615,7 @@ export default function CashReconciliationPage() {
                   className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-bold text-servora-navy focus:outline-none cursor-pointer"
                 >
                   <option value="VERIFIED_BALANCED">Verified Balanced (Full Deposit Cleared)</option>
-                  <option value="VARIANCE_ACCEPTED">Variance Accepted (Normal Operational Drift)</option>
+                  <option value="VARIANCE_ACCEPTED">Variance Accepted (Auto-Post GL Adjustment)</option>
                   <option value="DISPUTED_ESCALATED">Disputed & Escalated (Trigger Governance Alert)</option>
                 </select>
               </div>
