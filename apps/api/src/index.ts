@@ -118,6 +118,7 @@ import payablesRoutes from './routes/payables.routes';
 import taxesRoutes from './routes/taxes.routes';
 import adjustmentsRoutes from './routes/adjustments.routes';
 import financeHubRoutes from './routes/finance-hub.routes';
+import posTerminalRoutes from './routes/pos-terminal.routes';
 
 const app: Express = express();
 const port = process.env.PORT || 8000;
@@ -270,7 +271,8 @@ app.use('/api/v1/loyalty/transactions', loyaltyTransactionsRoutes);
 app.use('/api/v1/loyalty/rewards', loyaltyRewardsRoutes);
 app.use('/api/v1/loyalty', loyaltyRoutes);
 
-// 12 marketing/CRM modules
+// 12 POS Terminal Context, CRM Lookup & Promo Validation, marketing/CRM modules 
+app.use('/api/v1/pos', posTerminalRoutes);
 app.use('/api/v1/marketing/promotions', promotionalDiscountRoutes);
 app.use('/api/v1/marketing/templates', marketingTemplateRoutes);
 app.use('/api/v1/marketing/hub', marketingHubRoutes);

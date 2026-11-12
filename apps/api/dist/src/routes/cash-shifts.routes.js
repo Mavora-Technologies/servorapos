@@ -6,8 +6,10 @@ const cash_shifts_controller_1 = require("../controllers/cash-shifts.controller"
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.requireAuth);
 router.get('/', cash_shifts_controller_1.getShifts);
+router.get('/setup', cash_shifts_controller_1.getShiftSetup);
 router.get('/metrics', cash_shifts_controller_1.getShiftOverview);
 router.get('/active', cash_shifts_controller_1.getMyActiveShift);
 router.post('/open', cash_shifts_controller_1.postOpenShift);
+router.post('/cash-movement', cash_shifts_controller_1.postShiftCashMovement);
 router.post('/close', cash_shifts_controller_1.postCloseShift);
 exports.default = router;

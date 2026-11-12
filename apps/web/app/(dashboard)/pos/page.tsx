@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -11,7 +11,6 @@ import {
   ShoppingBag,
   CreditCard,
   Clock,
-  Coffee,
   Utensils,
   Printer,
   CheckCircle,
@@ -28,13 +27,15 @@ import {
   Truck,
   Car,
   QrCode,
-  ShieldCheck,
   Split,
-  Wifi,
-  Receipt,
   Users,
   AlertTriangle,
-  ArrowRight,
+  Building2,
+  Award,
+  Tag,
+  UserCheck,
+  Gift,
+  Lock,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -67,6 +68,67 @@ interface BranchProfile {
   etimsBranchId?: string;
   etimsDeviceSerial?: string;
   receiptFooter?: string;
+  isMainBranch?: boolean;
+}
+
+interface CashDrawerOption {
+  id: number;
+  drawerCode: string;
+  name: string;
+  status: string;
+  currentBalance: number;
+}
+
+interface ActiveCashierShift {
+  id: number;
+  branchId: number | null;
+  openingFloat: number;
+  expectedCash: number;
+  status: string;
+  openedAt: string;
+}
+
+interface CustodianGuardrails {
+  id: number;
+  cashDrawerId: number;
+  shiftType: string;
+  allocatedFloat: number;
+  maxCashLimit: number;
+  allowRefunds: boolean;
+  allowDrawerPop: boolean;
+  allowManualDiscount: boolean;
+  maxDiscountPercent: number;
+}
+
+interface LoyaltyCustomerMatch {
+  id: number;
+  name: string;
+  phone: string;
+  email: string | null;
+  kraPin: string | null;
+  companyName: string | null;
+  customerType: string;
+  totalSpent: number;
+  ordersCount: number;
+  currentPoints: number;
+  tierId: number | null;
+  tierName: string;
+  earningMultiplier: number;
+}
+
+interface LoyaltyRewardOption {
+  id: number;
+  name: string;
+  pointsCost: number;
+  rewardType: string;
+  rewardValue: number;
+  minTierId: number | null;
+}
+
+interface ItemAvailabilityFlag {
+  menuItemId: number;
+  is86ed: boolean;
+  remainingCount: number | null;
 }
 
 interface MenuItem {
@@ -91,14 +153,6 @@ interface RestaurantTable {
   tableLabel: string;
   areaId: number;
   status: string;
-}
-
-interface CashDrawerSession {
-  id: number;
-  drawerId: number;
-  drawerName: string;
-  openingFloat: string;
-  expectedClosingBalance: string;
 }
 
 interface ServiceModel {
@@ -156,6 +210,7 @@ interface ReceiptTemplate {
   showFiscalDeviceSerial: boolean;
   showPaymentBreakdown: boolean;
   showChangeDue: boolean;
+  showLoyaltyPoints: boolean;
   footerMessage: string | null;
   returnPolicy: string | null;
   wifiDetails: string | null;
@@ -166,32 +221,54 @@ type MobileTab = 'menu' | 'cart';
 
 const SERVICE_MODEL_ICONS: Record<string, any> = {
   DINE_IN: Utensils,
-  QUICK_SERVICE: Store,
+  QUICK_SERVICE: ShoppingBag,
   BAR_TAB: Wine,
   TAKEAWAY: ShoppingBag,
   DELIVERY: Truck,
   DRIVE_THRU: Car,
 };
 
-function Store(props: any) {
-  return <ShoppingBag {...props} />;
-}
-
 export default function POSPage() {
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get('tableId');
   const receiptPrintRef = useRef<HTMLDivElement>(null);
 
-  // Dynamic Workspace & Auth User States
+  // Dynamic Workspace, Branch & Auth User States
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
-  const [branch, setBranch] = useState<BranchProfile | null>(null);
+  const [branches, setBranches] = useState<BranchProfile[]>([]);
+  const [activeBranch, setActiveBranch] = useState<BranchProfile | null>(null);
 
-  // Catalog & Product Matrix
+  // Cash Drawers, Active Shift & Custodian Guardrails
+  const [drawers, setDrawers] = useState<CashDrawerOption[]>([]);
+  const [selectedDrawerId, setSelectedDrawerId] = useState<string>('');
+  const [activeShift, setActiveShift] = useState<ActiveCashierShift | null>(null);
+  const [custodianGuardrails, setCustodianGuardrails] = useState<CustodianGuardrails | null>(null);
+
+  // Catalog & Availability Matrix
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>(['All']);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [availabilityMap, setAvailabilityMap] = useState<Record<number, ItemAvailabilityFlag>>({});
+
+  // CRM Customer & Loyalty Engine States
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerMatches, setCustomerMatches] = useState<LoyaltyCustomerMatch[]>([]);
+  const [selectedCustomer, setSelectedCustomer] = useState<LoyaltyCustomerMatch | null>(null);
+  const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
+  const [loyaltyRewards, setLoyaltyRewards] = useState<LoyaltyRewardOption[]>([]);
+  const [selectedReward, setSelectedReward] = useState<LoyaltyRewardOption | null>(null);
+
+  // Promotional Code States
+  const [promoCodeInput, setPromoCodeInput] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<{
+    id: number;
+    code: string;
+    calculatedDiscountKes: number;
+  } | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [isValidatingPromo, setIsValidatingPromo] = useState(false);
 
   // Cart & Order Attributes
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -208,7 +285,6 @@ export default function POSPage() {
   const [activeServiceModel, setActiveServiceModel] = useState<ServiceModel | null>(null);
   const [financialSettings, setFinancialSettings] = useState<FinancialSettings | null>(null);
   const [receiptTemplate, setReceiptTemplate] = useState<ReceiptTemplate | null>(null);
-  const [activeSession, setActiveSession] = useState<CashDrawerSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Mobile layout state
@@ -226,22 +302,30 @@ export default function POSPage() {
   // Completed Receipt State
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async (overrideBranchId?: number) => {
     try {
       setIsLoading(true);
+      const savedBranchId =
+        overrideBranchId ||
+        (typeof window !== 'undefined'
+          ? Number(localStorage.getItem('servora_active_branch_id')) || undefined
+          : undefined);
+
+      const branchParam = savedBranchId ? `?branchId=${savedBranchId}` : '';
+
       const [
         authRes,
+        posContextRes,
         menuRes,
         tablesRes,
-        sessionRes,
         serviceModelsRes,
         finRes,
         receiptRes,
       ] = await Promise.all([
         fetchApi('/api/v1/auth/me').catch(() => null),
-        fetchApi('/api/v1/menu/active').catch(() => ({ data: { items: [], categories: [] } })),
-        fetchApi('/api/v1/restaurant/tables').catch(() => ({ data: [] })),
-        fetchApi('/api/v1/cash-management/drawers').catch(() => ({ data: { activeSessions: [] } })),
+        fetchApi(`/api/v1/pos/context${branchParam}`).catch(() => null),
+        fetchApi(`/api/v1/menu/active${branchParam}`).catch(() => ({ data: { items: [], categories: [] } })),
+        fetchApi(`/api/v1/restaurant/tables${branchParam}`).catch(() => ({ data: [] })),
         fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
         fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
         fetchApi('/api/v1/settings/receipts').catch(() => ({ data: [] })),
@@ -249,74 +333,191 @@ export default function POSPage() {
 
       if (authRes?.data) {
         setBusiness(authRes.data.business);
-        setBranch(authRes.data.branch);
-        if (authRes.data.user) {
-          setCurrentUser(authRes.data.user);
-        }
+        if (authRes.data.user) setCurrentUser(authRes.data.user);
       }
 
-      if (menuRes?.data) {
-        setMenuItems(menuRes.data.items || []);
+      if (posContextRes?.data) {
+        const ctx = posContextRes.data;
+        setBranches(ctx.branches || []);
+        setActiveBranch(ctx.activeBranch || authRes?.data?.branch || null);
+        if (ctx.activeBranch && typeof window !== 'undefined') {
+          localStorage.setItem('servora_active_branch_id', String(ctx.activeBranch.id));
+        }
+
+        setDrawers(ctx.drawers || []);
+        setActiveShift(ctx.activeShift || null);
+        setCustodianGuardrails(ctx.custodianGuardrails || null);
+        setLoyaltyRewards(ctx.loyaltyRewards || []);
+
+        // Auto-select assigned drawer or first open drawer
+        if (ctx.custodianGuardrails?.cashDrawerId) {
+          setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
+        } else if (ctx.drawers?.length > 0 && !selectedDrawerId) {
+          const openDrawer = ctx.drawers.find((d: CashDrawerOption) => d.status === 'OPEN');
+          setSelectedDrawerId(String((openDrawer || ctx.drawers[0]).id));
+        }
+
+        // Build 86'd / low-stock lookup map
+        const availLookup: Record<number, ItemAvailabilityFlag> = {};
+        for (const flag of ctx.itemAvailability || []) {
+          availLookup[flag.menuItemId] = flag;
+        }
+        setAvailabilityMap(availLookup);
+      } else if (authRes?.data?.branch) {
+        setActiveBranch(authRes.data.branch);
+      }
+
+      if (menuRes?.data?.items?.length > 0) {
+        setMenuItems(menuRes.data.items);
         setCategories(['All', ...(menuRes.data.categories || [])]);
+      } else {
+        // Fallback to /api/v1/menu/items if /active route wasn't matched
+        const fallbackRes = await fetchApi(`/api/v1/menu/items${branchParam}`).catch(() => null);
+        const rawItems = fallbackRes?.data?.items || fallbackRes?.data || [];
+        if (Array.isArray(rawItems) && rawItems.length > 0) {
+          const normalized = rawItems.map((i: any) => ({
+            id: String(i.id),
+            name: i.name,
+            category: i.categoryName || i.category?.name || i.category || 'Menu',
+            price: Number(i.price || 0),
+            isAvailable: i.isAvailable !== false,
+            sku: i.sku,
+            image: i.imageUrl || i.image,
+          }));
+          const uniqueCats = Array.from(new Set(normalized.map((i: any) => i.category))) as string[];
+          setMenuItems(normalized);
+          setCategories(['All', ...uniqueCats]);
+        }
       }
 
       if (tablesRes?.data) {
         setTables(tablesRes.data);
       }
 
-      if (sessionRes?.data?.activeSessions?.[0]) {
-        setActiveSession(sessionRes.data.activeSessions[0]);
-      }
-
-      // Configure Active Service Models
       if (serviceModelsRes?.data && Array.isArray(serviceModelsRes.data)) {
         const activeOnly = serviceModelsRes.data.filter((m: ServiceModel) => m.isActive);
         setServiceModels(activeOnly);
         const defaultModel =
           activeOnly.find((m: ServiceModel) => m.type === 'DINE_IN') || activeOnly[0];
-        if (defaultModel) {
-          setActiveServiceModel(defaultModel);
-        }
+        if (defaultModel) setActiveServiceModel(defaultModel);
       }
 
-      // Financial & Tax Settings
       if (finRes?.data?.settings) {
         setFinancialSettings(finRes.data.settings);
       }
 
-      // Thermal Receipt Template
       if (receiptRes?.data && Array.isArray(receiptRes.data)) {
         const defaultTpl =
           receiptRes.data.find((t: ReceiptTemplate) => (t as any).isDefault) || receiptRes.data[0];
-        if (defaultTpl) {
-          setReceiptTemplate(defaultTpl);
-        }
+        if (defaultTpl) setReceiptTemplate(defaultTpl);
       }
     } catch (error) {
       console.warn('POS: Initializing terminal state.', error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedDrawerId]);
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [loadInitialData]);
+
+  // Debounced CRM & Loyalty Member Search
+  useEffect(() => {
+    if (!customerSearchQuery.trim() || customerSearchQuery.trim().length < 2) {
+      setCustomerMatches([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingCustomers(true);
+        const res = await fetchApi(
+          `/api/v1/pos/customers?search=${encodeURIComponent(customerSearchQuery.trim())}`
+        );
+        setCustomerMatches(res?.data || []);
+      } catch {
+        setCustomerMatches([]);
+      } finally {
+        setIsSearchingCustomers(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [customerSearchQuery]);
+
+  const handleBranchSwitch = (newBranchId: string) => {
+    const idNum = parseInt(newBranchId, 10);
+    if (!idNum) return;
+    setSelectedTableId('');
+    setSelectedDrawerId('');
+    loadInitialData(idNum);
+  };
+
+  const handleSelectLoyaltyCustomer = (cust: LoyaltyCustomerMatch) => {
+    setSelectedCustomer(cust);
+    setCustomerName(cust.name);
+    setCustomerPhone(cust.phone);
+    if (cust.kraPin) setBuyerKraPin(cust.kraPin);
+    setCustomerSearchQuery('');
+    setCustomerMatches([]);
+    setSelectedReward(null);
+  };
+
+  const handleClearLoyaltyCustomer = () => {
+    setSelectedCustomer(null);
+    setSelectedReward(null);
+    setCustomerName('');
+    setCustomerPhone('');
+    setBuyerKraPin('');
+  };
+
+  const handleApplyPromoCode = async () => {
+    if (!promoCodeInput.trim()) return;
+    try {
+      setIsValidatingPromo(true);
+      setPromoError(null);
+      const rawSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const res = await fetchApi('/api/v1/pos/validate-promo', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: promoCodeInput.trim(),
+          subtotalKes: rawSubtotal,
+        }),
+      });
+      if (res?.data) {
+        setAppliedPromo(res.data);
+        setPromoCodeInput('');
+      }
+    } catch (err: any) {
+      setPromoError(err.message || 'Invalid promo code');
+    } finally {
+      setIsValidatingPromo(false);
+    }
+  };
 
   const currencySymbol = business?.currency || financialSettings?.baseCurrency || 'KES';
 
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-      const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch =
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase()));
       return matchesCategory && matchesSearch && item.isAvailable;
     });
   }, [menuItems, selectedCategory, searchQuery]);
 
   const addToCart = (item: MenuItem) => {
+    const flag = availabilityMap[Number(item.id)];
+    if (flag?.is86ed) return;
+
     setCart((prev) => {
       const existing = prev.find((c) => c.id === item.id);
       if (existing) {
+        if (flag?.remainingCount !== null && flag?.remainingCount !== undefined) {
+          if (existing.quantity >= flag.remainingCount) return prev;
+        }
         return prev.map((c) => (c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
       }
       return [
@@ -348,37 +549,52 @@ export default function POSPage() {
     if (window.confirm('Clear active terminal ticket? All unposted line items will be removed.')) {
       setCart([]);
       setSelectedTableId('');
-      setCustomerName('');
-      setCustomerPhone('');
-      setBuyerKraPin('');
+      handleClearLoyaltyCustomer();
       setOrderDiscountPercent(0);
+      setAppliedPromo(null);
+      setPromoError(null);
       setGuestCount(1);
     }
   };
 
-  // Real-Time Enterprise Financial Calculations
+  // Real-Time Enterprise Financial & Loyalty Calculations
   const calculations = useMemo(() => {
     const rawSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const discountAmount = rawSubtotal * (orderDiscountPercent / 100);
-    const discountedGross = Math.max(0, rawSubtotal - discountAmount);
+    const manualDiscountKes = rawSubtotal * (orderDiscountPercent / 100);
+    const promoDiscountKes = appliedPromo ? appliedPromo.calculatedDiscountKes : 0;
+
+    // Loyalty Reward Discount (if FIXED or PERCENTAGE reward redeemed)
+    let rewardDiscountKes = 0;
+    if (selectedReward) {
+      if (selectedReward.rewardType === 'DISCOUNT_FIXED') {
+        rewardDiscountKes = selectedReward.rewardValue;
+      } else if (selectedReward.rewardType === 'PERCENTAGE_OFF') {
+        rewardDiscountKes = rawSubtotal * (selectedReward.rewardValue / 100);
+      }
+    }
+
+    const totalDiscountAmount = Math.min(
+      rawSubtotal,
+      manualDiscountKes + promoDiscountKes + rewardDiscountKes
+    );
+    const discountedGross = Math.max(0, rawSubtotal - totalDiscountAmount);
 
     const isVatInclusive = financialSettings ? financialSettings.isVatInclusive : true;
     const vatRate = financialSettings ? parseFloat(financialSettings.vatRate) / 100 : 0.16;
     const isCateringLevyEnabled = financialSettings
       ? financialSettings.isCateringLevyEnabled
       : true;
-    const levyRate = isCateringLevyEnabled && financialSettings
-      ? parseFloat(financialSettings.cateringLevyRate) / 100
-      : 0.02;
+    const levyRate =
+      isCateringLevyEnabled && financialSettings
+        ? parseFloat(financialSettings.cateringLevyRate) / 100
+        : 0.02;
 
-    // Service Charge from Model or Financial Settings
     const modelServiceChargePercent = activeServiceModel?.autoApplyServiceCharge
       ? parseFloat(activeServiceModel.serviceChargePercent) / 100
       : financialSettings?.isServiceChargeEnabled
-      ? parseFloat(financialSettings.serviceChargeRate) / 100
-      : 0;
+        ? parseFloat(financialSettings.serviceChargeRate) / 100
+        : 0;
 
-    // Packaging Charge from Active Service Model
     const packingChargeAmount = activeServiceModel
       ? parseFloat(activeServiceModel.packingChargeAmount) || 0
       : 0;
@@ -404,19 +620,38 @@ export default function POSPage() {
       grandTotal = netAmount + vatAmount + levyAmount + serviceChargeAmount + packingChargeAmount;
     }
 
+    // Loyalty Points Earned Preview (1 point per 100 KES * Tier Multiplier)
+    const basePoints = Math.floor(grandTotal / 100);
+    const multiplier = selectedCustomer?.earningMultiplier || 1;
+    const estimatedPointsEarned = selectedCustomer ? Math.round(basePoints * multiplier) : 0;
+
     return {
       rawSubtotal,
-      discountAmount,
+      discountAmount: totalDiscountAmount,
       netAmount,
       vatAmount,
       levyAmount,
       serviceChargeAmount,
       packingChargeAmount,
       grandTotal,
+      estimatedPointsEarned,
     };
-  }, [cart, orderDiscountPercent, financialSettings, activeServiceModel]);
+  }, [
+    cart,
+    orderDiscountPercent,
+    appliedPromo,
+    selectedReward,
+    financialSettings,
+    activeServiceModel,
+    selectedCustomer,
+  ]);
 
   const totalItemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  const selectedDrawerObj = useMemo(
+    () => drawers.find((d) => String(d.id) === selectedDrawerId) || null,
+    [drawers, selectedDrawerId]
+  );
 
   // Cash Change Calculation
   const cashChangeDue = useMemo(() => {
@@ -432,13 +667,24 @@ export default function POSPage() {
     return 0;
   }, [paymentMethod, cashTendered, splitCashAmount, splitMpesaAmount, calculations.grandTotal]);
 
-  // Safe Drop Alert Telemetry Check
+  // Safe Drop Alert Telemetry Check (Checks Active Shift + Custodian Max Cash Limit)
   const isSafeDropWarning = useMemo(() => {
-    if (!financialSettings?.enableSafeDropAlerts || !activeSession) return false;
-    const currentBalance = parseFloat(activeSession.expectedClosingBalance) || 0;
-    const threshold = parseFloat(financialSettings.maxDrawerCashThreshold) || 50000;
+    if (!financialSettings?.enableSafeDropAlerts) return false;
+    const currentBalance =
+      activeShift?.expectedCash ?? selectedDrawerObj?.currentBalance ?? 0;
+    const threshold =
+      custodianGuardrails?.maxCashLimit ||
+      parseFloat(financialSettings.maxDrawerCashThreshold) ||
+      50000;
     return currentBalance >= threshold * 0.9;
-  }, [financialSettings, activeSession]);
+  }, [financialSettings, activeShift, selectedDrawerObj, custodianGuardrails]);
+
+  // Max discount ceiling allowed for this cashier assignment
+  const maxAllowedDiscount = useMemo(() => {
+    if (!custodianGuardrails) return 20;
+    if (!custodianGuardrails.allowManualDiscount) return 0;
+    return custodianGuardrails.maxDiscountPercent;
+  }, [custodianGuardrails]);
 
   const handleOpenPayment = () => {
     if (cart.length === 0) return;
@@ -458,9 +704,26 @@ export default function POSPage() {
     try {
       const tableObj = tables.find((t) => String(t.id) === selectedTableId);
 
+      // 1. If Loyalty Reward was redeemed, execute redemption deduction first
+      if (selectedCustomer && selectedReward) {
+        await fetchApi('/api/v1/loyalty/rewards/redeem', {
+          method: 'POST',
+          body: JSON.stringify({
+            customerId: selectedCustomer.id,
+            rewardId: selectedReward.id,
+            notes: `Redeemed at POS Terminal (${activeBranch?.name || 'Outlet'})`,
+          }),
+        });
+      }
+
+      // 2. Post Order & Tender Settlement
       const result = await fetchApi('/api/v1/orders', {
         method: 'POST',
         body: JSON.stringify({
+          branchId: activeBranch?.id,
+          cashDrawerId: selectedDrawerId ? parseInt(selectedDrawerId, 10) : undefined,
+          cashierShiftId: activeShift?.id,
+          customerId: selectedCustomer?.id,
           orderType: activeServiceModel?.name || 'Dine-In',
           serviceModelId: activeServiceModel?.id,
           tableId: selectedTableId ? parseInt(selectedTableId, 10) : undefined,
@@ -469,6 +732,7 @@ export default function POSPage() {
           customerPhone: customerPhone.trim() || undefined,
           buyerKraPin: buyerKraPin.trim() || undefined,
           guestCount: activeServiceModel?.promptGuestCount ? guestCount : undefined,
+          promoCode: appliedPromo?.code,
           subtotal: calculations.netAmount,
           tax: calculations.vatAmount,
           cateringLevy: calculations.levyAmount,
@@ -481,8 +745,8 @@ export default function POSPage() {
             paymentMethod === 'Cash'
               ? parseFloat(cashTendered)
               : paymentMethod === 'Split'
-              ? parseFloat(splitCashAmount)
-              : calculations.grandTotal,
+                ? parseFloat(splitCashAmount)
+                : calculations.grandTotal,
           changeReturned: cashChangeDue,
           items: cart.map((i) => ({
             menuItemId: parseInt(i.id, 10) || 1,
@@ -501,7 +765,7 @@ export default function POSPage() {
         );
       }
 
-      // Trigger M-Pesa STK Push if M-Pesa was selected or split
+      // 3. Trigger M-Pesa STK Push if M-Pesa was selected or split
       if (
         (paymentMethod === 'M-Pesa' || paymentMethod === 'Split') &&
         (customerPhone || mpesaPhone)
@@ -520,7 +784,7 @@ export default function POSPage() {
               result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
             notes: `POS Tender for ${customerName || 'Guest'}`,
           }),
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       const generatedReceipt = {
@@ -535,24 +799,32 @@ export default function POSPage() {
           paymentMethod === 'Cash'
             ? parseFloat(cashTendered)
             : paymentMethod === 'Split'
-            ? parseFloat(splitCashAmount)
-            : calculations.grandTotal,
+              ? parseFloat(splitCashAmount)
+              : calculations.grandTotal,
         cashChangeDue,
         tableName: tableObj ? tableObj.tableLabel : activeServiceModel?.name || 'Walk-in',
         customerName: customerName || 'Walk-in Guest',
         customerPhone: customerPhone || null,
         buyerKraPin: buyerKraPin || null,
+        loyaltyTier: selectedCustomer?.tierName || null,
+        loyaltyPointsBalance: selectedCustomer
+          ? selectedCustomer.currentPoints -
+          (selectedReward?.pointsCost || 0) +
+          calculations.estimatedPointsEarned
+          : null,
         servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
-        drawerName: activeSession?.drawerName || 'Main Till',
+        drawerName: selectedDrawerObj?.name || 'Main Till',
         timestamp: new Date().toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' }),
         businessName: receiptTemplate?.headerTitle || business?.name || 'Restaurant Workspace',
         headerSubtitle: receiptTemplate?.headerSubtitle || '',
-        branchName: branch?.name || '',
-        branchAddress: branch?.address || '',
-        branchPhone: branch?.phone || business?.phone || '',
-        kraPin: financialSettings?.taxPin || branch?.kraPin || business?.kraPin || '',
+        branchName: activeBranch?.name || '',
+        branchAddress: activeBranch?.address || '',
+        branchPhone: activeBranch?.phone || business?.phone || '',
+        kraPin: financialSettings?.taxPin || activeBranch?.kraPin || business?.kraPin || '',
         etimsDeviceSerial:
-          branch?.etimsDeviceSerial || (financialSettings as any)?.etimsDeviceSerial || 'OSCU-SCU-2026-NBO',
+          activeBranch?.etimsDeviceSerial ||
+          (financialSettings as any)?.etimsDeviceSerial ||
+          'OSCU-SCU-2026-NBO',
         footerMessage: receiptTemplate?.footerMessage || 'Thank you for your business. Karibu tena!',
         returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
         wifiDetails: receiptTemplate?.wifiDetails || null,
@@ -560,8 +832,12 @@ export default function POSPage() {
 
       setCompletedOrder(generatedReceipt);
       setCart([]);
+      setAppliedPromo(null);
+      setSelectedReward(null);
+      setOrderDiscountPercent(0);
       setIsPaymentModalOpen(false);
       setMobileTab('menu');
+      loadInitialData(activeBranch?.id);
     } catch (error: any) {
       alert(error.message || 'POS Checkout transaction encountered an error.');
     } finally {
@@ -569,7 +845,6 @@ export default function POSPage() {
     }
   };
 
-  // Thermal Print Engine dynamically adapting to the loaded template configuration
   const handlePrintReceipt = () => {
     const receiptElement = receiptPrintRef.current;
     if (!receiptElement) {
@@ -602,10 +877,7 @@ export default function POSPage() {
           <meta charset="utf-8" />
           <title>Receipt - ${completedOrder?.orderNumber || 'Slip'}</title>
           <style>
-            @page {
-              size: ${paperWidth} auto;
-              margin: 0mm !important;
-            }
+            @page { size: ${paperWidth} auto; margin: 0mm !important; }
             html, body {
               margin: 0 !important;
               padding: 0 !important;
@@ -669,53 +941,100 @@ export default function POSPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] gap-3 font-sans">
-      {/* 1. TOP CONTROL TELEMETRY BAR & SAFE DROP ALERTS */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-blue-50 text-servora-core flex items-center justify-center shrink-0">
-            <Wallet size={16} />
-          </div>
-          <div>
-            <div className="text-[10px] font-bold uppercase text-gray-400 tracking-wider">
-              {branch?.name || 'Store'} &bull; Terminal Station
-            </div>
-            <div className="text-xs font-bold text-servora-navy flex items-center gap-2">
-              <span>{activeSession ? activeSession.drawerName : 'Unassigned Register'}</span>
-              {activeSession && (
-                <span className="font-mono text-gray-500 font-medium">
-                  (Till: {currencySymbol} {parseFloat(activeSession.openingFloat).toLocaleString()})
+      {/* 1. ENTERPRISE TERMINAL HEADER: BRANCH, DRAWER & SHIFT TELEMETRY */}
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Branch Outlet Switcher */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl">
+            <Building2 size={15} className="text-servora-core shrink-0" />
+            <div>
+              <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
+                Active Outlet
+              </span>
+              {branches.length > 1 ? (
+                <select
+                  value={activeBranch?.id || ''}
+                  onChange={(e) => handleBranchSwitch(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+                >
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name} ({b.code})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs font-bold text-servora-navy">
+                  {activeBranch?.name || 'Main Outlet'}
                 </span>
+              )}
+            </div>
+          </div>
+
+          {/* Physical Cash Drawer Register Selector */}
+          <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl">
+            <Wallet size={15} className="text-servora-core shrink-0" />
+            <div>
+              <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
+                Cash Drawer Register
+              </span>
+              {drawers.length > 0 ? (
+                <select
+                  value={selectedDrawerId}
+                  onChange={(e) => setSelectedDrawerId(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+                >
+                  {drawers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} [{d.drawerCode}] &bull; {d.status}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Link
+                  href="/cash-management/drawers"
+                  className="text-xs font-bold text-amber-700 hover:underline"
+                >
+                  No Drawers Configured &rarr;
+                </Link>
               )}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+        {/* Right Side: Shift Status, Safe Drop Alert & Sync */}
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
           {isSafeDropWarning && (
             <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold animate-pulse">
               <AlertTriangle size={13} className="text-amber-600" />
-              <span>Safe Drop Recommended</span>
+              <span>Safe Drop Threshold Reached</span>
             </div>
           )}
 
-          {!activeSession ? (
+          {!activeShift ? (
             <Link
-              href="/cash-management/drawers"
+              href="/cash-management/shifts"
               className="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors flex items-center gap-1.5"
             >
-              <AlertCircle size={13} /> Open Shift Float &rarr;
+              <Clock size={13} /> No Active Shift &bull; Open Till Float &rarr;
             </Link>
           ) : (
-            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-xl text-xs font-bold">
-              <Unlock size={12} /> Expected:{' '}
-              {currencySymbol} {parseFloat(activeSession.expectedClosingBalance).toLocaleString()}
-            </div>
+            <Link
+              href="/cash-management/shifts"
+              className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors"
+              title="Blind Custody Active — Manage Shift"
+            >
+              <Unlock size={13} className="text-emerald-600" />
+              <span>
+                Shift #{activeShift.id} &bull; Active
+              </span>
+            </Link>
           )}
 
           <button
-            onClick={loadInitialData}
-            title="Sync Workspace & Catalog"
-            className="p-1.5 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
+            onClick={() => loadInitialData(activeBranch?.id)}
+            title="Sync Workspace, Drawers & Catalog"
+            className="p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
           >
             <RefreshCw size={14} className={isLoading ? 'animate-spin text-servora-core' : ''} />
           </button>
@@ -726,17 +1045,15 @@ export default function POSPage() {
       <div className="flex lg:hidden bg-white p-1 rounded-xl border border-gray-200 shadow-xs shrink-0">
         <button
           onClick={() => setMobileTab('menu')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
-            mobileTab === 'menu' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
-          }`}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${mobileTab === 'menu' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
+            }`}
         >
           <Layers size={15} /> Catalog ({filteredItems.length})
         </button>
         <button
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
-            mobileTab === 'cart' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
-          }`}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${mobileTab === 'cart' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
+            }`}
         >
           <ShoppingCart size={15} /> Current Order
           {totalItemsCount > 0 && (
@@ -751,9 +1068,8 @@ export default function POSPage() {
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
         {/* LEFT COLUMN: ITEM CATALOG & LOOKUP */}
         <div
-          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
-            mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
-          }`}
+          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
+            }`}
         >
           <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
             <div className="flex flex-wrap items-center gap-2">
@@ -802,11 +1118,10 @@ export default function POSPage() {
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                    selectedCategory === cat
-                      ? 'bg-servora-navy text-white shadow-xs'
-                      : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
-                  }`}
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${selectedCategory === cat
+                    ? 'bg-servora-navy text-white shadow-xs'
+                    : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
+                    }`}
                 >
                   {cat}
                 </button>
@@ -814,7 +1129,7 @@ export default function POSPage() {
             </div>
           </div>
 
-          {/* Product Cards Grid */}
+          {/* Product Cards Grid with 86'd & Low-Stock Telemetry */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
@@ -828,56 +1143,75 @@ export default function POSPage() {
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
-                {filteredItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => addToCart(item)}
-                    className="flex flex-col text-left bg-white p-3 rounded-xl border border-gray-200 shadow-xs hover:border-servora-core/40 hover:shadow-md transition-all active:scale-97 h-28 justify-between group cursor-pointer"
-                  >
-                    <div>
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-servora-deepTeal bg-slate-100 px-1.5 py-0.5 rounded-md inline-block mb-1">
-                        {item.category}
-                      </span>
-                      <span className="text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
-                        {item.name}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center pt-1 border-t border-gray-50">
-                      <span className="text-xs font-mono font-bold text-servora-core">
-                        {currencySymbol} {item.price.toLocaleString()}
-                      </span>
-                      <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors">
-                        <Plus size={11} />
+                {filteredItems.map((item) => {
+                  const flag = availabilityMap[Number(item.id)];
+                  const is86ed = flag?.is86ed === true;
+                  const lowCount = flag?.remainingCount;
+
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => addToCart(item)}
+                      disabled={is86ed}
+                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-28 justify-between group ${is86ed
+                        ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
+                        : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
+                        }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span className="text-[9px] font-bold uppercase tracking-wider text-servora-deepTeal bg-slate-100 px-1.5 py-0.5 rounded-md truncate">
+                            {item.category}
+                          </span>
+                          {is86ed ? (
+                            <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md">
+                              86&apos;d
+                            </span>
+                          ) : lowCount !== null && lowCount !== undefined && lowCount <= 5 ? (
+                            <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">
+                              {lowCount} left
+                            </span>
+                          ) : null}
+                        </div>
+                        <span className="text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
+                          {item.name}
+                        </span>
                       </div>
-                    </div>
-                  </button>
-                ))}
+                      <div className="flex justify-between items-center pt-1 border-t border-gray-50">
+                        <span className="text-xs font-mono font-bold text-servora-core">
+                          {currencySymbol} {item.price.toLocaleString()}
+                        </span>
+                        <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors">
+                          <Plus size={11} />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
-        {/* RIGHT COLUMN: ACTIVE CHECK & FISCAL LEDGER */}
+        {/* RIGHT COLUMN: ACTIVE CHECK, CRM LOYALTY & FISCAL LEDGER */}
         <div
-          className={`w-full lg:w-[420px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
-            mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
-          }`}
+          className={`w-full lg:w-[440px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
+            }`}
         >
           {/* Dynamic Service Model Revenue Center Selectors */}
           <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
             {serviceModels.length > 0 ? (
               serviceModels.map((model) => {
-                const Icon = SERVICE_MODEL_ICONS[model.type] || Store;
+                const Icon = SERVICE_MODEL_ICONS[model.type] || ShoppingBag;
                 const isSelected = activeServiceModel?.id === model.id;
                 return (
                   <button
                     key={model.id}
                     onClick={() => setActiveServiceModel(model)}
-                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
-                        : 'text-gray-500 hover:text-servora-navy'
-                    }`}
+                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${isSelected
+                      ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
+                      : 'text-gray-500 hover:text-servora-navy'
+                      }`}
                   >
                     <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
                     <span className="truncate">{model.name}</span>
@@ -889,7 +1223,7 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Order Header Metadata */}
+          {/* CRM Member Lookup & Guest Identity Section */}
           <div className="p-3 border-b border-gray-200 bg-white space-y-2 shrink-0 text-xs">
             {activeServiceModel?.requiresTable && (
               <div className="p-2 bg-blue-50/70 border border-blue-200 rounded-xl font-bold text-servora-core flex justify-between items-center text-xs">
@@ -902,27 +1236,124 @@ export default function POSPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                placeholder="Guest Name (Optional)"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-servora-core text-xs"
-              />
-              <input
-                type="text"
-                placeholder="Phone (07... M-Pesa)"
-                value={customerPhone}
-                onChange={(e) => setCustomerPhone(e.target.value)}
-                className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-servora-core text-xs"
-              />
-            </div>
+            {/* CRM & Loyalty Directory Search Bar */}
+            {!selectedCustomer ? (
+              <div className="relative">
+                <Award className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500" size={14} />
+                <input
+                  type="text"
+                  placeholder="Lookup CRM / Loyalty Member by phone, name, or PIN..."
+                  value={customerSearchQuery}
+                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 bg-amber-50/40 border border-amber-200/80 rounded-xl focus:outline-none focus:border-amber-400 text-xs"
+                />
+                {customerMatches.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 max-h-48 overflow-y-auto divide-y divide-gray-100">
+                    {customerMatches.map((cust) => (
+                      <button
+                        key={cust.id}
+                        type="button"
+                        onClick={() => handleSelectLoyaltyCustomer(cust)}
+                        className="w-full text-left px-3 py-2 hover:bg-blue-50/60 flex justify-between items-center cursor-pointer"
+                      >
+                        <div>
+                          <span className="font-bold text-servora-navy block">{cust.name}</span>
+                          <span className="text-[10px] text-gray-500 font-mono">
+                            {cust.phone} {cust.kraPin ? `• PIN: ${cust.kraPin}` : ''}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold block">
+                            {cust.tierName}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-servora-core">
+                            {cust.currentPoints.toLocaleString()} pts
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Active Loyalty Member Profile Card */
+              <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-2">
+                    <UserCheck size={15} className="text-amber-700 shrink-0" />
+                    <div>
+                      <span className="font-bold text-servora-navy block leading-tight">
+                        {selectedCustomer.name}
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-600">
+                        {selectedCustomer.tierName} ({selectedCustomer.earningMultiplier}x) &bull;{' '}
+                        <strong>{selectedCustomer.currentPoints.toLocaleString()} pts</strong>
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleClearLoyaltyCustomer}
+                    className="text-gray-400 hover:text-rose-600 cursor-pointer"
+                    title="Detach Member"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
 
+                {/* Eligible Rewards Redemption Dropdown */}
+                {loyaltyRewards.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <Gift size={13} className="text-amber-700 shrink-0" />
+                    <select
+                      value={selectedReward?.id || ''}
+                      onChange={(e) => {
+                        const rId = parseInt(e.target.value, 10);
+                        setSelectedReward(loyaltyRewards.find((r) => r.id === rId) || null);
+                      }}
+                      className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none cursor-pointer"
+                    >
+                      <option value="">Redeem Member Reward (Optional)</option>
+                      {loyaltyRewards.map((r) => (
+                        <option
+                          key={r.id}
+                          value={r.id}
+                          disabled={selectedCustomer.currentPoints < r.pointsCost}
+                        >
+                          {r.name} (-{r.pointsCost.toLocaleString()} pts)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Walk-in / Manual Guest Fields */}
+            {!selectedCustomer && (
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  placeholder="Guest Name (Optional)"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-servora-core text-xs"
+                />
+                <input
+                  type="text"
+                  placeholder="Phone (07... M-Pesa)"
+                  value={customerPhone}
+                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-servora-core text-xs"
+                />
+              </div>
+            )}
+
+            {/* Buyer KRA PIN, Guest Covers & Custodian-Guarded Discount */}
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Buyer KRA PIN (Optional eTIMS)"
+                placeholder="Buyer KRA PIN (eTIMS)"
                 value={buyerKraPin}
                 onChange={(e) => setBuyerKraPin(e.target.value.toUpperCase())}
                 className="flex-1 px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono uppercase focus:outline-none focus:border-servora-core text-xs"
@@ -943,21 +1374,70 @@ export default function POSPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2">
-                <Percent size={11} className="text-gray-400" />
+              <div
+                className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2"
+                title={`Custodian Max Discount: ${maxAllowedDiscount}%`}
+              >
+                {maxAllowedDiscount === 0 ? (
+                  <Lock size={11} className="text-gray-400" />
+                ) : (
+                  <Percent size={11} className="text-gray-400" />
+                )}
                 <select
                   value={orderDiscountPercent}
+                  disabled={maxAllowedDiscount === 0}
                   onChange={(e) => setOrderDiscountPercent(Number(e.target.value))}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-50"
                 >
                   <option value="0">0%</option>
-                  <option value="5">5%</option>
-                  <option value="10">10%</option>
-                  <option value="15">15%</option>
-                  <option value="20">20%</option>
+                  {maxAllowedDiscount >= 5 && <option value="5">5%</option>}
+                  {maxAllowedDiscount >= 10 && <option value="10">10%</option>}
+                  {maxAllowedDiscount >= 15 && <option value="15">15%</option>}
+                  {maxAllowedDiscount >= 20 && <option value="20">20%</option>}
                 </select>
               </div>
             </div>
+
+            {/* Dynamic Promotional Code Input */}
+            <div className="flex gap-1.5 items-center">
+              {!appliedPromo ? (
+                <>
+                  <div className="relative flex-1">
+                    <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
+                    <input
+                      type="text"
+                      placeholder="Promo Code (e.g. BRUNCH20)"
+                      value={promoCodeInput}
+                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                      className="w-full pl-7 pr-2.5 py-1 bg-slate-50 border border-gray-200 rounded-lg font-mono uppercase text-[11px] focus:outline-none focus:border-servora-core"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleApplyPromoCode}
+                    disabled={!promoCodeInput.trim() || cart.length === 0 || isValidatingPromo}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-servora-navy font-bold rounded-lg text-[11px] disabled:opacity-40 cursor-pointer"
+                  >
+                    {isValidatingPromo ? '...' : 'Apply'}
+                  </button>
+                </>
+              ) : (
+                <div className="flex-1 flex justify-between items-center px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 font-bold">
+                  <span className="flex items-center gap-1 font-mono">
+                    <Tag size={11} /> {appliedPromo.code} (-{currencySymbol}{' '}
+                    {appliedPromo.calculatedDiscountKes.toLocaleString()})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAppliedPromo(null)}
+                    className="text-emerald-700 hover:text-rose-600 cursor-pointer"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+            </div>
+            {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
           </div>
 
           {/* Cart Itemized List */}
@@ -1004,7 +1484,7 @@ export default function POSPage() {
           </div>
 
           {/* Dynamic Financial Summary & Action Buttons */}
-          <div className="p-3.5 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2.5">
+          <div className="p-3.5 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2">
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-gray-500">
                 <span>Taxable Net Base</span>
@@ -1062,9 +1542,9 @@ export default function POSPage() {
                 </div>
               )}
 
-              {orderDiscountPercent > 0 && (
+              {calculations.discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>Discount ({orderDiscountPercent}%)</span>
+                  <span>Total Discounts & Rewards</span>
                   <span className="font-mono">
                     -{currencySymbol}{' '}
                     {calculations.discountAmount.toLocaleString(undefined, {
@@ -1072,6 +1552,13 @@ export default function POSPage() {
                       maximumFractionDigits: 2,
                     })}
                   </span>
+                </div>
+              )}
+
+              {selectedCustomer && calculations.estimatedPointsEarned > 0 && (
+                <div className="flex justify-between text-amber-700 font-bold text-[11px]">
+                  <span>Loyalty Points Earned</span>
+                  <span className="font-mono">+{calculations.estimatedPointsEarned} pts</span>
                 </div>
               )}
 
@@ -1116,10 +1603,11 @@ export default function POSPage() {
               <div>
                 <h3 className="text-sm font-bold text-servora-navy">Tender Settlement & Routing</h3>
                 <p className="text-[11px] text-gray-500">
-                  {activeServiceModel?.name || 'Order'} &bull;{' '}
+                  {activeBranch?.name || 'Outlet'} &bull;{' '}
+                  {selectedDrawerObj?.name || 'Register'} &bull;{' '}
                   {selectedTableId
                     ? `Table ${tables.find((t) => String(t.id) === selectedTableId)?.tableLabel}`
-                    : 'Counter'}
+                    : activeServiceModel?.name || 'Counter'}
                 </p>
               </div>
               <button
@@ -1148,11 +1636,10 @@ export default function POSPage() {
                 <button
                   key={method}
                   onClick={() => setPaymentMethod(method)}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
-                    paymentMethod === method
-                      ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${paymentMethod === method
+                    ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                    }`}
                 >
                   {method}
                 </button>
@@ -1206,7 +1693,9 @@ export default function POSPage() {
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">Cash Portioned</label>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">
+                      Cash Portioned
+                    </label>
                     <input
                       type="number"
                       value={splitCashAmount}
@@ -1215,7 +1704,9 @@ export default function POSPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">M-Pesa Portioned</label>
+                    <label className="block text-[10px] font-bold text-gray-500 mb-0.5">
+                      M-Pesa Portioned
+                    </label>
                     <input
                       type="number"
                       value={splitMpesaAmount}
@@ -1260,13 +1751,10 @@ export default function POSPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
           <div
             id="thermal-receipt-printable"
-            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
-              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
-            }`}
+            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
+              }`}
           >
-            {/* Printable Content Node */}
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
-              {/* Dynamic Corporate Tax Header */}
               <div className="text-center space-y-0.5">
                 {receiptTemplate?.showLogo !== false && (
                   <div className="inline-block p-1 bg-black text-white font-bold text-[10px] rounded mb-0.5 tracking-widest">
@@ -1279,7 +1767,8 @@ export default function POSPage() {
                 )}
                 {receiptTemplate?.showBranchAddress !== false && (
                   <p className="text-[10px]">
-                    {completedOrder.branchName} {completedOrder.branchAddress && `• ${completedOrder.branchAddress}`}
+                    {completedOrder.branchName}{' '}
+                    {completedOrder.branchAddress && `• ${completedOrder.branchAddress}`}
                   </p>
                 )}
                 {receiptTemplate?.showContactPhone !== false && completedOrder.branchPhone && (
@@ -1296,7 +1785,6 @@ export default function POSPage() {
 
               <div className="dashed-divider"></div>
 
-              {/* Staff & Guest Identity Attributes */}
               <div className="text-[11px] space-y-0.5">
                 {receiptTemplate?.showCustomerDetails !== false && (
                   <div className="flex-between">
@@ -1310,6 +1798,12 @@ export default function POSPage() {
                     <span className="font-bold">{completedOrder.servedBy}</span>
                   </div>
                 )}
+                {completedOrder.drawerName && (
+                  <div className="flex-between">
+                    <span>Register:</span>
+                    <span>{completedOrder.drawerName}</span>
+                  </div>
+                )}
                 {completedOrder.buyerKraPin && (
                   <div className="flex-between font-bold">
                     <span>Buyer PIN:</span>
@@ -1320,7 +1814,6 @@ export default function POSPage() {
 
               <div className="dashed-divider"></div>
 
-              {/* Itemized Lines */}
               <div className="space-y-1">
                 {completedOrder.items.map((i: any) => (
                   <div key={i.cartItemId} className="flex-between text-[11px]">
@@ -1336,7 +1829,6 @@ export default function POSPage() {
 
               <div className="dashed-divider"></div>
 
-              {/* Statutory Tax Breakdown */}
               <div className="space-y-1 text-[11px]">
                 <div className="flex-between">
                   <span>Net Food & Beverage:</span>
@@ -1389,7 +1881,21 @@ export default function POSPage() {
                 {completedOrder.packingChargeAmount > 0 && (
                   <div className="flex-between">
                     <span>Packaging:</span>
-                    <span>{currencySymbol} {completedOrder.packingChargeAmount.toLocaleString()}</span>
+                    <span>
+                      {currencySymbol} {completedOrder.packingChargeAmount.toLocaleString()}
+                    </span>
+                  </div>
+                )}
+                {completedOrder.discountAmount > 0 && (
+                  <div className="flex-between font-bold">
+                    <span>Savings / Discount:</span>
+                    <span>
+                      -{currencySymbol}{' '}
+                      {completedOrder.discountAmount.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
                   </div>
                 )}
 
@@ -1409,7 +1915,6 @@ export default function POSPage() {
 
               <div className="dashed-divider"></div>
 
-              {/* Tender Attribution */}
               <div className="space-y-0.5 text-[11px]">
                 <div className="flex-between font-bold">
                   <span>Tender:</span>
@@ -1418,12 +1923,32 @@ export default function POSPage() {
                 {completedOrder.cashChangeDue > 0 && (
                   <div className="flex-between font-bold">
                     <span>Change Returned:</span>
-                    <span>{currencySymbol} {completedOrder.cashChangeDue.toLocaleString()}</span>
+                    <span>
+                      {currencySymbol} {completedOrder.cashChangeDue.toLocaleString()}
+                    </span>
                   </div>
                 )}
+                {receiptTemplate?.showLoyaltyPoints !== false &&
+                  completedOrder.loyaltyTier && (
+                    <div className="pt-1 border-t border-dashed border-gray-400 space-y-0.5">
+                      <div className="flex-between">
+                        <span>Loyalty Tier:</span>
+                        <span className="font-bold">{completedOrder.loyaltyTier}</span>
+                      </div>
+                      <div className="flex-between">
+                        <span>Points Earned:</span>
+                        <span className="font-bold">+{completedOrder.estimatedPointsEarned} pts</span>
+                      </div>
+                      <div className="flex-between">
+                        <span>New Balance:</span>
+                        <span className="font-bold">
+                          {completedOrder.loyaltyPointsBalance?.toLocaleString()} pts
+                        </span>
+                      </div>
+                    </div>
+                  )}
               </div>
 
-              {/* eTIMS QR & Fiscal Sign-off */}
               {receiptTemplate?.showEtimsQrCode !== false && (
                 <div className="text-center pt-2 space-y-1">
                   <div className="w-16 h-16 mx-auto bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
@@ -1436,7 +1961,6 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Dynamic Footer, Wi-Fi & Policy */}
               <div className="text-center pt-2 space-y-0.5 text-[10px]">
                 <p className="font-bold">{completedOrder.footerMessage}</p>
                 {completedOrder.wifiDetails && (
@@ -1448,7 +1972,6 @@ export default function POSPage() {
               </div>
             </div>
 
-            {/* Action Bar (Excluded from Printing) */}
             <div className="flex gap-2 pt-2 font-sans print:hidden">
               <button
                 type="button"

@@ -44,23 +44,23 @@ const addMenuItem = async (tenantId, data) => {
     return await menuRepo.createMenuItem(tenantId, data);
 };
 exports.addMenuItem = addMenuItem;
-const fetchActiveMenu = async (tenantId) => {
-    const { categories, items } = await menuRepo.getActiveMenu(tenantId);
-    // Format the payload perfectly for the POS frontend interface
+const fetchActiveMenu = async (tenantId, branchId) => {
+    const { categories, items } = await menuRepo.getActiveMenu(tenantId, branchId);
     return {
-        categories: categories.map(c => c.name),
-        items: items.map(i => ({
+        categories: categories.map((c) => c.name),
+        items: items.map((i) => ({
             id: i.id.toString(),
             name: i.name,
-            price: parseFloat(i.price), // Convert decimal string back to number for frontend calculation
+            sku: i.sku || undefined,
+            price: parseFloat(i.price),
             isAvailable: i.isAvailable,
             image: i.imageUrl,
-            category: categories.find(c => c.id === i.categoryId)?.name || 'Uncategorized'
-        }))
+            category: categories.find((c) => c.id === i.categoryId)?.name || 'Uncategorized',
+        })),
     };
 };
 exports.fetchActiveMenu = fetchActiveMenu;
-const fetchCategories = async (tenantId) => {
-    return await menuRepo.getCategories(tenantId);
+const fetchCategories = async (tenantId, branchId) => {
+    return await menuRepo.getCategories(tenantId, branchId);
 };
 exports.fetchCategories = fetchCategories;

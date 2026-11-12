@@ -113,6 +113,7 @@ const payables_routes_1 = __importDefault(require("./routes/payables.routes"));
 const taxes_routes_1 = __importDefault(require("./routes/taxes.routes"));
 const adjustments_routes_1 = __importDefault(require("./routes/adjustments.routes"));
 const finance_hub_routes_1 = __importDefault(require("./routes/finance-hub.routes"));
+const pos_terminal_routes_1 = __importDefault(require("./routes/pos-terminal.routes"));
 const app = (0, express_1.default)();
 const port = process.env.PORT || 8000;
 const allowedOrigins = [
@@ -246,7 +247,8 @@ app.use('/api/v1/customers', customer_routes_1.default);
 app.use('/api/v1/loyalty/transactions', loyalty_transactions_routes_1.default);
 app.use('/api/v1/loyalty/rewards', loyalty_rewards_routes_1.default);
 app.use('/api/v1/loyalty', loyalty_routes_1.default);
-// 12 marketing/CRM modules
+// 12 POS Terminal Context, CRM Lookup & Promo Validation, marketing/CRM modules 
+app.use('/api/v1/pos', pos_terminal_routes_1.default);
 app.use('/api/v1/marketing/promotions', promotional_discount_routes_1.default);
 app.use('/api/v1/marketing/templates', marketing_template_routes_1.default);
 app.use('/api/v1/marketing/hub', marketing_hub_routes_1.default);

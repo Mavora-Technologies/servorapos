@@ -38,8 +38,35 @@ const orderRepo = __importStar(require("../repositories/order.repository"));
 const createOrder = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const { orderType, subtotal, tax, total, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod } = req.body;
-        const order = await orderRepo.createOrderRecord(tenantId, { orderType, subtotal, tax, total, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod }, items);
+        const cashierId = req.user?.userId ?? req.user?.id ?? null;
+        const { branchId, cashDrawerId, cashierShiftId, customerId, orderType, subtotal, discountTotal, tax, cateringLevy, serviceCharge, packingCharge, total, cashTendered, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod, } = req.body;
+        const effectiveBranchId = branchId !== undefined && branchId !== null
+            ? Number(branchId)
+            : req.user?.defaultBranchId
+                ? Number(req.user.defaultBranchId)
+                : null;
+        const order = await orderRepo.createOrderRecord(tenantId, {
+            branchId: effectiveBranchId,
+            cashierId: cashierId ? Number(cashierId) : null,
+            cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
+            cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
+            customerId: customerId ? Number(customerId) : null,
+            orderType,
+            subtotal,
+            discountTotal,
+            tax,
+            cateringLevy,
+            serviceCharge,
+            packingCharge,
+            total,
+            cashTendered,
+            tableId,
+            tableName,
+            customerName,
+            customerPhone,
+            buyerKraPin,
+            paymentMethod,
+        }, items);
         res.status(201).json({ status: 'success', data: order });
     }
     catch (error) {
@@ -73,9 +100,8 @@ exports.getOpenOrders = getOpenOrders;
 const updateStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const id = req.params.id; // Assert as string to satisfy TypeScript
+        const id = req.params.id;
         const { status } = req.body;
-        // Pass the parsed integer
         await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status);
         res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
     }

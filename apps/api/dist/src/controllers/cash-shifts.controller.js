@@ -33,9 +33,25 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.postCloseShift = exports.postOpenShift = exports.getMyActiveShift = exports.getShifts = exports.getShiftOverview = void 0;
+exports.postCloseShift = exports.postShiftCashMovement = exports.postOpenShift = exports.getMyActiveShift = exports.getShifts = exports.getShiftOverview = exports.getShiftSetup = void 0;
 const cashShiftRepo = __importStar(require("../repositories/cash-shifts.repository"));
 const cash_shifts_validator_1 = require("../validators/cash-shifts.validator");
+const getShiftSetup = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const data = await cashShiftRepo.getShiftCockpitSetup(tenantId, branchId);
+        res.status(200).json({ status: 'success', data });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to load shift setup' });
+    }
+};
+exports.getShiftSetup = getShiftSetup;
 const getShiftOverview = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
@@ -80,8 +96,7 @@ const getMyActiveShift = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
-        const active = await cashShiftRepo.getActiveShiftForCashier(tenantId, userId, branchId);
+        const active = await cashShiftRepo.getActiveShiftForCashier(tenantId, userId);
         res.status(200).json({ status: 'success', data: active });
     }
     catch (error) {
@@ -114,6 +129,31 @@ const postOpenShift = async (req, res) => {
     }
 };
 exports.postOpenShift = postOpenShift;
+const postShiftCashMovement = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const userId = req.user?.userId;
+        if (!tenantId || !userId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const parseResult = cash_shifts_validator_1.shiftCashMovementSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ status: 'error', message: 'Invalid cash movement parameters', errors: parseResult.error.issues });
+            return;
+        }
+        const updated = await cashShiftRepo.recordShiftCashMovement(tenantId, userId, parseResult.data);
+        res.status(200).json({
+            status: 'success',
+            data: updated,
+            message: `${parseResult.data.movementType === 'SAFE_DROP' ? 'Safe drop' : 'Petty cash payout'} of KES ${parseResult.data.amount.toLocaleString()} recorded.`,
+        });
+    }
+    catch (error) {
+        res.status(400).json({ status: 'error', message: error.message || 'Failed to record cash movement' });
+    }
+};
+exports.postShiftCashMovement = postShiftCashMovement;
 const postCloseShift = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;

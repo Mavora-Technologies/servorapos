@@ -1,16 +1,18 @@
-// apps/api/src/routes/menu.routes.ts
 import { Router } from 'express';
-import { createCategory, createMenuItem, getActiveMenu, getCategories } from '../controllers/menu.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import {
+  createCategory,
+  createMenuItem,
+  getActiveMenu,
+  getCategories,
+} from '../controllers/menu.controller';
 
 const router = Router();
-
-// All menu routes are protected and tenant-aware[cite: 12]
 router.use(requireAuth);
 
+router.get('/active', getActiveMenu);
+router.get('/categories', getCategories);
 router.post('/categories', createCategory);
-router.post('/items', createMenuItem); 
-router.get('/active', getActiveMenu); // Endpoint used by the POS terminal
-router.get('/categories', getCategories); // Endpoint to fetch all categories
+router.post('/items', createMenuItem);
 
 export default router;

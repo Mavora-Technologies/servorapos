@@ -1,4 +1,4 @@
-// app/controllers/order.controller.ts
+// apps/api/src/controllers/order.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as orderRepo from '../repositories/order.repository';
@@ -6,13 +6,65 @@ import * as orderRepo from '../repositories/order.repository';
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const { orderType, subtotal, tax, total, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod } = req.body;
-    
+    const cashierId = (req.user as any)?.userId ?? (req.user as any)?.id ?? null;
+
+    const {
+      branchId,
+      cashDrawerId,
+      cashierShiftId,
+      customerId,
+      orderType,
+      subtotal,
+      discountTotal,
+      tax,
+      cateringLevy,
+      serviceCharge,
+      packingCharge,
+      total,
+      cashTendered,
+      items,
+      tableId,
+      tableName,
+      customerName,
+      customerPhone,
+      buyerKraPin,
+      paymentMethod,
+    } = req.body;
+
+    const effectiveBranchId =
+      branchId !== undefined && branchId !== null
+        ? Number(branchId)
+        : req.user?.defaultBranchId
+        ? Number(req.user.defaultBranchId)
+        : null;
+
     const order = await orderRepo.createOrderRecord(
-      tenantId, 
-      { orderType, subtotal, tax, total, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod }, 
+      tenantId,
+      {
+        branchId: effectiveBranchId,
+        cashierId: cashierId ? Number(cashierId) : null,
+        cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
+        cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
+        customerId: customerId ? Number(customerId) : null,
+        orderType,
+        subtotal,
+        discountTotal,
+        tax,
+        cateringLevy,
+        serviceCharge,
+        packingCharge,
+        total,
+        cashTendered,
+        tableId,
+        tableName,
+        customerName,
+        customerPhone,
+        buyerKraPin,
+        paymentMethod,
+      },
       items
     );
+
     res.status(201).json({ status: 'success', data: order });
   } catch (error: any) {
     console.error('[Order Error]:', error);
@@ -43,10 +95,9 @@ export const getOpenOrders = async (req: AuthRequest, res: Response): Promise<vo
 export const updateStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const id = req.params.id as string; // Assert as string to satisfy TypeScript
+    const id = req.params.id as string;
     const { status } = req.body;
-    
-    // Pass the parsed integer
+
     await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status);
     res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
   } catch (error: any) {

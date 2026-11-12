@@ -38,7 +38,11 @@ const menu_validator_1 = require("../validators/menu.validator");
 const menuService = __importStar(require("../services/menu.service"));
 const createCategory = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
         const validatedData = menu_validator_1.createCategorySchema.parse(req.body);
         const category = await menuService.addCategory(tenantId, validatedData);
         res.status(201).json({ status: 'success', data: category });
@@ -48,13 +52,17 @@ const createCategory = async (req, res) => {
             res.status(400).json({ status: 'error', errors: error.errors });
             return;
         }
-        res.status(500).json({ status: 'error', message: 'Internal server error' });
+        res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
     }
 };
 exports.createCategory = createCategory;
 const createMenuItem = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
         const validatedData = menu_validator_1.createMenuItemSchema.parse(req.body);
         const item = await menuService.addMenuItem(tenantId, validatedData);
         res.status(201).json({ status: 'success', data: item });
@@ -64,30 +72,40 @@ const createMenuItem = async (req, res) => {
             res.status(400).json({ status: 'error', errors: error.errors });
             return;
         }
-        res.status(500).json({ status: 'error', message: 'Internal server error' });
+        res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
     }
 };
 exports.createMenuItem = createMenuItem;
 const getActiveMenu = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
-        const menu = await menuService.fetchActiveMenu(tenantId);
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const menu = await menuService.fetchActiveMenu(tenantId, branchId);
         res.status(200).json({ status: 'success', data: menu });
     }
     catch (error) {
         console.error('[Menu API Error]:', error);
-        res.status(500).json({ status: 'error', message: 'Internal server error' });
+        res.status(500).json({ status: 'error', message: error.message || 'Internal server error' });
     }
 };
 exports.getActiveMenu = getActiveMenu;
 const getCategories = async (req, res) => {
     try {
-        const tenantId = req.user.tenantId;
-        const categories = await menuService.fetchCategories(tenantId);
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const categories = await menuService.fetchCategories(tenantId, branchId);
         res.status(200).json({ status: 'success', data: categories });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch categories' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch categories' });
     }
 };
 exports.getCategories = getCategories;

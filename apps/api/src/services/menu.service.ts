@@ -10,23 +10,23 @@ export const addMenuItem = async (tenantId: number, data: CreateMenuItemInput) =
   return await menuRepo.createMenuItem(tenantId, data);
 };
 
-export const fetchActiveMenu = async (tenantId: number) => {
-  const { categories, items } = await menuRepo.getActiveMenu(tenantId);
-  
-  // Format the payload perfectly for the POS frontend interface
+export const fetchActiveMenu = async (tenantId: number, branchId?: number) => {
+  const { categories, items } = await menuRepo.getActiveMenu(tenantId, branchId);
+
   return {
-    categories: categories.map(c => c.name),
-    items: items.map(i => ({
+    categories: categories.map((c) => c.name),
+    items: items.map((i) => ({
       id: i.id.toString(),
       name: i.name,
-      price: parseFloat(i.price as string), // Convert decimal string back to number for frontend calculation
+      sku: i.sku || undefined,
+      price: parseFloat(i.price as string),
       isAvailable: i.isAvailable,
       image: i.imageUrl,
-      category: categories.find(c => c.id === i.categoryId)?.name || 'Uncategorized'
-    }))
+      category: categories.find((c) => c.id === i.categoryId)?.name || 'Uncategorized',
+    })),
   };
 };
 
-export const fetchCategories = async (tenantId: number) => {
-  return await menuRepo.getCategories(tenantId);
+export const fetchCategories = async (tenantId: number, branchId?: number) => {
+  return await menuRepo.getCategories(tenantId, branchId);
 };
