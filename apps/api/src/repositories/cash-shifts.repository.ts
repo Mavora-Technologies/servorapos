@@ -6,6 +6,7 @@ import {
   drawerSessions,
   cashierAssignments,
   orders,
+  payments,
   users,
   branches,
   notifications,
@@ -113,6 +114,131 @@ export const getCashShiftMetrics = async (tenantId: number, branchId?: number) =
   };
 };
 
+// Shared helper to compute live POS cash sales & drawer deductions for an active shift
+async function computeLiveShiftFinancials(
+  tenantId: number,
+  shift: {
+    cashierId: number;
+    branchId: number | null;
+    openingFloat: string | number;
+    expectedCash: string | number;
+    openedAt: Date;
+    status: string;
+  }
+) {
+  const openingFloat = Number(shift.openingFloat) || 0;
+
+  if (shift.status !== 'OPEN') {
+    const finalExpected = Number(shift.expectedCash) || 0;
+    return {
+      openingFloat,
+      posSalesDoneSoFar: Math.max(0, finalExpected - openingFloat),
+      safeDropsTotal: 0,
+      payoutsTotal: 0,
+      liveExpectedCash: finalExpected,
+      linkedSession: null,
+    };
+  }
+
+  const scopeFilter = or(
+    eq(orders.cashierId, shift.cashierId),
+    eq(orders.waiterId, shift.cashierId),
+    and(
+      isNull(orders.cashierId),
+      shift.branchId ? eq(orders.branchId, shift.branchId) : sql`true`
+    )
+  );
+
+  const [[orderSalesAgg], [paymentSalesAgg], [linkedSession]] = await Promise.all([
+    db
+      .select({
+        totalFromOrders: sql<number>`coalesce(sum(
+          case 
+            when coalesce(${orders.amountPaid}, 0) > 0 then ${orders.amountPaid}
+            else coalesce(${orders.total}, 0)
+          end
+        ), 0)::numeric`,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.tenantId, tenantId),
+          sql`UPPER(${orders.status}) != 'CANCELLED'`,
+          sql`UPPER(${orders.paymentStatus}) != 'REFUNDED'`,
+          gte(orders.createdAt, shift.openedAt),
+          scopeFilter
+        )
+      ),
+
+    db
+      .select({
+        totalFromPayments: sql<number>`coalesce(sum(${payments.amount}), 0)::numeric`,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.tenantId, tenantId),
+          eq(payments.paymentFlow, 'INBOUND_AR'),
+          eq(payments.paymentMethod, 'CASH_DRAWER'),
+          eq(payments.isReversed, false),
+          eq(payments.processedById, shift.cashierId),
+          gte(payments.createdAt, shift.openedAt)
+        )
+      ),
+
+    db
+      .select({
+        id: drawerSessions.id,
+        drawerId: drawerSessions.drawerId,
+        drawerName: cashDrawers.name,
+        drawerCode: cashDrawers.drawerCode,
+        cashSalesTotal: drawerSessions.cashSalesTotal,
+        cashDropsTotal: drawerSessions.cashDropsTotal,
+        payoutsTotal: drawerSessions.payoutsTotal,
+      })
+      .from(drawerSessions)
+      .innerJoin(cashDrawers, eq(drawerSessions.drawerId, cashDrawers.id))
+      .where(
+        and(
+          eq(drawerSessions.tenantId, tenantId),
+          eq(drawerSessions.cashierId, shift.cashierId),
+          sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`
+        )
+      )
+      .orderBy(desc(drawerSessions.openedAt))
+      .limit(1),
+  ]);
+
+  const fromOrders = Number(orderSalesAgg?.totalFromOrders || 0);
+  const fromPayments = Number(paymentSalesAgg?.totalFromPayments || 0);
+  const fromSession = Number(linkedSession?.cashSalesTotal || 0);
+
+  const posSalesDoneSoFar = Math.max(fromOrders, fromPayments, fromSession);
+  const safeDropsTotal = Number(linkedSession?.cashDropsTotal || 0);
+  const payoutsTotal = Number(linkedSession?.payoutsTotal || 0);
+
+  const liveExpectedCash = Math.max(
+    0,
+    openingFloat + posSalesDoneSoFar - safeDropsTotal - payoutsTotal
+  );
+
+  return {
+    openingFloat,
+    posSalesDoneSoFar,
+    safeDropsTotal,
+    payoutsTotal,
+    liveExpectedCash,
+    linkedSession: linkedSession
+      ? {
+          id: linkedSession.id,
+          drawerId: linkedSession.drawerId,
+          drawerName: linkedSession.drawerName,
+          drawerCode: linkedSession.drawerCode,
+        }
+      : null,
+  };
+}
+
 export const listTenantCashShifts = async (tenantId: number, query: ListShiftsQuery) => {
   const page = query.page || 1;
   const limit = query.limit || 25;
@@ -170,14 +296,23 @@ export const listTenantCashShifts = async (tenantId: number, query: ListShiftsQu
 
   const total = Number(countResult[0]?.count || 0);
 
+  const enrichedShifts = await Promise.all(
+    rows.map(async (r) => {
+      const fin = await computeLiveShiftFinancials(tenantId, r);
+      return {
+        ...r,
+        openingFloat: fin.openingFloat,
+        posSalesDoneSoFar: fin.posSalesDoneSoFar,
+        safeDropsTotal: fin.safeDropsTotal,
+        expectedCash: fin.liveExpectedCash,
+        countedCash: r.countedCash !== null ? Number(r.countedCash) : null,
+        variance: r.variance !== null ? Number(r.variance) : null,
+      };
+    })
+  );
+
   return {
-    shifts: rows.map((r) => ({
-      ...r,
-      openingFloat: Number(r.openingFloat),
-      expectedCash: Number(r.expectedCash),
-      countedCash: r.countedCash !== null ? Number(r.countedCash) : null,
-      variance: r.variance !== null ? Number(r.variance) : null,
-    })),
+    shifts: enrichedShifts,
     pagination: {
       page,
       limit,
@@ -212,58 +347,16 @@ export const getActiveShiftForCashier = async (tenantId: number, cashierId: numb
 
   if (!active) return null;
 
-  const [[cashTendered], [linkedSession]] = await Promise.all([
-    db
-      .select({
-        totalCashInbound: sql<number>`coalesce(sum(coalesce(${orders.amountPaid}, 0)), 0)::numeric`,
-      })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.tenantId, tenantId),
-          eq(orders.cashierId, cashierId),
-          eq(orders.paymentStatus, 'Paid'),
-          gte(orders.createdAt, active.openedAt)
-        )
-      ),
-    db
-      .select({
-        id: drawerSessions.id,
-        drawerId: drawerSessions.drawerId,
-        drawerName: cashDrawers.name,
-        drawerCode: cashDrawers.drawerCode,
-        cashDropsTotal: drawerSessions.cashDropsTotal,
-        payoutsTotal: drawerSessions.payoutsTotal,
-      })
-      .from(drawerSessions)
-      .innerJoin(cashDrawers, eq(drawerSessions.drawerId, cashDrawers.id))
-      .where(
-        and(
-          eq(drawerSessions.tenantId, tenantId),
-          eq(drawerSessions.cashierId, cashierId),
-          eq(drawerSessions.status, 'OPEN')
-        )
-      )
-      .orderBy(desc(drawerSessions.openedAt))
-      .limit(1),
-  ]);
-
-  const inboundSales = Number(cashTendered?.totalCashInbound || 0);
-  const safeDrops = Number(linkedSession?.cashDropsTotal || 0);
-  const payouts = Number(linkedSession?.payoutsTotal || 0);
-  const liveExpectedCash = Math.max(
-    0,
-    Number(active.openingFloat) + inboundSales - safeDrops - payouts
-  );
+  const fin = await computeLiveShiftFinancials(tenantId, active);
 
   return {
     ...active,
-    openingFloat: Number(active.openingFloat),
-    inboundCashSales: inboundSales,
-    safeDropsTotal: safeDrops,
-    payoutsTotal: payouts,
-    liveExpectedCash,
-    drawerSession: linkedSession || null,
+    openingFloat: fin.openingFloat,
+    inboundCashSales: fin.posSalesDoneSoFar,
+    safeDropsTotal: fin.safeDropsTotal,
+    payoutsTotal: fin.payoutsTotal,
+    liveExpectedCash: fin.liveExpectedCash,
+    drawerSession: fin.linkedSession,
   };
 };
 
@@ -275,7 +368,6 @@ export const openCashShiftRecord = async (
   const targetCashierId = input.cashierId || authenticatedUserId;
 
   return await db.transaction(async (tx) => {
-    // 1. Guard against concurrent active shifts for the target cashier
     const [existingOpen] = await tx
       .select({ id: cashierShifts.id })
       .from(cashierShifts)
@@ -294,7 +386,6 @@ export const openCashShiftRecord = async (
       );
     }
 
-    // 2. If a cash drawer is specified, verify it belongs to tenant and is CLOSED
     if (input.cashDrawerId) {
       const [drawer] = await tx
         .select()
@@ -308,7 +399,6 @@ export const openCashShiftRecord = async (
       }
     }
 
-    // 3. Open Cashier Shift
     const [shift] = await tx
       .insert(cashierShifts)
       .values({
@@ -324,7 +414,6 @@ export const openCashShiftRecord = async (
       })
       .returning();
 
-    // 4. Bind Physical Drawer Session & Update Drawer Status
     if (input.cashDrawerId) {
       await tx.insert(drawerSessions).values({
         tenantId,
@@ -333,7 +422,7 @@ export const openCashShiftRecord = async (
         supervisorId: authenticatedUserId !== targetCashierId ? authenticatedUserId : null,
         openingFloat: input.openingFloat.toFixed(4),
         expectedClosingBalance: input.openingFloat.toFixed(4),
-        status: 'OPEN',
+        status: 'ACTIVE',
         notes: input.notes || `${input.shiftType} shift float initialized`,
       });
 
@@ -347,7 +436,6 @@ export const openCashShiftRecord = async (
         .where(eq(cashDrawers.id, input.cashDrawerId));
     }
 
-    // 5. Immutable Audit Log
     await tx.insert(auditLogs).values({
       tenantId,
       branchId: input.branchId,
@@ -391,7 +479,7 @@ export const recordShiftCashMovement = async (
         and(
           eq(drawerSessions.tenantId, tenantId),
           eq(drawerSessions.cashierId, shift.cashierId),
-          eq(drawerSessions.status, 'OPEN')
+          sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`
         )
       )
       .orderBy(desc(drawerSessions.openedAt))
@@ -466,45 +554,11 @@ export const closeCashShiftRecord = async (
     if (!shift) throw new Error('Cashier shift not found');
     if (shift.status === 'CLOSED') throw new Error('Shift is already reconciled and closed');
 
-    const [[cashTendered], [linkedSession]] = await Promise.all([
-      tx
-        .select({
-          totalCash: sql<number>`coalesce(sum(coalesce(${orders.amountPaid}, 0)), 0)::numeric`,
-        })
-        .from(orders)
-        .where(
-          and(
-            eq(orders.tenantId, tenantId),
-            eq(orders.cashierId, shift.cashierId),
-            eq(orders.paymentStatus, 'Paid'),
-            gte(orders.createdAt, shift.openedAt)
-          )
-        ),
-      tx
-        .select()
-        .from(drawerSessions)
-        .where(
-          and(
-            eq(drawerSessions.tenantId, tenantId),
-            eq(drawerSessions.cashierId, shift.cashierId),
-            eq(drawerSessions.status, 'OPEN')
-          )
-        )
-        .orderBy(desc(drawerSessions.openedAt))
-        .limit(1),
-    ]);
-
-    const cashSales = Number(cashTendered?.totalCash || 0);
-    const safeDrops = Number(linkedSession?.cashDropsTotal || 0);
-    const payouts = Number(linkedSession?.payoutsTotal || 0);
-    const expectedCash = Math.max(
-      0,
-      Number(shift.openingFloat) + cashSales - safeDrops - payouts
-    );
+    const fin = await computeLiveShiftFinancials(tenantId, shift);
+    const expectedCash = fin.liveExpectedCash;
     const countedCash = input.countedCash;
     const variance = Math.round((countedCash - expectedCash) * 100) / 100;
 
-    // 1. Update shift record to CLOSED
     const [closed] = await tx
       .update(cashierShifts)
       .set({
@@ -519,13 +573,12 @@ export const closeCashShiftRecord = async (
       .where(eq(cashierShifts.id, shift.id))
       .returning();
 
-    // 2. Close & Unlock Linked Drawer Session
-    if (linkedSession) {
+    if (fin.linkedSession) {
       await tx
         .update(drawerSessions)
         .set({
           status: 'CLOSED_RECONCILED',
-          cashSalesTotal: cashSales.toFixed(4),
+          cashSalesTotal: fin.posSalesDoneSoFar.toFixed(4),
           expectedClosingBalance: expectedCash.toFixed(4),
           actualClosingBalance: countedCash.toFixed(4),
           variance: variance.toFixed(4),
@@ -534,7 +587,7 @@ export const closeCashShiftRecord = async (
           closedAt: new Date(),
           notes: input.varianceNotes || 'Shift closed and reconciled',
         })
-        .where(eq(drawerSessions.id, linkedSession.id));
+        .where(eq(drawerSessions.id, fin.linkedSession.id));
 
       await tx
         .update(cashDrawers)
@@ -543,10 +596,9 @@ export const closeCashShiftRecord = async (
           currentBalance: '0.00',
           updatedAt: new Date(),
         })
-        .where(eq(cashDrawers.id, linkedSession.drawerId));
+        .where(eq(cashDrawers.id, fin.linkedSession.drawerId));
     }
 
-    // 3. Automated Variance Escalation Trigger
     if (Math.abs(variance) >= 500) {
       await tx.insert(notifications).values({
         tenantId,

@@ -33,6 +33,8 @@ interface ShiftRecord {
   cashierEmail: string;
   cashierRole?: string;
   openingFloat: number;
+  posSalesDoneSoFar: number;
+  safeDropsTotal?: number;
   expectedCash: number;
   countedCash: number | null;
   variance: number | null;
@@ -569,6 +571,7 @@ export default function CashShiftsPage() {
                 <th className="py-2.5 px-3">Cashier Custodian</th>
                 <th className="py-2.5 px-3">Branch Outlet</th>
                 <th className="py-2.5 px-3 text-right">Opening Float</th>
+                <th className="py-2.5 px-3 text-right">POS Sales So Far</th>
                 <th className="py-2.5 px-3 text-right">Expected Cash</th>
                 <th className="py-2.5 px-3 text-right">Counted Cash</th>
                 <th className="py-2.5 px-3 text-right">Variance</th>
@@ -609,7 +612,10 @@ export default function CashShiftsPage() {
                       <td className="py-3 px-3 text-right font-mono text-gray-700">
                         KES {s.openingFloat.toLocaleString()}
                       </td>
-                      <td className="py-3 px-3 text-right font-mono font-bold text-servora-navy">
+                      <td className="py-3 px-3 text-right font-mono font-bold text-emerald-700">
+                        +KES {(s.posSalesDoneSoFar || 0).toLocaleString()}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold text-servora-core">
                         KES {s.expectedCash.toLocaleString()}
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-purple-700">
