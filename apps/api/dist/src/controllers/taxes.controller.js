@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.postRetryFiscalization = exports.patchTaxSettings = exports.getFiscalInvoices = exports.getTaxOverview = void 0;
+exports.postRetryFiscalization = exports.postCreateTaxCode = exports.patchTaxSettings = exports.getFiscalInvoices = exports.getTaxOverview = void 0;
 const taxesRepo = __importStar(require("../repositories/taxes.repository"));
 const taxes_validator_1 = require("../validators/taxes.validator");
 const getTaxOverview = async (req, res) => {
@@ -44,10 +44,18 @@ const getTaxOverview = async (req, res) => {
             return;
         }
         const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const periodType = req.query.periodType || 'MONTH';
         const periodYear = req.query.year ? parseInt(String(req.query.year), 10) : undefined;
         const periodMonth = req.query.month ? parseInt(String(req.query.month), 10) : undefined;
+        const periodQuarter = req.query.quarter ? parseInt(String(req.query.quarter), 10) : undefined;
         const [telemetry, settings, codes] = await Promise.all([
-            taxesRepo.getTaxLiabilityTelemetry(tenantId, branchId, periodYear, periodMonth),
+            taxesRepo.getTaxLiabilityTelemetry(tenantId, {
+                branchId,
+                periodType,
+                periodYear,
+                periodMonth,
+                periodQuarter,
+            }),
             taxesRepo.getTenantTaxSettings(tenantId),
             taxesRepo.listTaxCodes(tenantId),
         ]);
@@ -72,14 +80,6 @@ const getFiscalInvoices = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        // Defensive check to immediately identify import issues
-        if (!taxes_validator_1.taxReportQuerySchema || typeof taxes_validator_1.taxReportQuerySchema.safeParse !== 'function') {
-            res.status(500).json({
-                status: 'error',
-                message: 'taxReportQuerySchema is not properly defined or imported in taxes.controller',
-            });
-            return;
-        }
         const parseResult = taxes_validator_1.taxReportQuerySchema.safeParse(req.query);
         if (!parseResult.success) {
             res.status(400).json({ status: 'error', message: 'Invalid query filters', errors: parseResult.error.issues });
@@ -96,7 +96,8 @@ exports.getFiscalInvoices = getFiscalInvoices;
 const patchTaxSettings = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const userId = req.user?.userId;
+        if (!tenantId || !userId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
@@ -105,7 +106,7 @@ const patchTaxSettings = async (req, res) => {
             res.status(400).json({ status: 'error', message: 'Invalid tax configuration', errors: parseResult.error.issues });
             return;
         }
-        const updated = await taxesRepo.updateTenantTaxSettings(tenantId, parseResult.data);
+        const updated = await taxesRepo.updateTenantTaxSettings(tenantId, userId, parseResult.data);
         res.status(200).json({
             status: 'success',
             data: updated,
@@ -117,6 +118,30 @@ const patchTaxSettings = async (req, res) => {
     }
 };
 exports.patchTaxSettings = patchTaxSettings;
+const postCreateTaxCode = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const parseResult = taxes_validator_1.createTaxCodeSchema.safeParse(req.body);
+        if (!parseResult.success) {
+            res.status(400).json({ status: 'error', message: 'Invalid tax code payload', errors: parseResult.error.issues });
+            return;
+        }
+        const created = await taxesRepo.createTaxCodeRecord(tenantId, parseResult.data);
+        res.status(201).json({
+            status: 'success',
+            data: created,
+            message: `Tax code ${created.code} (${created.rate}%) registered.`,
+        });
+    }
+    catch (error) {
+        res.status(400).json({ status: 'error', message: error.message || 'Failed to create tax code' });
+    }
+};
+exports.postCreateTaxCode = postCreateTaxCode;
 const postRetryFiscalization = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;

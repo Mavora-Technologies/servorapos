@@ -33,24 +33,32 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchKitchenPerformance = exports.fetchKitchenHistory = exports.advanceTicketStatus = exports.fetchActiveTickets = void 0;
+exports.fetchKitchenPerformance = exports.fetchKitchenHistory = exports.advanceLineItemStatus = exports.advanceTicketStatus = exports.fetchActiveTickets = exports.fetchTenantStations = void 0;
 const kitchenRepo = __importStar(require("../repositories/kitchen.repository"));
-const fetchActiveTickets = async (tenantId, station) => {
-    return await kitchenRepo.getActiveKitchenTickets(tenantId, station);
+const fetchTenantStations = async (tenantId) => {
+    return await kitchenRepo.getDistinctTenantKitchenStations(tenantId);
+};
+exports.fetchTenantStations = fetchTenantStations;
+const fetchActiveTickets = async (tenantId, query = {}) => {
+    return await kitchenRepo.getActiveKitchenTickets(tenantId, query);
 };
 exports.fetchActiveTickets = fetchActiveTickets;
-const advanceTicketStatus = async (tenantId, orderId, status) => {
-    if (!['Preparing', 'Ready', 'Cancelled'].includes(status)) {
+const advanceTicketStatus = async (tenantId, userId, orderId, status) => {
+    if (!['Confirmed', 'Preparing', 'Ready', 'Cancelled'].includes(status)) {
         throw new Error('Invalid kitchen status transition');
     }
-    return await kitchenRepo.updateTicketStatus(tenantId, orderId, status);
+    return await kitchenRepo.updateTicketStatus(tenantId, userId, orderId, status);
 };
 exports.advanceTicketStatus = advanceTicketStatus;
-const fetchKitchenHistory = async (tenantId) => {
-    return await kitchenRepo.getKitchenHistoryTickets(tenantId);
+const advanceLineItemStatus = async (tenantId, orderItemId, kitchenStatus) => {
+    return await kitchenRepo.updateLineItemKitchenStatus(tenantId, orderItemId, kitchenStatus);
+};
+exports.advanceLineItemStatus = advanceLineItemStatus;
+const fetchKitchenHistory = async (tenantId, branchId) => {
+    return await kitchenRepo.getKitchenHistoryTickets(tenantId, branchId);
 };
 exports.fetchKitchenHistory = fetchKitchenHistory;
-const fetchKitchenPerformance = async (tenantId) => {
-    return await kitchenRepo.getKitchenPerformanceStats(tenantId);
+const fetchKitchenPerformance = async (tenantId, branchId) => {
+    return await kitchenRepo.getKitchenPerformanceStats(tenantId, branchId);
 };
 exports.fetchKitchenPerformance = fetchKitchenPerformance;

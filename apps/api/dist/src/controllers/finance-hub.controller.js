@@ -50,7 +50,7 @@ const getFinanceOverview = async (req, res) => {
         }
         const [overview, recentLedger] = await Promise.all([
             financeHubRepo.getExecutiveFinanceOverview(tenantId, parseResult.data),
-            financeHubRepo.getRecentTreasuryLedger(tenantId, 10),
+            financeHubRepo.getRecentTreasuryLedger(tenantId, parseResult.data.branchId, 15),
         ]);
         res.status(200).json({
             status: 'success',

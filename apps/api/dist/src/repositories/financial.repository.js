@@ -5,54 +5,18 @@ const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
 const getOrCreateFinancialSettings = async (tenantId) => {
-    let [settings] = await db_1.db
+    const [settings] = await db_1.db
         .select()
         .from(schema_1.tenantFinancialSettings)
         .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
         .limit(1);
-    if (!settings) {
-        // Proactively load tenant metadata to pre-populate corporate tax PIN & currency
-        const [tenant] = await db_1.db
-            .select({ kraPin: schema_1.tenants.kraPin, currency: schema_1.tenants.currency })
-            .from(schema_1.tenants)
-            .where((0, drizzle_orm_1.eq)(schema_1.tenants.id, tenantId))
-            .limit(1);
-        const [created] = await db_1.db
-            .insert(schema_1.tenantFinancialSettings)
-            .values({
-            tenantId,
-            baseCurrency: tenant?.currency || 'KES',
-            taxPin: tenant?.kraPin || '',
-            vatRate: '16.00',
-            cateringLevyRate: '2.00',
-            serviceChargeRate: '5.00',
-            isVatInclusive: true,
-            isCateringLevyEnabled: true,
-            isServiceChargeEnabled: false,
-            etimsEnvironment: 'SANDBOX',
-            autoFiscalizeOnPayment: true,
-            etimsBranchCode: '00',
-            tipDistributionModel: 'HOURS_WEIGHTED',
-            defaultOvertimeMultiplier: '1.50',
-            holidayOvertimeMultiplier: '2.00',
-            maxDrawerCashThreshold: '50000.00',
-        })
-            .returning();
-        settings = created;
-        // Seed default statutory tax schedules
-        await db_1.db.insert(schema_1.taxCodes).values([
-            { tenantId, code: 'VAT-16', name: 'Standard Rate Value Added Tax', rate: '16.00', statutoryCode: 'A' },
-            { tenantId, code: 'ZERO-RATED', name: 'Zero-Rated Supplies (0%)', rate: '0.00', statutoryCode: 'B' },
-            { tenantId, code: 'EXEMPT', name: 'Exempt Goods & Services', rate: '0.00', statutoryCode: 'C' },
-        ]);
-    }
     const tenantTaxCodes = await db_1.db
         .select()
         .from(schema_1.taxCodes)
         .where((0, drizzle_orm_1.eq)(schema_1.taxCodes.tenantId, tenantId))
         .orderBy((0, drizzle_orm_1.asc)(schema_1.taxCodes.id));
     return {
-        settings,
+        settings: settings || null,
         taxCodes: tenantTaxCodes,
     };
 };

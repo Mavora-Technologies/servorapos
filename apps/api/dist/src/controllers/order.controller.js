@@ -33,8 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTakeawayOrders = exports.updateStatus = exports.getOpenOrders = exports.getOrders = exports.createOrder = void 0;
+exports.getOnlineOrders = exports.getOrderDetail = exports.getOrders = exports.getTakeawayOrders = exports.updateStatus = exports.getOpenOrders = exports.createOrder = void 0;
 const orderRepo = __importStar(require("../repositories/order.repository"));
+const order_validator_1 = require("../validators/order.validator");
 const createOrder = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
@@ -75,25 +76,15 @@ const createOrder = async (req, res) => {
     }
 };
 exports.createOrder = createOrder;
-const getOrders = async (req, res) => {
-    try {
-        const tenantId = req.user.tenantId;
-        const allOrders = await orderRepo.fetchTenantOrders(tenantId);
-        res.status(200).json({ status: 'success', data: allOrders });
-    }
-    catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
-    }
-};
-exports.getOrders = getOrders;
 const getOpenOrders = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const openOrders = await orderRepo.fetchOpenOrders(tenantId);
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const openOrders = await orderRepo.fetchOpenOrders(tenantId, branchId);
         res.status(200).json({ status: 'success', data: openOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch open orders' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch open orders' });
     }
 };
 exports.getOpenOrders = getOpenOrders;
@@ -113,11 +104,56 @@ exports.updateStatus = updateStatus;
 const getTakeawayOrders = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const takeawayOrders = await orderRepo.fetchTakeawayOrders(tenantId);
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const takeawayOrders = await orderRepo.fetchTakeawayOrders(tenantId, branchId);
         res.status(200).json({ status: 'success', data: takeawayOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch takeaway orders' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch takeaway orders' });
     }
 };
 exports.getTakeawayOrders = getTakeawayOrders;
+const getOrders = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const parsed = order_validator_1.listOrdersQuerySchema.safeParse(req.query);
+        const allOrders = await orderRepo.fetchTenantOrders(tenantId, parsed.success ? parsed.data : undefined);
+        res.status(200).json({ status: 'success', data: allOrders });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch orders' });
+    }
+};
+exports.getOrders = getOrders;
+const getOrderDetail = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const orderId = parseInt(String(req.params.id), 10);
+        if (isNaN(orderId)) {
+            res.status(400).json({ status: 'error', message: 'Invalid order ID' });
+            return;
+        }
+        const detail = await orderRepo.fetchOrderDetailById(tenantId, orderId);
+        if (!detail) {
+            res.status(404).json({ status: 'error', message: 'Order record not found' });
+            return;
+        }
+        res.status(200).json({ status: 'success', data: detail });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to load order details' });
+    }
+};
+exports.getOrderDetail = getOrderDetail;
+const getOnlineOrders = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const onlineOrders = await orderRepo.fetchOnlineStorefrontOrders(tenantId, branchId);
+        res.status(200).json({ status: 'success', data: onlineOrders });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch online orders' });
+    }
+};
+exports.getOnlineOrders = getOnlineOrders;

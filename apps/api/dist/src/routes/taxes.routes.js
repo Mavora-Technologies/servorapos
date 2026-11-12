@@ -8,5 +8,6 @@ router.use(auth_middleware_1.requireAuth);
 router.get('/overview', taxes_controller_1.getTaxOverview);
 router.get('/invoices', taxes_controller_1.getFiscalInvoices);
 router.patch('/settings', taxes_controller_1.patchTaxSettings);
+router.post('/codes', taxes_controller_1.postCreateTaxCode);
 router.post('/retry', taxes_controller_1.postRetryFiscalization);
 exports.default = router;

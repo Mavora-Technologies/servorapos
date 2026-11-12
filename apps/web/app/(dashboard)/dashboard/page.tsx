@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import {
   AreaChart,
@@ -13,42 +13,27 @@ import {
   PieChart,
   Pie,
   Cell,
-  BarChart,
-  Bar,
 } from 'recharts';
 import {
   TrendingUp,
   ShoppingBag,
-  Clock,
-  AlertCircle,
   UtensilsCrossed,
-  Building2,
   Store,
-  Truck,
   Receipt,
   ShieldCheck,
-  CheckCircle2,
   ChevronRight,
-  Users,
   Wallet,
   RefreshCw,
   ChefHat,
   ArrowRight,
   Package,
   Warehouse,
-  Smartphone,
-  FileText,
-  CalendarDays,
   Sparkles,
-  SlidersHorizontal,
-  Boxes,
-  ClipboardList,
   Layers,
-  ArrowUpRight,
-  ArrowDownRight,
-  CheckCircle,
-  Clock3,
-  Percent,
+  Award,
+  Scale,
+  Calendar,
+  Activity,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -101,19 +86,38 @@ interface DashboardPayload {
   };
   treasury: {
     hasActiveSession: boolean;
+    activeDrawersCount: number;
     drawerName: string | null;
     openingFloat: number;
     expectedClosing: number;
+    openShiftsCount: number;
+    closedShiftsCount: number;
+    netShiftVariance: number;
+    pendingExpensesCount: number;
+    approvedExpensesTotal: number;
+    pendingAdjustmentsCount: number;
+    pendingAdjustmentsAmount: number;
     unallocatedMpesaCount: number;
     unallocatedMpesaAmount: number;
     etimsFiscalizedCount: number;
     etimsPendingCount: number;
     tenderBreakdown: { method: string; amount: number }[];
   };
+  loyalty: {
+    enrolledMembersCount: number;
+    activePointsPool: number;
+  };
   salesTrend: { time: string; sales: number; orders: number }[];
   channelBreakdown: { type: string; revenue: number; orders: number }[];
   topProducts: { id: number; name: string; station: string; quantity: number; revenue: number }[];
-  recentAudits: { id: number; action: string; module: string; entityType: string; createdAt: string }[];
+  recentAudits: {
+    id: number;
+    action: string;
+    module: string;
+    entityType: string;
+    actorName: string | null;
+    createdAt: string;
+  }[];
 }
 
 interface BranchRecord {
@@ -126,33 +130,47 @@ type PerspectiveTab = 'OVERVIEW' | 'OPERATIONS' | 'SUPPLY_CHAIN' | 'FINANCE_TREA
 
 const CHANNEL_COLORS: Record<string, string> = {
   'Dine-In': '#2563EB',
+  'Standard Dining Room': '#2563EB',
   Takeaway: '#059669',
+  'Express Counter & Takeaway': '#059669',
   Delivery: '#7C3AED',
+  'Delivery & 3PL Logistics': '#7C3AED',
   'Bar-Tab': '#D97706',
+  'Lounge & Bar Tabs': '#D97706',
 };
 
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [branches, setBranches] = useState<BranchRecord[]>([]);
   const [timeframe, setTimeframe] = useState<string>('today');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedBranchId, setSelectedBranchId] = useState<string>('ALL');
+  const [selectedChannel, setSelectedChannel] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<PerspectiveTab>('OVERVIEW');
   const [isLoading, setIsLoading] = useState(true);
   const [currencySymbol, setCurrencySymbol] = useState('KES');
   const [businessName, setBusinessName] = useState('Workspace');
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(async () => {
     try {
       setIsLoading(true);
+      const params = new URLSearchParams();
+      params.set('timeframe', timeframe);
+      params.set('branchId', selectedBranchId);
+      if (selectedChannel !== 'ALL') params.set('orderType', selectedChannel);
+      if (timeframe === 'custom' && customStartDate) {
+        params.set('startDate', customStartDate);
+        if (customEndDate) params.set('endDate', customEndDate);
+      }
+
       const [analyticsRes, branchRes, authRes] = await Promise.all([
-        fetchApi(`/api/v1/analytics/dashboard?timeframe=${timeframe}&branchId=${selectedBranchId}`),
+        fetchApi(`/api/v1/analytics/dashboard?${params.toString()}`),
         fetchApi('/api/v1/branches').catch(() => ({ data: [] })),
         fetchApi('/api/v1/auth/me').catch(() => null),
       ]);
 
-      if (analyticsRes?.data) {
-        setData(analyticsRes.data);
-      }
+      if (analyticsRes?.data) setData(analyticsRes.data);
       if (branchRes?.data && Array.isArray(branchRes.data)) {
         setBranches(branchRes.data);
       }
@@ -165,13 +183,13 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [timeframe, customStartDate, customEndDate, selectedBranchId, selectedChannel]);
 
   useEffect(() => {
     fetchDashboardData();
     const interval = setInterval(fetchDashboardData, 30000);
     return () => clearInterval(interval);
-  }, [timeframe, selectedBranchId]);
+  }, [fetchDashboardData]);
 
   useEffect(() => {
     const handleBranchSwitched = (e: any) => {
@@ -185,11 +203,12 @@ export default function DashboardPage() {
 
   const channelChartData = useMemo(() => {
     if (!data?.channelBreakdown) return [];
-    return data.channelBreakdown.map((c) => ({
+    const fallbackPalette = ['#2563EB', '#059669', '#7C3AED', '#D97706', '#0891B2'];
+    return data.channelBreakdown.map((c, idx) => ({
       name: c.type,
       value: c.revenue,
       orders: c.orders,
-      color: CHANNEL_COLORS[c.type] || '#64748B',
+      color: CHANNEL_COLORS[c.type] || fallbackPalette[idx % fallbackPalette.length],
     }));
   }, [data?.channelBreakdown]);
 
@@ -199,8 +218,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 pb-12 font-sans">
-      {/* 1. EXECUTIVE ACTION & FILTER BAR */}
-      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      {/* 1. EXECUTIVE ACTION & MULTI-DIMENSIONAL FILTER BAR */}
+      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-bold uppercase tracking-wider text-servora-core bg-blue-50 px-2 py-0.5 rounded-md flex items-center gap-1.5">
@@ -212,11 +231,11 @@ export default function DashboardPage() {
           </div>
           <h1 className="text-xl font-bold text-servora-navy">Enterprise Operations & Analytics</h1>
           <p className="text-xs text-servora-deepTeal mt-0.5">
-            Consolidated telemetry across Point of Sale, Kitchen Display, Multi-Branch Stock, Procurement, and Tax Compliance.
+            Consolidated telemetry across POS, Shift Custody, Multi-Branch Stock, Procurement, Expenses, and KRA Compliance.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
           <Link
             href="/pos"
             className="px-3.5 py-2 bg-servora-core text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
@@ -224,12 +243,22 @@ export default function DashboardPage() {
             <ShoppingBag size={14} /> Launch POS
           </Link>
 
+          {/* Branch Filter */}
           <select
             value={selectedBranchId}
-            onChange={(e) => setSelectedBranchId(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setSelectedBranchId(val);
+              if (typeof window !== 'undefined' && val !== 'ALL') {
+                localStorage.setItem('servora_active_branch_id', val);
+                window.dispatchEvent(
+                  new CustomEvent('servora:branch-switched', { detail: { branchId: Number(val) } })
+                );
+              }
+            }}
             className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
           >
-            <option value="ALL">All Branch Locations</option>
+            <option value="ALL">All Branch Locations ({branches.length})</option>
             {branches.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name} ({b.code})
@@ -237,6 +266,20 @@ export default function DashboardPage() {
             ))}
           </select>
 
+          {/* Service Channel Filter */}
+          <select
+            value={selectedChannel}
+            onChange={(e) => setSelectedChannel(e.target.value)}
+            className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+          >
+            <option value="ALL">All Service Channels</option>
+            <option value="Dine-In">Dine-In</option>
+            <option value="Takeaway">Takeaway</option>
+            <option value="Delivery">Delivery</option>
+            <option value="Bar-Tab">Bar-Tab</option>
+          </select>
+
+          {/* Timeframe Selector */}
           <select
             value={timeframe}
             onChange={(e) => setTimeframe(e.target.value)}
@@ -246,7 +289,27 @@ export default function DashboardPage() {
             <option value="yesterday">Yesterday</option>
             <option value="7days">Past 7 Days</option>
             <option value="30days">Past 30 Days</option>
+            <option value="custom">Custom Range</option>
           </select>
+
+          {timeframe === 'custom' && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl text-xs">
+              <Calendar size={13} className="text-servora-core" />
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="bg-transparent font-mono text-xs focus:outline-none"
+              />
+              <span className="text-gray-400">to</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="bg-transparent font-mono text-xs focus:outline-none"
+              />
+            </div>
+          )}
 
           <button
             onClick={fetchDashboardData}
@@ -275,11 +338,10 @@ export default function DashboardPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${
-                active
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${active
                   ? 'bg-servora-navy text-white shadow-xs'
                   : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-              }`}
+                }`}
             >
               <Icon size={14} />
               <span>{tab.label}</span>
@@ -330,7 +392,8 @@ export default function DashboardPage() {
               })}
             </span>
             <span className="text-[11px] text-gray-500 font-mono block">
-              VAT: {(data?.financials.totalTax || 0).toLocaleString()} • Levy: {(data?.financials.cateringLevy || 0).toLocaleString()}
+              VAT: {(data?.financials.totalTax || 0).toLocaleString()} &bull; Levy:{' '}
+              {(data?.financials.cateringLevy || 0).toLocaleString()}
             </span>
           </div>
           <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] font-medium text-gray-500">
@@ -361,25 +424,30 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Floor Utilization */}
+        {/* Active Cash Custody & Shifts */}
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Floor Occupancy</span>
-            <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
-              <UtensilsCrossed size={16} />
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Active Tills</span>
+            <div className="p-2 bg-blue-50 text-servora-core rounded-xl">
+              <Scale size={16} />
             </div>
           </div>
           <div className="my-1.5">
-            <span className="text-lg font-bold font-mono text-servora-navy block">
-              {data?.floorPlan.utilizationRate || 0}% Seated
+            <span className="text-lg font-bold font-mono text-servora-core block truncate">
+              {currencySymbol} {(data?.treasury.expectedClosing || 0).toLocaleString()}
             </span>
             <span className="text-[11px] text-gray-500 block">
-              {data?.floorPlan.occupiedTables || 0} Occupied • {data?.floorPlan.availableTables || 0} Free
+              {data?.treasury.openShiftsCount || 0} Open Shifts &bull; {data?.treasury.activeDrawersCount || 0} Drawers
             </span>
           </div>
           <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] font-medium text-gray-500">
-            <span>Waitlist Queue:</span>
-            <span className="font-mono font-bold text-purple-700">{data?.floorPlan.waitlistCount || 0} Parties</span>
+            <span>Net Drift:</span>
+            <span
+              className={`font-mono font-bold ${(data?.treasury.netShiftVariance || 0) < 0 ? 'text-rose-600' : 'text-emerald-700'
+                }`}
+            >
+              {currencySymbol} {(data?.treasury.netShiftVariance || 0).toLocaleString()}
+            </span>
           </div>
         </div>
 
@@ -396,7 +464,7 @@ export default function DashboardPage() {
               {currencySymbol} {(data?.inventory.totalValuation || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </span>
             <span className="text-[11px] text-rose-600 font-bold block">
-              {data?.inventory.depletedItemsCount || 0} Low • {data?.inventory.outOfStockCount || 0} Out
+              {data?.inventory.depletedItemsCount || 0} Low &bull; {data?.inventory.outOfStockCount || 0} Out
             </span>
           </div>
           <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] font-medium text-gray-500">
@@ -405,37 +473,37 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* AP & Liquidity */}
+        {/* CRM & Loyalty Engagement */}
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Accounts Payable</span>
-            <div className="p-2 bg-teal-50 text-teal-600 rounded-xl">
-              <Wallet size={16} />
+            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">CRM & Loyalty</span>
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+              <Award size={16} />
             </div>
           </div>
           <div className="my-1.5">
             <span className="text-lg font-bold font-mono text-servora-navy block truncate">
-              {currencySymbol} {(data?.procurement.accountsPayableBalance || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+              {(data?.loyalty?.activePointsPool || 0).toLocaleString()} pts
             </span>
             <span className="text-[11px] text-gray-500 block">
-              {data?.procurement.unpaidInvoicesCount || 0} Unpaid Vendor Bills
+              {data?.loyalty?.enrolledMembersCount || 0} Enrolled Members
             </span>
           </div>
           <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[11px] font-medium text-gray-500">
-            <span>Open POs:</span>
-            <span className="font-mono font-bold text-servora-navy">{data?.procurement.openPurchaseOrders || 0}</span>
+            <span>Floor Seated:</span>
+            <span className="font-mono font-bold text-purple-700">{data?.floorPlan.utilizationRate || 0}%</span>
           </div>
         </div>
       </div>
 
-      {/* 4. VISUAL ANALYTICAL CHARTS (HOURLY REVENUE, CHANNEL MIX, TOP ITEMS) */}
+      {/* 4. VISUAL ANALYTICAL CHARTS (HOURLY/DAILY REVENUE, CHANNEL MIX, TOP ITEMS) */}
       {(activeTab === 'OVERVIEW' || activeTab === 'FINANCE_TREASURY') && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
           {/* Revenue Velocity Area Chart */}
           <div className="lg:col-span-6 bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h2 className="text-sm font-bold text-servora-navy">Hourly Revenue & Ticket Velocity</h2>
+                <h2 className="text-sm font-bold text-servora-navy">Revenue & Ticket Velocity</h2>
                 <p className="text-[11px] text-gray-400">Trading volume and throughput distribution</p>
               </div>
               <Link href="/reports/sales" className="text-[11px] font-bold text-servora-core hover:underline flex items-center gap-1">
@@ -532,11 +600,11 @@ export default function DashboardPage() {
                 const percent = totalChannelRevenue > 0 ? Math.round((c.value / totalChannelRevenue) * 100) : 0;
                 return (
                   <div key={c.name} className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c.color }} />
-                      <span className="font-semibold text-servora-navy">{c.name}</span>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                      <span className="font-semibold text-servora-navy truncate">{c.name}</span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] text-gray-400">{percent}%</span>
                       <span className="font-mono font-bold text-servora-navy">
                         {currencySymbol} {c.value.toLocaleString()}
@@ -578,7 +646,7 @@ export default function DashboardPage() {
                         </span>
                         <div className="min-w-0">
                           <p className="font-bold text-servora-navy truncate">{item.name}</p>
-                          <p className="text-[10px] text-gray-400">{item.quantity} sold • {item.station}</p>
+                          <p className="text-[10px] text-gray-400">{item.quantity} sold &bull; {item.station}</p>
                         </div>
                       </div>
                       <span className="font-mono font-bold text-servora-core shrink-0 ml-2">
@@ -722,7 +790,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 7. TREASURY, CASH MANAGEMENT & KRA COMPLIANCE */}
+      {/* 7. TREASURY, CASH CUSTODY, EXPENSES & KRA COMPLIANCE */}
       {(activeTab === 'OVERVIEW' || activeTab === 'FINANCE_TREASURY') && (
         <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs space-y-4">
           <div className="flex items-center justify-between border-b border-gray-100 pb-3">
@@ -731,56 +799,87 @@ export default function DashboardPage() {
                 <Wallet size={16} />
               </div>
               <div>
-                <h2 className="text-sm font-bold text-servora-navy">Treasury, Payments & Compliance</h2>
-                <p className="text-[11px] text-gray-400">Cash drawer sessions, M-Pesa C2B reconciliation, vendor payables, and eTIMS</p>
+                <h2 className="text-sm font-bold text-servora-navy">Treasury, Cash Custody & Governance</h2>
+                <p className="text-[11px] text-gray-400">Cash drawer sessions, Z-report reconciliation, corporate expenses, GL adjustments, and eTIMS</p>
               </div>
             </div>
-            <Link href="/payments" className="text-xs font-bold text-purple-700 hover:underline">
-              Settlement Cockpit &rarr;
+            <Link href="/cash-management/reconciliation" className="text-xs font-bold text-purple-700 hover:underline">
+              EOD Z-Report Cockpit &rarr;
             </Link>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <Link href="/cash-management/drawers" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
-              <span className="text-[10px] text-gray-400 font-bold uppercase block">Active Cash Till Session</span>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Active Cash Till Registers</span>
               <span className="text-base font-bold text-servora-navy mt-1 block truncate">
-                {data?.treasury.hasActiveSession ? data.treasury.drawerName : 'No Active Session'}
+                {data?.treasury.hasActiveSession
+                  ? `${data.treasury.activeDrawersCount} Open (${data.treasury.drawerName})`
+                  : 'No Active Session'}
               </span>
               <span className="text-[10px] font-mono text-emerald-700 font-bold block mt-0.5">
                 Expected: {currencySymbol} {(data?.treasury.expectedClosing || 0).toLocaleString()}
               </span>
             </Link>
 
-            <Link href="/payments/mpesa" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
-              <span className="text-[10px] text-gray-400 font-bold uppercase block">Unallocated M-Pesa Payments</span>
-              <span className="text-base font-bold text-emerald-700 mt-1 block">
-                {data?.treasury.unallocatedMpesaCount || 0} Transactions
+            <Link href="/finance/expenses" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">Corporate Expenses & Claims</span>
+              <span className="text-base font-bold text-servora-navy mt-1 block">
+                {data?.treasury.pendingExpensesCount || 0} Pending Approval
               </span>
               <span className="text-[10px] font-mono text-gray-500 block mt-0.5">
-                {currencySymbol} {(data?.treasury.unallocatedMpesaAmount || 0).toLocaleString()} Unmatched
+                Approved: {currencySymbol} {(data?.treasury.approvedExpensesTotal || 0).toLocaleString()}
               </span>
             </Link>
 
-            <Link href="/purchasing/invoices" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
-              <span className="text-[10px] text-gray-400 font-bold uppercase block">Accounts Payable Liability</span>
-              <span className="text-base font-bold text-rose-600 mt-1 block truncate">
-                {currencySymbol} {(data?.procurement.accountsPayableBalance || 0).toLocaleString()}
+            <Link href="/finance/adjustments" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">GL Adjustments (Maker-Checker)</span>
+              <span className="text-base font-bold text-rose-600 mt-1 block">
+                {data?.treasury.pendingAdjustmentsCount || 0} Vouchers Pending
               </span>
-              <span className="text-[10px] text-gray-500 block mt-0.5">
-                {data?.procurement.unpaidInvoicesCount || 0} Open Supplier Invoices
+              <span className="text-[10px] font-mono text-gray-500 block mt-0.5">
+                {currencySymbol} {(data?.treasury.pendingAdjustmentsAmount || 0).toLocaleString()} Awaiting Checker
               </span>
             </Link>
 
             <Link href="/finance/taxes" className="p-3.5 rounded-xl bg-slate-50 hover:bg-purple-50/40 border border-gray-200 transition-colors">
-              <span className="text-[10px] text-gray-400 font-bold uppercase block">KRA eTIMS Fiscal Device</span>
+              <span className="text-[10px] text-gray-400 font-bold uppercase block">KRA eTIMS & M-Pesa IPN</span>
               <span className="text-base font-bold text-servora-navy mt-1 block">
                 {data?.treasury.etimsFiscalizedCount || 0} Invoices Signed
               </span>
               <span className="text-[10px] text-amber-700 font-semibold block mt-0.5">
-                {data?.treasury.etimsPendingCount || 0} Pending OSCU Dispatch
+                {data?.treasury.unallocatedMpesaCount || 0} Unallocated M-Pesa
               </span>
             </Link>
           </div>
+
+          {/* Live Enterprise Governance Audit Stream */}
+          {data?.recentAudits && data.recentAudits.length > 0 && (
+            <div className="pt-3 border-t border-gray-100">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5 mb-2">
+                <Activity size={12} className="text-servora-core" /> Live Governance & Custody Audit Trail
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-[11px]">
+                {data.recentAudits.map((log) => (
+                  <div
+                    key={log.id}
+                    className="px-3 py-2 rounded-xl bg-slate-50 border border-gray-100 flex items-center justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-mono font-bold text-servora-navy block truncate">
+                        {log.action}
+                      </span>
+                      <span className="text-[10px] text-gray-500 truncate block">
+                        {log.module} &bull; {log.actorName || 'System'}
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-mono text-gray-400 shrink-0">
+                      {new Date(log.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -844,11 +943,11 @@ export default function DashboardPage() {
                 <ShieldCheck size={14} className="text-purple-600" /> Governance & Finance
               </span>
               <div className="space-y-1.5 pt-1">
-                <Link href="/payments" className="block hover:text-servora-core">Tender Settlements</Link>
-                <Link href="/payments/mpesa" className="block hover:text-servora-core">M-Pesa Daraja Console</Link>
-                <Link href="/finance/taxes" className="block hover:text-servora-core">Tax & eTIMS Compliance</Link>
-                <Link href="/staff" className="block hover:text-servora-core">Staff & Workforce</Link>
-                <Link href="/staff/roles" className="block hover:text-servora-core">RBAC Security Clearances</Link>
+                <Link href="/cash-management/drawers" className="block hover:text-servora-core">POS Cash Drawers</Link>
+                <Link href="/cash-management/shifts" className="block hover:text-servora-core">Cashier Shift Custody</Link>
+                <Link href="/cash-management/reconciliation" className="block hover:text-servora-core">EOD Z-Report Reconciliation</Link>
+                <Link href="/finance/expenses" className="block hover:text-servora-core">Corporate Expenses</Link>
+                <Link href="/finance/adjustments" className="block hover:text-servora-core">GL Variance Adjustments</Link>
                 <Link href="/settings/branches" className="block hover:text-servora-core">Multi-Location Branches</Link>
               </div>
             </div>

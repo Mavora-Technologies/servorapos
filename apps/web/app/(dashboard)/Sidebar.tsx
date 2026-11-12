@@ -137,12 +137,12 @@ const navigationGroups: NavGroup[] = [
     items: [
       { label: 'All Orders Ledger', href: '/orders', icon: FileText, permission: 'orders.view', keywords: ['sales', 'receipts'] },
       { label: 'Open Dining Checks', href: '/orders/open', icon: ClipboardList, permission: 'orders.view', keywords: ['active', 'tables'] },
+      { label: 'Takeaway & Express Pickups', href: '/orders/takeaway', icon: ShoppingBasket, permission: 'orders.view', keywords: ['to-go', 'pickup'] },
+      { label: 'Dispatch & Delivery Tracking', href: '/orders/delivery', icon: Truck, permission: 'delivery.view', keywords: ['courier', 'rider'] },
+      { label: 'Online Ordering Storefront', href: '/orders/online-orders', icon: Monitor, permission: 'orders.view', keywords: ['web', 'menu'] },
       { label: 'Floor Layout & Tables', href: '/tables', icon: UtensilsCrossed, permission: 'tables.view', keywords: ['seating', 'map'] },
       { label: 'Table Reservations', href: '/reservations', icon: CalendarDays, permission: 'reservations.view', keywords: ['booking', 'calendar'] },
       { label: 'Guest Waitlist Queue', href: '/reservations/waitlist', icon: Clock, permission: 'reservations.view', keywords: ['walkin', 'line'] },
-      { label: 'Takeaway & Express Pickups', href: '/orders/takeaway', icon: ShoppingBasket, permission: 'orders.view', keywords: ['to-go', 'pickup'] },
-      { label: 'Dispatch & Delivery Tracking', href: '/orders/delivery', icon: Truck, permission: 'delivery.view', keywords: ['courier', 'rider'] },
-      { label: 'Online Ordering Storefront', href: '/online-orders', icon: Monitor, permission: 'orders.view', keywords: ['web', 'menu'] },
     ],
   },
   {

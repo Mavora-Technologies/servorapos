@@ -1,14 +1,14 @@
-import { eq, and, desc, sql, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, sql, or, isNull } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   orders,
   supplierInvoices,
   expenses,
   cashDrawers,
+  drawerSessions,
   financialAdjustments,
   cashierShifts,
   payments,
-  mpesaTransactions,
   branches,
 } from '../config/schema';
 import { FinanceHubQuery } from '../validators/finance-hub.validator';
@@ -34,11 +34,17 @@ export const getExecutiveFinanceOverview = async (tenantId: number, query: Finan
     dateFilterOrders = sql`date_trunc('month', ${orders.createdAt}) = date_trunc('month', current_date)`;
     dateFilterSupplier = sql`date_trunc('month', ${supplierInvoices.invoiceDate}) = date_trunc('month', current_date)`;
     dateFilterExpenses = sql`date_trunc('month', ${expenses.expenseDate}) = date_trunc('month', current_date)`;
+  } else if (query.period === 'THIS_QUARTER') {
+    dateFilterOrders = sql`date_trunc('quarter', ${orders.createdAt}) = date_trunc('quarter', current_date)`;
+    dateFilterSupplier = sql`date_trunc('quarter', ${supplierInvoices.invoiceDate}) = date_trunc('quarter', current_date)`;
+    dateFilterExpenses = sql`date_trunc('quarter', ${expenses.expenseDate}) = date_trunc('quarter', current_date)`;
   } else if (query.period === 'THIS_YEAR') {
     dateFilterOrders = sql`date_trunc('year', ${orders.createdAt}) = date_trunc('year', current_date)`;
     dateFilterSupplier = sql`date_trunc('year', ${supplierInvoices.invoiceDate}) = date_trunc('year', current_date)`;
     dateFilterExpenses = sql`date_trunc('year', ${expenses.expenseDate}) = date_trunc('year', current_date)`;
   }
+
+  const paidOrderCondition = sql`UPPER(${orders.status}) != 'CANCELLED' AND UPPER(${orders.paymentStatus}) IN ('PAID', 'PARTIAL')`;
 
   const [
     [salesResult],
@@ -51,11 +57,11 @@ export const getExecutiveFinanceOverview = async (tenantId: number, query: Finan
     // 1. Gross Revenue & Output Tax Liability
     db
       .select({
-        totalRevenue: sql<number>`coalesce(sum(case when ${orders.paymentStatus} = 'Paid' then ${orders.total} else 0 end), 0)::numeric`,
-        grossTaxableSales: sql<number>`coalesce(sum(case when ${orders.paymentStatus} = 'Paid' then ${orders.subtotal} else 0 end), 0)::numeric`,
-        outputVat: sql<number>`coalesce(sum(case when ${orders.paymentStatus} = 'Paid' then ${orders.tax} else 0 end), 0)::numeric`,
-        cateringLevy: sql<number>`coalesce(sum(case when ${orders.paymentStatus} = 'Paid' then ${orders.cateringLevy} else 0 end), 0)::numeric`,
-        settledOrdersCount: sql<number>`count(case when ${orders.paymentStatus} = 'Paid' then 1 end)::int`,
+        totalRevenue: sql<number>`coalesce(sum(case when ${paidOrderCondition} then ${orders.total} else 0 end), 0)::numeric`,
+        grossTaxableSales: sql<number>`coalesce(sum(case when ${paidOrderCondition} then ${orders.subtotal} else 0 end), 0)::numeric`,
+        outputVat: sql<number>`coalesce(sum(case when ${paidOrderCondition} then ${orders.tax} else 0 end), 0)::numeric`,
+        cateringLevy: sql<number>`coalesce(sum(case when ${paidOrderCondition} then ${orders.cateringLevy} else 0 end), 0)::numeric`,
+        settledOrdersCount: sql<number>`count(case when ${paidOrderCondition} then 1 end)::int`,
       })
       .from(orders)
       .where(and(eq(orders.tenantId, tenantId), branchCondition, dateFilterOrders)),
@@ -65,7 +71,7 @@ export const getExecutiveFinanceOverview = async (tenantId: number, query: Finan
       .select({
         totalInvoicedBills: sql<number>`coalesce(sum(${supplierInvoices.totalAmount}), 0)::numeric`,
         totalPaidBills: sql<number>`coalesce(sum(${supplierInvoices.paidAmount}), 0)::numeric`,
-        outstandingPayables: sql<number>`coalesce(sum(case when ${supplierInvoices.status} in ('UNPAID', 'PARTIALLY_PAID') then (${supplierInvoices.totalAmount} - ${supplierInvoices.paidAmount}) else 0 end), 0)::numeric`,
+        outstandingPayables: sql<number>`coalesce(sum(case when ${supplierInvoices.status} in ('UNPAID', 'PARTIALLY_PAID', 'DISPUTED') then (${supplierInvoices.totalAmount} - ${supplierInvoices.paidAmount}) else 0 end), 0)::numeric`,
         inputVat: sql<number>`coalesce(sum(${supplierInvoices.taxAmount}), 0)::numeric`,
       })
       .from(supplierInvoices)
@@ -81,7 +87,7 @@ export const getExecutiveFinanceOverview = async (tenantId: number, query: Finan
       .from(expenses)
       .where(and(eq(expenses.tenantId, tenantId), expenseBranchCondition, dateFilterExpenses)),
 
-    // 4. Live Treasury Balances
+    // 4. Live Treasury Balances across Active Drawers
     db
       .select({
         totalDrawerCash: sql<number>`coalesce(sum(${cashDrawers.currentBalance}), 0)::numeric`,
@@ -148,7 +154,11 @@ export const getExecutiveFinanceOverview = async (tenantId: number, query: Finan
   };
 };
 
-export const getRecentTreasuryLedger = async (tenantId: number, limit = 10) => {
+export const getRecentTreasuryLedger = async (
+  tenantId: number,
+  branchId?: number,
+  limit = 15
+) => {
   const recentPayments = await db
     .select({
       id: payments.id,
@@ -159,10 +169,17 @@ export const getRecentTreasuryLedger = async (tenantId: number, limit = 10) => {
       clearingAccount: payments.clearingAccount,
       transactionReference: payments.transactionReference,
       amount: payments.amount,
+      branchName: branches.name,
       createdAt: payments.createdAt,
     })
     .from(payments)
-    .where(eq(payments.tenantId, tenantId))
+    .leftJoin(branches, eq(payments.branchId, branches.id))
+    .where(
+      and(
+        eq(payments.tenantId, tenantId),
+        branchId ? eq(payments.branchId, branchId) : undefined
+      )
+    )
     .orderBy(desc(payments.createdAt))
     .limit(limit);
 

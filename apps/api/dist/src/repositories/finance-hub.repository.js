@@ -25,20 +25,26 @@ const getExecutiveFinanceOverview = async (tenantId, query) => {
         dateFilterSupplier = (0, drizzle_orm_1.sql) `date_trunc('month', ${schema_1.supplierInvoices.invoiceDate}) = date_trunc('month', current_date)`;
         dateFilterExpenses = (0, drizzle_orm_1.sql) `date_trunc('month', ${schema_1.expenses.expenseDate}) = date_trunc('month', current_date)`;
     }
+    else if (query.period === 'THIS_QUARTER') {
+        dateFilterOrders = (0, drizzle_orm_1.sql) `date_trunc('quarter', ${schema_1.orders.createdAt}) = date_trunc('quarter', current_date)`;
+        dateFilterSupplier = (0, drizzle_orm_1.sql) `date_trunc('quarter', ${schema_1.supplierInvoices.invoiceDate}) = date_trunc('quarter', current_date)`;
+        dateFilterExpenses = (0, drizzle_orm_1.sql) `date_trunc('quarter', ${schema_1.expenses.expenseDate}) = date_trunc('quarter', current_date)`;
+    }
     else if (query.period === 'THIS_YEAR') {
         dateFilterOrders = (0, drizzle_orm_1.sql) `date_trunc('year', ${schema_1.orders.createdAt}) = date_trunc('year', current_date)`;
         dateFilterSupplier = (0, drizzle_orm_1.sql) `date_trunc('year', ${schema_1.supplierInvoices.invoiceDate}) = date_trunc('year', current_date)`;
         dateFilterExpenses = (0, drizzle_orm_1.sql) `date_trunc('year', ${schema_1.expenses.expenseDate}) = date_trunc('year', current_date)`;
     }
+    const paidOrderCondition = (0, drizzle_orm_1.sql) `UPPER(${schema_1.orders.status}) != 'CANCELLED' AND UPPER(${schema_1.orders.paymentStatus}) IN ('PAID', 'PARTIAL')`;
     const [[salesResult], [billsResult], [expensesResult], [liquidityResult], [adjustmentsResult], [pendingGovernanceResult],] = await Promise.all([
         // 1. Gross Revenue & Output Tax Liability
         db_1.db
             .select({
-            totalRevenue: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.orders.paymentStatus} = 'Paid' then ${schema_1.orders.total} else 0 end), 0)::numeric`,
-            grossTaxableSales: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.orders.paymentStatus} = 'Paid' then ${schema_1.orders.subtotal} else 0 end), 0)::numeric`,
-            outputVat: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.orders.paymentStatus} = 'Paid' then ${schema_1.orders.tax} else 0 end), 0)::numeric`,
-            cateringLevy: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.orders.paymentStatus} = 'Paid' then ${schema_1.orders.cateringLevy} else 0 end), 0)::numeric`,
-            settledOrdersCount: (0, drizzle_orm_1.sql) `count(case when ${schema_1.orders.paymentStatus} = 'Paid' then 1 end)::int`,
+            totalRevenue: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${paidOrderCondition} then ${schema_1.orders.total} else 0 end), 0)::numeric`,
+            grossTaxableSales: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${paidOrderCondition} then ${schema_1.orders.subtotal} else 0 end), 0)::numeric`,
+            outputVat: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${paidOrderCondition} then ${schema_1.orders.tax} else 0 end), 0)::numeric`,
+            cateringLevy: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${paidOrderCondition} then ${schema_1.orders.cateringLevy} else 0 end), 0)::numeric`,
+            settledOrdersCount: (0, drizzle_orm_1.sql) `count(case when ${paidOrderCondition} then 1 end)::int`,
         })
             .from(schema_1.orders)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), branchCondition, dateFilterOrders)),
@@ -47,7 +53,7 @@ const getExecutiveFinanceOverview = async (tenantId, query) => {
             .select({
             totalInvoicedBills: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.supplierInvoices.totalAmount}), 0)::numeric`,
             totalPaidBills: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.supplierInvoices.paidAmount}), 0)::numeric`,
-            outstandingPayables: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.supplierInvoices.status} in ('UNPAID', 'PARTIALLY_PAID') then (${schema_1.supplierInvoices.totalAmount} - ${schema_1.supplierInvoices.paidAmount}) else 0 end), 0)::numeric`,
+            outstandingPayables: (0, drizzle_orm_1.sql) `coalesce(sum(case when ${schema_1.supplierInvoices.status} in ('UNPAID', 'PARTIALLY_PAID', 'DISPUTED') then (${schema_1.supplierInvoices.totalAmount} - ${schema_1.supplierInvoices.paidAmount}) else 0 end), 0)::numeric`,
             inputVat: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.supplierInvoices.taxAmount}), 0)::numeric`,
         })
             .from(schema_1.supplierInvoices)
@@ -61,7 +67,7 @@ const getExecutiveFinanceOverview = async (tenantId, query) => {
         })
             .from(schema_1.expenses)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.expenses.tenantId, tenantId), expenseBranchCondition, dateFilterExpenses)),
-        // 4. Live Treasury Balances
+        // 4. Live Treasury Balances across Active Drawers
         db_1.db
             .select({
             totalDrawerCash: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.cashDrawers.currentBalance}), 0)::numeric`,
@@ -124,7 +130,7 @@ const getExecutiveFinanceOverview = async (tenantId, query) => {
     };
 };
 exports.getExecutiveFinanceOverview = getExecutiveFinanceOverview;
-const getRecentTreasuryLedger = async (tenantId, limit = 10) => {
+const getRecentTreasuryLedger = async (tenantId, branchId, limit = 15) => {
     const recentPayments = await db_1.db
         .select({
         id: schema_1.payments.id,
@@ -135,10 +141,12 @@ const getRecentTreasuryLedger = async (tenantId, limit = 10) => {
         clearingAccount: schema_1.payments.clearingAccount,
         transactionReference: schema_1.payments.transactionReference,
         amount: schema_1.payments.amount,
+        branchName: schema_1.branches.name,
         createdAt: schema_1.payments.createdAt,
     })
         .from(schema_1.payments)
-        .where((0, drizzle_orm_1.eq)(schema_1.payments.tenantId, tenantId))
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.payments.branchId, schema_1.branches.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.payments.tenantId, tenantId), branchId ? (0, drizzle_orm_1.eq)(schema_1.payments.branchId, branchId) : undefined))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.payments.createdAt))
         .limit(limit);
     return recentPayments.map((p) => ({

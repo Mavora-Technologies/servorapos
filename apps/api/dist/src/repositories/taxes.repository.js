@@ -1,37 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.retryInvoiceFiscalization = exports.listTaxCodes = exports.listFiscalInvoices = exports.getTaxLiabilityTelemetry = exports.updateTenantTaxSettings = exports.getTenantTaxSettings = void 0;
+exports.retryInvoiceFiscalization = exports.createTaxCodeRecord = exports.listTaxCodes = exports.listFiscalInvoices = exports.getTaxLiabilityTelemetry = exports.updateTenantTaxSettings = exports.getTenantTaxSettings = void 0;
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
+// Pure read-only retrieval (Zero auto-seeding on SELECT)
 const getTenantTaxSettings = async (tenantId) => {
-    let [settings] = await db_1.db
+    const [settings] = await db_1.db
         .select()
         .from(schema_1.tenantFinancialSettings)
         .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
         .limit(1);
-    // If no custom financial settings exist yet, create default configuration once
-    if (!settings) {
-        const [created] = await db_1.db
-            .insert(schema_1.tenantFinancialSettings)
-            .values({
-            tenantId,
-            baseCurrency: 'KES',
-            fiscalYearStartMonth: 1,
-            isVatInclusive: true,
-            vatRate: '16.00',
-            isCateringLevyEnabled: true,
-            cateringLevyRate: '2.00',
-            isServiceChargeEnabled: false,
-            serviceChargeRate: '5.00',
-            etimsEnvironment: 'SANDBOX',
-            autoFiscalizeOnPayment: true,
-            etimsBranchCode: '00',
-            allowOfflineFiscalSign: true,
-        })
-            .returning();
-        settings = created;
-    }
+    if (!settings)
+        return null;
     return {
         ...settings,
         vatRate: Number(settings.vatRate),
@@ -40,54 +21,99 @@ const getTenantTaxSettings = async (tenantId) => {
     };
 };
 exports.getTenantTaxSettings = getTenantTaxSettings;
-const updateTenantTaxSettings = async (tenantId, input) => {
-    const updateData = {
+const updateTenantTaxSettings = async (tenantId, userId, input) => {
+    const [existing] = await db_1.db
+        .select({ id: schema_1.tenantFinancialSettings.id })
+        .from(schema_1.tenantFinancialSettings)
+        .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
+        .limit(1);
+    const payload = {
         updatedAt: new Date(),
     };
     if (input.taxPin !== undefined)
-        updateData.taxPin = input.taxPin;
+        payload.taxPin = input.taxPin;
     if (input.vatRate !== undefined)
-        updateData.vatRate = input.vatRate.toFixed(2);
+        payload.vatRate = input.vatRate.toFixed(2);
     if (input.isVatInclusive !== undefined)
-        updateData.isVatInclusive = input.isVatInclusive;
+        payload.isVatInclusive = input.isVatInclusive;
     if (input.isCateringLevyEnabled !== undefined)
-        updateData.isCateringLevyEnabled = input.isCateringLevyEnabled;
+        payload.isCateringLevyEnabled = input.isCateringLevyEnabled;
     if (input.cateringLevyRate !== undefined)
-        updateData.cateringLevyRate = input.cateringLevyRate.toFixed(2);
+        payload.cateringLevyRate = input.cateringLevyRate.toFixed(2);
     if (input.isServiceChargeEnabled !== undefined)
-        updateData.isServiceChargeEnabled = input.isServiceChargeEnabled;
+        payload.isServiceChargeEnabled = input.isServiceChargeEnabled;
     if (input.serviceChargeRate !== undefined)
-        updateData.serviceChargeRate = input.serviceChargeRate.toFixed(2);
+        payload.serviceChargeRate = input.serviceChargeRate.toFixed(2);
     if (input.etimsEnvironment !== undefined)
-        updateData.etimsEnvironment = input.etimsEnvironment;
+        payload.etimsEnvironment = input.etimsEnvironment;
     if (input.autoFiscalizeOnPayment !== undefined)
-        updateData.autoFiscalizeOnPayment = input.autoFiscalizeOnPayment;
+        payload.autoFiscalizeOnPayment = input.autoFiscalizeOnPayment;
     if (input.etimsMiddleServerUrl !== undefined)
-        updateData.etimsMiddleServerUrl = input.etimsMiddleServerUrl;
+        payload.etimsMiddleServerUrl = input.etimsMiddleServerUrl || null;
     if (input.etimsDeviceSerial !== undefined)
-        updateData.etimsDeviceSerial = input.etimsDeviceSerial;
+        payload.etimsDeviceSerial = input.etimsDeviceSerial;
     if (input.etimsBranchCode !== undefined)
-        updateData.etimsBranchCode = input.etimsBranchCode;
+        payload.etimsBranchCode = input.etimsBranchCode;
     if (input.allowOfflineFiscalSign !== undefined)
-        updateData.allowOfflineFiscalSign = input.allowOfflineFiscalSign;
-    const [updated] = await db_1.db
-        .update(schema_1.tenantFinancialSettings)
-        .set(updateData)
-        .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
-        .returning();
-    return updated;
+        payload.allowOfflineFiscalSign = input.allowOfflineFiscalSign;
+    let saved;
+    if (!existing) {
+        const [created] = await db_1.db
+            .insert(schema_1.tenantFinancialSettings)
+            .values({
+            tenantId,
+            baseCurrency: 'KES',
+            fiscalYearStartMonth: 1,
+            ...payload,
+        })
+            .returning();
+        saved = created;
+    }
+    else {
+        const [updated] = await db_1.db
+            .update(schema_1.tenantFinancialSettings)
+            .set(payload)
+            .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
+            .returning();
+        saved = updated;
+    }
+    await db_1.db.insert(schema_1.auditLogs).values({
+        tenantId,
+        userId,
+        action: 'TAX_CONFIGURATION_UPDATED',
+        module: 'FINANCE',
+        entityType: 'tenant_financial_settings',
+        entityId: String(saved.id),
+        reason: `Updated statutory tax parameters (${input.etimsEnvironment})`,
+        newValues: payload,
+    });
+    return saved;
 };
 exports.updateTenantTaxSettings = updateTenantTaxSettings;
-const getTaxLiabilityTelemetry = async (tenantId, branchId, periodYear, periodMonth) => {
-    const year = periodYear || new Date().getFullYear();
-    const month = periodMonth || new Date().getMonth() + 1;
-    const branchCondition = branchId ? (0, drizzle_orm_1.eq)(schema_1.orders.branchId, branchId) : undefined;
-    const supplierBranchCondition = branchId ? (0, drizzle_orm_1.eq)(schema_1.supplierInvoices.branchId, branchId) : undefined;
-    const fiscalBranchCondition = branchId ? (0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.branchId, branchId) : undefined;
-    const dateFilterOrders = (0, drizzle_orm_1.sql) `extract(year from ${schema_1.orders.createdAt}) = ${year} and extract(month from ${schema_1.orders.createdAt}) = ${month}`;
-    const dateFilterPurchases = (0, drizzle_orm_1.sql) `extract(year from ${schema_1.supplierInvoices.invoiceDate}) = ${year} and extract(month from ${schema_1.supplierInvoices.invoiceDate}) = ${month}`;
-    const dateFilterFiscal = (0, drizzle_orm_1.sql) `extract(year from ${schema_1.fiscalInvoices.createdAt}) = ${year} and extract(month from ${schema_1.fiscalInvoices.createdAt}) = ${month}`;
-    // 1. Output Tax Liability from Point-of-Sale Orders (Completed/Paid)
+const getTaxLiabilityTelemetry = async (tenantId, params) => {
+    const year = params.periodYear || new Date().getFullYear();
+    const month = params.periodMonth || new Date().getMonth() + 1;
+    const quarter = params.periodQuarter || Math.ceil(month / 3);
+    const periodType = params.periodType || 'MONTH';
+    const branchCondition = params.branchId
+        ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.orders.branchId, params.branchId), (0, drizzle_orm_1.isNull)(schema_1.orders.branchId))
+        : undefined;
+    const supplierBranchCondition = params.branchId
+        ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.supplierInvoices.branchId, params.branchId), (0, drizzle_orm_1.isNull)(schema_1.supplierInvoices.branchId))
+        : undefined;
+    const fiscalBranchCondition = params.branchId
+        ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.branchId, params.branchId), (0, drizzle_orm_1.isNull)(schema_1.fiscalInvoices.branchId))
+        : undefined;
+    const buildPeriodSql = (col) => {
+        if (periodType === 'YEAR') {
+            return (0, drizzle_orm_1.sql) `extract(year from ${col}) = ${year}`;
+        }
+        if (periodType === 'QUARTER') {
+            return (0, drizzle_orm_1.sql) `extract(year from ${col}) = ${year} and extract(quarter from ${col}) = ${quarter}`;
+        }
+        return (0, drizzle_orm_1.sql) `extract(year from ${col}) = ${year} and extract(month from ${col}) = ${month}`;
+    };
+    // 1. Output Tax Liability from Settled POS Orders
     const [outputTax] = await db_1.db
         .select({
         grossSalesKes: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.orders.total}), 0)::numeric`,
@@ -98,8 +124,8 @@ const getTaxLiabilityTelemetry = async (tenantId, branchId, periodYear, periodMo
         paidOrdersCount: (0, drizzle_orm_1.sql) `count(*)::int`,
     })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orders.paymentStatus, 'Paid'), branchCondition, dateFilterOrders));
-    // 2. Input Tax Deductions from Verified Supplier Invoices (B2B Purchases)
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.sql) `UPPER(${schema_1.orders.status}) != 'CANCELLED'`, (0, drizzle_orm_1.sql) `UPPER(${schema_1.orders.paymentStatus}) IN ('PAID', 'PARTIAL')`, branchCondition, buildPeriodSql(schema_1.orders.createdAt)));
+    // 2. Input Tax Deductions from Verified Supplier Invoices
     const [inputTax] = await db_1.db
         .select({
         grossPurchasesKes: (0, drizzle_orm_1.sql) `coalesce(sum(${schema_1.supplierInvoices.totalAmount}), 0)::numeric`,
@@ -107,7 +133,7 @@ const getTaxLiabilityTelemetry = async (tenantId, branchId, periodYear, periodMo
         invoicesCount: (0, drizzle_orm_1.sql) `count(*)::int`,
     })
         .from(schema_1.supplierInvoices)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.supplierInvoices.tenantId, tenantId), supplierBranchCondition, dateFilterPurchases));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.supplierInvoices.tenantId, tenantId), supplierBranchCondition, buildPeriodSql(schema_1.supplierInvoices.invoiceDate)));
     // 3. Fiscal Device (eTIMS) Real-Time Transmission Health
     const [fiscalStats] = await db_1.db
         .select({
@@ -117,12 +143,18 @@ const getTaxLiabilityTelemetry = async (tenantId, branchId, periodYear, periodMo
         failedCount: (0, drizzle_orm_1.sql) `count(case when ${schema_1.fiscalInvoices.fiscalStatus} = 'FAILED' then 1 end)::int`,
     })
         .from(schema_1.fiscalInvoices)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.tenantId, tenantId), fiscalBranchCondition, dateFilterFiscal));
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.tenantId, tenantId), fiscalBranchCondition, buildPeriodSql(schema_1.fiscalInvoices.createdAt)));
     const outputVat = Number(outputTax?.outputVatKes || 0);
     const inputVat = Number(inputTax?.inputVatKes || 0);
     const netPayableVat = Math.round((outputVat - inputVat) * 100) / 100;
+    // Compute KRA Statutory Filing Deadline (20th of the following month for monthly VAT)
+    const filingDeadlineDate = periodType === 'MONTH'
+        ? new Date(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 20)
+            .toISOString()
+            .split('T')[0]
+        : `${year}-12-31`;
     return {
-        period: { year, month },
+        period: { year, month, quarter, periodType, filingDeadlineDate },
         salesOutputTax: {
             grossSalesKes: Number(outputTax?.grossSalesKes || 0),
             netTaxableSalesKes: Number(outputTax?.netTaxableSalesKes || 0),
@@ -160,13 +192,19 @@ const listFiscalInvoices = async (tenantId, query) => {
     const offset = (page - 1) * limit;
     const conditions = [
         (0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.tenantId, tenantId),
-        query.branchId ? (0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.branchId, query.branchId) : undefined,
+        query.branchId
+            ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.branchId, query.branchId), (0, drizzle_orm_1.isNull)(schema_1.fiscalInvoices.branchId))
+            : undefined,
         query.status && query.status !== 'ALL' ? (0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.fiscalStatus, query.status) : undefined,
+        query.search
+            ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.ilike)(schema_1.orders.orderNumber, `%${query.search}%`), (0, drizzle_orm_1.ilike)(schema_1.fiscalInvoices.cuInvoiceNumber, `%${query.search}%`), (0, drizzle_orm_1.ilike)(schema_1.fiscalInvoices.buyerKraPin, `%${query.search}%`))
+            : undefined,
     ].filter(Boolean);
     const [countResult, rows] = await Promise.all([
         db_1.db
             .select({ count: (0, drizzle_orm_1.sql) `count(*)` })
             .from(schema_1.fiscalInvoices)
+            .leftJoin(schema_1.orders, (0, drizzle_orm_1.eq)(schema_1.fiscalInvoices.orderId, schema_1.orders.id))
             .where((0, drizzle_orm_1.and)(...conditions)),
         db_1.db
             .select({
@@ -185,6 +223,7 @@ const listFiscalInvoices = async (tenantId, query) => {
             createdAt: schema_1.fiscalInvoices.createdAt,
             orderTotal: schema_1.orders.total,
             orderTax: schema_1.orders.tax,
+            orderLevy: schema_1.orders.cateringLevy,
             branchName: schema_1.branches.name,
         })
             .from(schema_1.fiscalInvoices)
@@ -201,6 +240,7 @@ const listFiscalInvoices = async (tenantId, query) => {
             ...r,
             orderTotal: Number(r.orderTotal || 0),
             orderTax: Number(r.orderTax || 0),
+            orderLevy: Number(r.orderLevy || 0),
         })),
         pagination: {
             page,
@@ -211,8 +251,9 @@ const listFiscalInvoices = async (tenantId, query) => {
     };
 };
 exports.listFiscalInvoices = listFiscalInvoices;
+// Pure read-only retrieval (Zero auto-seeding on SELECT)
 const listTaxCodes = async (tenantId) => {
-    let codes = await db_1.db
+    const codes = await db_1.db
         .select({
         id: schema_1.taxCodes.id,
         code: schema_1.taxCodes.code,
@@ -224,31 +265,30 @@ const listTaxCodes = async (tenantId) => {
         .from(schema_1.taxCodes)
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.taxCodes.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.taxCodes.isActive, true)))
         .orderBy((0, drizzle_orm_1.asc)(schema_1.taxCodes.code));
-    if (codes.length === 0) {
-        const defaultCodes = [
-            { code: 'VAT-16', name: 'Standard Rate (16% VAT)', rate: '16.00', statutoryCode: 'B' },
-            { code: 'LEVY-2', name: 'Tourism & Catering Training Levy (2%)', rate: '2.00', statutoryCode: 'LEVY' },
-            { code: 'ZERO-0', name: 'Zero-Rated Supplies (0%)', rate: '0.00', statutoryCode: 'A' },
-            { code: 'EXEMPT', name: 'Exempt Goods & Services', rate: '0.00', statutoryCode: 'E' },
-        ];
-        codes = await db_1.db
-            .insert(schema_1.taxCodes)
-            .values(defaultCodes.map((c) => ({ ...c, tenantId, isActive: true })))
-            .returning({
-            id: schema_1.taxCodes.id,
-            code: schema_1.taxCodes.code,
-            name: schema_1.taxCodes.name,
-            rate: schema_1.taxCodes.rate,
-            statutoryCode: schema_1.taxCodes.statutoryCode,
-            isActive: schema_1.taxCodes.isActive,
-        });
-    }
     return codes.map((c) => ({
         ...c,
         rate: Number(c.rate),
     }));
 };
 exports.listTaxCodes = listTaxCodes;
+const createTaxCodeRecord = async (tenantId, input) => {
+    const [created] = await db_1.db
+        .insert(schema_1.taxCodes)
+        .values({
+        tenantId,
+        code: input.code,
+        name: input.name,
+        rate: input.rate.toFixed(2),
+        statutoryCode: input.statutoryCode || null,
+        isActive: true,
+    })
+        .returning();
+    return {
+        ...created,
+        rate: Number(created.rate),
+    };
+};
+exports.createTaxCodeRecord = createTaxCodeRecord;
 const retryInvoiceFiscalization = async (tenantId, fiscalInvoiceId) => {
     const [invoice] = await db_1.db
         .select()
@@ -257,7 +297,6 @@ const retryInvoiceFiscalization = async (tenantId, fiscalInvoiceId) => {
         .limit(1);
     if (!invoice)
         throw new Error('Fiscal invoice record not found');
-    // Increment retry attempt counter and reset to PENDING for queue pickup
     const [updated] = await db_1.db
         .update(schema_1.fiscalInvoices)
         .set({

@@ -33,37 +33,67 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.markDelivered = exports.assignDriver = exports.getDeliveries = void 0;
+exports.markDelivered = exports.assignDriver = exports.getFleetRoster = exports.getDeliveries = void 0;
 const deliveryService = __importStar(require("../services/delivery.service"));
+const delivery_validator_1 = require("../validators/delivery.validator");
 const getDeliveries = async (req, res) => {
     try {
-        const data = await deliveryService.getDeliveries(req.user.tenantId);
+        const parsed = delivery_validator_1.listDeliveriesQuerySchema.safeParse(req.query);
+        const data = await deliveryService.getDeliveries(req.user.tenantId, parsed.success ? parsed.data : undefined);
         res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch deliveries' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch deliveries' });
     }
 };
 exports.getDeliveries = getDeliveries;
+const getFleetRoster = async (req, res) => {
+    try {
+        const staff = await deliveryService.getFleetStaff(req.user.tenantId);
+        res.status(200).json({ status: 'success', data: staff });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to load fleet roster' });
+    }
+};
+exports.getFleetRoster = getFleetRoster;
 const assignDriver = async (req, res) => {
     try {
-        const id = req.params.id;
-        const order = await deliveryService.dispatchOrder(req.user.tenantId, parseInt(id, 10), req.body);
+        const id = parseInt(String(req.params.id), 10);
+        if (isNaN(id)) {
+            res.status(400).json({ status: 'error', message: 'Invalid order ID' });
+            return;
+        }
+        const parsed = delivery_validator_1.dispatchDeliverySchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({
+                status: 'error',
+                message: parsed.error.issues[0]?.message || 'Invalid dispatch payload',
+            });
+            return;
+        }
+        const userId = req.user?.userId ?? req.user?.id;
+        const order = await deliveryService.dispatchOrder(req.user.tenantId, userId, id, parsed.data);
         res.status(200).json({ status: 'success', data: order });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to assign driver' });
+        res.status(400).json({ status: 'error', message: error.message || 'Failed to dispatch order' });
     }
 };
 exports.assignDriver = assignDriver;
 const markDelivered = async (req, res) => {
     try {
-        const id = req.params.id;
-        const order = await deliveryService.completeDelivery(req.user.tenantId, parseInt(id, 10));
+        const id = parseInt(String(req.params.id), 10);
+        if (isNaN(id)) {
+            res.status(400).json({ status: 'error', message: 'Invalid order ID' });
+            return;
+        }
+        const userId = req.user?.userId ?? req.user?.id;
+        const order = await deliveryService.completeDelivery(req.user.tenantId, userId, id);
         res.status(200).json({ status: 'success', data: order });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to complete delivery' });
+        res.status(400).json({ status: 'error', message: error.message || 'Failed to complete delivery' });
     }
 };
 exports.markDelivered = markDelivered;

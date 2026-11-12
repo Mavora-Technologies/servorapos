@@ -33,35 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.completeDelivery = exports.dispatchOrder = exports.getDeliveries = void 0;
+exports.completeDelivery = exports.dispatchOrder = exports.getFleetStaff = exports.getDeliveries = void 0;
 const deliveryRepo = __importStar(require("../repositories/delivery.repository"));
-const getDeliveries = async (tenantId) => await deliveryRepo.fetchDeliveryOrders(tenantId);
+const getDeliveries = async (tenantId, query) => await deliveryRepo.fetchDeliveryOrders(tenantId, query);
 exports.getDeliveries = getDeliveries;
-// 3PL Integration Simulator
-const requestThirdPartyLogistics = async (provider) => {
-    // In production, this uses the provider's REST API (e.g., Uber Direct API or Bolt API)
-    // to request a rider and receive the driver details & tracking link.
-    const mockDrivers = ['Kamau (Bodaboda)', 'Ochieng (Rider)', 'Njoroge', 'Wanjiku (Delivery)'];
-    const randomDriver = mockDrivers[Math.floor(Math.random() * mockDrivers.length)];
-    const randomPhone = `07${Math.floor(Math.random() * 90000000 + 10000000)}`;
-    const mockFee = Math.floor(Math.random() * 300) + 150; // Random fee between 150 - 450 KES
-    return {
-        provider,
-        driverName: randomDriver,
-        driverPhone: randomPhone,
-        trackingUrl: `https://track.${provider.toLowerCase().replace(/\s/g, '')}.com/live/ord-${Math.floor(Math.random() * 10000)}`,
-        deliveryFee: mockFee
-    };
-};
-const dispatchOrder = async (tenantId, orderId, data) => {
-    let dispatchData = { ...data };
-    // If using a 3PL provider, call their API to assign the rider automatically
-    if (data.provider !== 'In-House') {
-        const apiResponse = await requestThirdPartyLogistics(data.provider);
-        dispatchData = { ...dispatchData, ...apiResponse };
-    }
-    return await deliveryRepo.assignDriverTransaction(tenantId, orderId, dispatchData);
+const getFleetStaff = async (tenantId) => await deliveryRepo.fetchFleetStaffDirectory(tenantId);
+exports.getFleetStaff = getFleetStaff;
+const dispatchOrder = async (tenantId, userId, orderId, input) => {
+    return await deliveryRepo.assignDriverTransaction(tenantId, userId, orderId, input);
 };
 exports.dispatchOrder = dispatchOrder;
-const completeDelivery = async (tenantId, orderId) => await deliveryRepo.markDeliveredTransaction(tenantId, orderId);
+const completeDelivery = async (tenantId, userId, orderId) => {
+    return await deliveryRepo.markDeliveredTransaction(tenantId, userId, orderId);
+};
 exports.completeDelivery = completeDelivery;

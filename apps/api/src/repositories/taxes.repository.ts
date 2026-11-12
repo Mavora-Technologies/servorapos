@@ -1,4 +1,4 @@
-import { eq, and, desc, asc, sql, or, ilike, gte, lte } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, or, isNull, ilike } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   tenantFinancialSettings,
@@ -7,43 +7,23 @@ import {
   orders,
   supplierInvoices,
   branches,
-  users,
+  auditLogs,
 } from '../config/schema';
 import {
   TaxReportQuery,
   UpdateTaxSettingsInput,
+  CreateTaxCodeInput,
 } from '../validators/taxes.validator';
 
+// Pure read-only retrieval (Zero auto-seeding on SELECT)
 export const getTenantTaxSettings = async (tenantId: number) => {
-  let [settings] = await db
+  const [settings] = await db
     .select()
     .from(tenantFinancialSettings)
     .where(eq(tenantFinancialSettings.tenantId, tenantId))
     .limit(1);
 
-  // If no custom financial settings exist yet, create default configuration once
-  if (!settings) {
-    const [created] = await db
-      .insert(tenantFinancialSettings)
-      .values({
-        tenantId,
-        baseCurrency: 'KES',
-        fiscalYearStartMonth: 1,
-        isVatInclusive: true,
-        vatRate: '16.00',
-        isCateringLevyEnabled: true,
-        cateringLevyRate: '2.00',
-        isServiceChargeEnabled: false,
-        serviceChargeRate: '5.00',
-        etimsEnvironment: 'SANDBOX',
-        autoFiscalizeOnPayment: true,
-        etimsBranchCode: '00',
-        allowOfflineFiscalSign: true,
-      })
-      .returning();
-
-    settings = created;
-  }
+  if (!settings) return null;
 
   return {
     ...settings,
@@ -55,53 +35,104 @@ export const getTenantTaxSettings = async (tenantId: number) => {
 
 export const updateTenantTaxSettings = async (
   tenantId: number,
+  userId: number,
   input: UpdateTaxSettingsInput
 ) => {
-  const updateData: Record<string, any> = {
+  const [existing] = await db
+    .select({ id: tenantFinancialSettings.id })
+    .from(tenantFinancialSettings)
+    .where(eq(tenantFinancialSettings.tenantId, tenantId))
+    .limit(1);
+
+  const payload: Record<string, any> = {
     updatedAt: new Date(),
   };
 
-  if (input.taxPin !== undefined) updateData.taxPin = input.taxPin;
-  if (input.vatRate !== undefined) updateData.vatRate = input.vatRate.toFixed(2);
-  if (input.isVatInclusive !== undefined) updateData.isVatInclusive = input.isVatInclusive;
-  if (input.isCateringLevyEnabled !== undefined) updateData.isCateringLevyEnabled = input.isCateringLevyEnabled;
-  if (input.cateringLevyRate !== undefined) updateData.cateringLevyRate = input.cateringLevyRate.toFixed(2);
-  if (input.isServiceChargeEnabled !== undefined) updateData.isServiceChargeEnabled = input.isServiceChargeEnabled;
-  if (input.serviceChargeRate !== undefined) updateData.serviceChargeRate = input.serviceChargeRate.toFixed(2);
-  if (input.etimsEnvironment !== undefined) updateData.etimsEnvironment = input.etimsEnvironment;
-  if (input.autoFiscalizeOnPayment !== undefined) updateData.autoFiscalizeOnPayment = input.autoFiscalizeOnPayment;
-  if (input.etimsMiddleServerUrl !== undefined) updateData.etimsMiddleServerUrl = input.etimsMiddleServerUrl;
-  if (input.etimsDeviceSerial !== undefined) updateData.etimsDeviceSerial = input.etimsDeviceSerial;
-  if (input.etimsBranchCode !== undefined) updateData.etimsBranchCode = input.etimsBranchCode;
-  if (input.allowOfflineFiscalSign !== undefined) updateData.allowOfflineFiscalSign = input.allowOfflineFiscalSign;
+  if (input.taxPin !== undefined) payload.taxPin = input.taxPin;
+  if (input.vatRate !== undefined) payload.vatRate = input.vatRate.toFixed(2);
+  if (input.isVatInclusive !== undefined) payload.isVatInclusive = input.isVatInclusive;
+  if (input.isCateringLevyEnabled !== undefined) payload.isCateringLevyEnabled = input.isCateringLevyEnabled;
+  if (input.cateringLevyRate !== undefined) payload.cateringLevyRate = input.cateringLevyRate.toFixed(2);
+  if (input.isServiceChargeEnabled !== undefined) payload.isServiceChargeEnabled = input.isServiceChargeEnabled;
+  if (input.serviceChargeRate !== undefined) payload.serviceChargeRate = input.serviceChargeRate.toFixed(2);
+  if (input.etimsEnvironment !== undefined) payload.etimsEnvironment = input.etimsEnvironment;
+  if (input.autoFiscalizeOnPayment !== undefined) payload.autoFiscalizeOnPayment = input.autoFiscalizeOnPayment;
+  if (input.etimsMiddleServerUrl !== undefined) payload.etimsMiddleServerUrl = input.etimsMiddleServerUrl || null;
+  if (input.etimsDeviceSerial !== undefined) payload.etimsDeviceSerial = input.etimsDeviceSerial;
+  if (input.etimsBranchCode !== undefined) payload.etimsBranchCode = input.etimsBranchCode;
+  if (input.allowOfflineFiscalSign !== undefined) payload.allowOfflineFiscalSign = input.allowOfflineFiscalSign;
 
-  const [updated] = await db
-    .update(tenantFinancialSettings)
-    .set(updateData)
-    .where(eq(tenantFinancialSettings.tenantId, tenantId))
-    .returning();
+  let saved;
+  if (!existing) {
+    const [created] = await db
+      .insert(tenantFinancialSettings)
+      .values({
+        tenantId,
+        baseCurrency: 'KES',
+        fiscalYearStartMonth: 1,
+        ...payload,
+      })
+      .returning();
+    saved = created;
+  } else {
+    const [updated] = await db
+      .update(tenantFinancialSettings)
+      .set(payload)
+      .where(eq(tenantFinancialSettings.tenantId, tenantId))
+      .returning();
+    saved = updated;
+  }
 
-  return updated;
+  await db.insert(auditLogs).values({
+    tenantId,
+    userId,
+    action: 'TAX_CONFIGURATION_UPDATED',
+    module: 'FINANCE',
+    entityType: 'tenant_financial_settings',
+    entityId: String(saved.id),
+    reason: `Updated statutory tax parameters (${input.etimsEnvironment})`,
+    newValues: payload,
+  });
+
+  return saved;
 };
 
 export const getTaxLiabilityTelemetry = async (
   tenantId: number,
-  branchId?: number,
-  periodYear?: number,
-  periodMonth?: number
+  params: {
+    branchId?: number;
+    periodType?: 'MONTH' | 'QUARTER' | 'YEAR';
+    periodYear?: number;
+    periodMonth?: number;
+    periodQuarter?: number;
+  }
 ) => {
-  const year = periodYear || new Date().getFullYear();
-  const month = periodMonth || new Date().getMonth() + 1;
+  const year = params.periodYear || new Date().getFullYear();
+  const month = params.periodMonth || new Date().getMonth() + 1;
+  const quarter = params.periodQuarter || Math.ceil(month / 3);
+  const periodType = params.periodType || 'MONTH';
 
-  const branchCondition = branchId ? eq(orders.branchId, branchId) : undefined;
-  const supplierBranchCondition = branchId ? eq(supplierInvoices.branchId, branchId) : undefined;
-  const fiscalBranchCondition = branchId ? eq(fiscalInvoices.branchId, branchId) : undefined;
+  const branchCondition = params.branchId
+    ? or(eq(orders.branchId, params.branchId), isNull(orders.branchId))
+    : undefined;
+  const supplierBranchCondition = params.branchId
+    ? or(eq(supplierInvoices.branchId, params.branchId), isNull(supplierInvoices.branchId))
+    : undefined;
+  const fiscalBranchCondition = params.branchId
+    ? or(eq(fiscalInvoices.branchId, params.branchId), isNull(fiscalInvoices.branchId))
+    : undefined;
 
-  const dateFilterOrders = sql`extract(year from ${orders.createdAt}) = ${year} and extract(month from ${orders.createdAt}) = ${month}`;
-  const dateFilterPurchases = sql`extract(year from ${supplierInvoices.invoiceDate}) = ${year} and extract(month from ${supplierInvoices.invoiceDate}) = ${month}`;
-  const dateFilterFiscal = sql`extract(year from ${fiscalInvoices.createdAt}) = ${year} and extract(month from ${fiscalInvoices.createdAt}) = ${month}`;
+  const buildPeriodSql = (col: any) => {
+    if (periodType === 'YEAR') {
+      return sql`extract(year from ${col}) = ${year}`;
+    }
+    if (periodType === 'QUARTER') {
+      return sql`extract(year from ${col}) = ${year} and extract(quarter from ${col}) = ${quarter}`;
+    }
+    return sql`extract(year from ${col}) = ${year} and extract(month from ${col}) = ${month}`;
+  };
 
-  // 1. Output Tax Liability from Point-of-Sale Orders (Completed/Paid)
+  // 1. Output Tax Liability from Settled POS Orders
   const [outputTax] = await db
     .select({
       grossSalesKes: sql<number>`coalesce(sum(${orders.total}), 0)::numeric`,
@@ -115,13 +146,14 @@ export const getTaxLiabilityTelemetry = async (
     .where(
       and(
         eq(orders.tenantId, tenantId),
-        eq(orders.paymentStatus, 'Paid'),
+        sql`UPPER(${orders.status}) != 'CANCELLED'`,
+        sql`UPPER(${orders.paymentStatus}) IN ('PAID', 'PARTIAL')`,
         branchCondition,
-        dateFilterOrders
+        buildPeriodSql(orders.createdAt)
       )
     );
 
-  // 2. Input Tax Deductions from Verified Supplier Invoices (B2B Purchases)
+  // 2. Input Tax Deductions from Verified Supplier Invoices
   const [inputTax] = await db
     .select({
       grossPurchasesKes: sql<number>`coalesce(sum(${supplierInvoices.totalAmount}), 0)::numeric`,
@@ -133,7 +165,7 @@ export const getTaxLiabilityTelemetry = async (
       and(
         eq(supplierInvoices.tenantId, tenantId),
         supplierBranchCondition,
-        dateFilterPurchases
+        buildPeriodSql(supplierInvoices.invoiceDate)
       )
     );
 
@@ -150,7 +182,7 @@ export const getTaxLiabilityTelemetry = async (
       and(
         eq(fiscalInvoices.tenantId, tenantId),
         fiscalBranchCondition,
-        dateFilterFiscal
+        buildPeriodSql(fiscalInvoices.createdAt)
       )
     );
 
@@ -158,8 +190,16 @@ export const getTaxLiabilityTelemetry = async (
   const inputVat = Number(inputTax?.inputVatKes || 0);
   const netPayableVat = Math.round((outputVat - inputVat) * 100) / 100;
 
+  // Compute KRA Statutory Filing Deadline (20th of the following month for monthly VAT)
+  const filingDeadlineDate =
+    periodType === 'MONTH'
+      ? new Date(month === 12 ? year + 1 : year, month === 12 ? 0 : month, 20)
+          .toISOString()
+          .split('T')[0]
+      : `${year}-12-31`;
+
   return {
-    period: { year, month },
+    period: { year, month, quarter, periodType, filingDeadlineDate },
     salesOutputTax: {
       grossSalesKes: Number(outputTax?.grossSalesKes || 0),
       netTaxableSalesKes: Number(outputTax?.netTaxableSalesKes || 0),
@@ -194,24 +234,31 @@ export const getTaxLiabilityTelemetry = async (
   };
 };
 
-export const listFiscalInvoices = async (
-  tenantId: number,
-  query: TaxReportQuery
-) => {
+export const listFiscalInvoices = async (tenantId: number, query: TaxReportQuery) => {
   const page = query.page || 1;
   const limit = query.limit || 25;
   const offset = (page - 1) * limit;
 
   const conditions = [
     eq(fiscalInvoices.tenantId, tenantId),
-    query.branchId ? eq(fiscalInvoices.branchId, query.branchId) : undefined,
+    query.branchId
+      ? or(eq(fiscalInvoices.branchId, query.branchId), isNull(fiscalInvoices.branchId))
+      : undefined,
     query.status && query.status !== 'ALL' ? eq(fiscalInvoices.fiscalStatus, query.status) : undefined,
+    query.search
+      ? or(
+          ilike(orders.orderNumber, `%${query.search}%`),
+          ilike(fiscalInvoices.cuInvoiceNumber, `%${query.search}%`),
+          ilike(fiscalInvoices.buyerKraPin, `%${query.search}%`)
+        )
+      : undefined,
   ].filter(Boolean);
 
   const [countResult, rows] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
       .from(fiscalInvoices)
+      .leftJoin(orders, eq(fiscalInvoices.orderId, orders.id))
       .where(and(...conditions)),
     db
       .select({
@@ -230,6 +277,7 @@ export const listFiscalInvoices = async (
         createdAt: fiscalInvoices.createdAt,
         orderTotal: orders.total,
         orderTax: orders.tax,
+        orderLevy: orders.cateringLevy,
         branchName: branches.name,
       })
       .from(fiscalInvoices)
@@ -248,6 +296,7 @@ export const listFiscalInvoices = async (
       ...r,
       orderTotal: Number(r.orderTotal || 0),
       orderTax: Number(r.orderTax || 0),
+      orderLevy: Number(r.orderLevy || 0),
     })),
     pagination: {
       page,
@@ -258,8 +307,9 @@ export const listFiscalInvoices = async (
   };
 };
 
+// Pure read-only retrieval (Zero auto-seeding on SELECT)
 export const listTaxCodes = async (tenantId: number) => {
-  let codes = await db
+  const codes = await db
     .select({
       id: taxCodes.id,
       code: taxCodes.code,
@@ -272,31 +322,29 @@ export const listTaxCodes = async (tenantId: number) => {
     .where(and(eq(taxCodes.tenantId, tenantId), eq(taxCodes.isActive, true)))
     .orderBy(asc(taxCodes.code));
 
-  if (codes.length === 0) {
-    const defaultCodes = [
-      { code: 'VAT-16', name: 'Standard Rate (16% VAT)', rate: '16.00', statutoryCode: 'B' },
-      { code: 'LEVY-2', name: 'Tourism & Catering Training Levy (2%)', rate: '2.00', statutoryCode: 'LEVY' },
-      { code: 'ZERO-0', name: 'Zero-Rated Supplies (0%)', rate: '0.00', statutoryCode: 'A' },
-      { code: 'EXEMPT', name: 'Exempt Goods & Services', rate: '0.00', statutoryCode: 'E' },
-    ];
-
-    codes = await db
-      .insert(taxCodes)
-      .values(defaultCodes.map((c) => ({ ...c, tenantId, isActive: true })))
-      .returning({
-        id: taxCodes.id,
-        code: taxCodes.code,
-        name: taxCodes.name,
-        rate: taxCodes.rate,
-        statutoryCode: taxCodes.statutoryCode,
-        isActive: taxCodes.isActive,
-      });
-  }
-
   return codes.map((c) => ({
     ...c,
     rate: Number(c.rate),
   }));
+};
+
+export const createTaxCodeRecord = async (tenantId: number, input: CreateTaxCodeInput) => {
+  const [created] = await db
+    .insert(taxCodes)
+    .values({
+      tenantId,
+      code: input.code,
+      name: input.name,
+      rate: input.rate.toFixed(2),
+      statutoryCode: input.statutoryCode || null,
+      isActive: true,
+    })
+    .returning();
+
+  return {
+    ...created,
+    rate: Number(created.rate),
+  };
 };
 
 export const retryInvoiceFiscalization = async (
@@ -311,7 +359,6 @@ export const retryInvoiceFiscalization = async (
 
   if (!invoice) throw new Error('Fiscal invoice record not found');
 
-  // Increment retry attempt counter and reset to PENDING for queue pickup
   const [updated] = await db
     .update(fiscalInvoices)
     .set({

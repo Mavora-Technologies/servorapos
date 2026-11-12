@@ -1,32 +1,39 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import {
   Landmark,
-  ShieldCheck,
   CheckCircle2,
   AlertTriangle,
   Clock,
   RefreshCw,
-  Search,
   ChevronRight,
-  ExternalLink,
   QrCode,
   FileSpreadsheet,
   Cpu,
   Receipt,
   Settings,
   SlidersHorizontal,
-  X,
-  FileCheck2,
   Building,
   RotateCw,
+  Download,
+  Plus,
+  Search,
+  CalendarClock,
+  Eye,
+  X,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
 interface TaxTelemetry {
-  period: { year: number; month: number };
+  period: {
+    year: number;
+    month: number;
+    quarter: number;
+    periodType: 'MONTH' | 'QUARTER' | 'YEAR';
+    filingDeadlineDate: string;
+  };
   salesOutputTax: {
     grossSalesKes: number;
     netTaxableSalesKes: number;
@@ -94,17 +101,44 @@ interface FiscalInvoiceRecord {
   createdAt: string;
   orderTotal: number;
   orderTax: number;
+  orderLevy: number;
   branchName: string | null;
 }
 
+interface BranchOption {
+  id: number;
+  name: string;
+  code: string;
+}
+
 export default function TaxesPage() {
+  const currentYear = new Date().getFullYear();
+
+  // Dynamic 11-year rolling statutory window (currentYear - 5 through currentYear + 5)
+  const availableYears = useMemo(
+    () => Array.from({ length: 11 }, (_, idx) => currentYear - 5 + idx),
+    [currentYear]
+  );
+
   const [telemetry, setTelemetry] = useState<TaxTelemetry | null>(null);
   const [settings, setSettings] = useState<TaxSettings | null>(null);
   const [taxCodes, setTaxCodes] = useState<TaxCode[]>([]);
   const [fiscalInvoices, setFiscalInvoices] = useState<FiscalInvoiceRecord[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('ALL');
+  const [periodType, setPeriodType] = useState<'MONTH' | 'QUARTER' | 'YEAR'>('MONTH');
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
+  const [selectedQuarter, setSelectedQuarter] = useState<number>(
+    Math.ceil((new Date().getMonth() + 1) / 3)
+  );
 
   const [activeTab, setActiveTab] = useState<'LEDGER' | 'ETIMS_DEVICES' | 'SETTINGS'>('LEDGER');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [invoiceSearch, setInvoiceSearch] = useState<string>('');
+  const [inspectedInvoice, setInspectedInvoice] = useState<FiscalInvoiceRecord | null>(null);
+
   const [isLoading, setIsLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
@@ -117,27 +151,44 @@ export default function TaxesPage() {
   const [editDeviceSerial, setEditDeviceSerial] = useState('');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
+  // New Tax Code Modal State
+  const [isAddCodeModalOpen, setIsAddCodeModalOpen] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newCodeName, setNewCodeName] = useState('');
+  const [newCodeRate, setNewCodeRate] = useState('16');
+  const [newStatutoryCode, setNewStatutoryCode] = useState('B');
+  const [isCreatingCode, setIsCreatingCode] = useState(false);
+
   const loadTaxData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const activeBranchId = typeof window !== 'undefined' ? localStorage.getItem('servora_active_branch_id') : null;
+      const branchQuery = selectedBranchId !== 'ALL' ? `&branchId=${selectedBranchId}` : '';
+      const searchQuery = invoiceSearch.trim() ? `&search=${encodeURIComponent(invoiceSearch.trim())}` : '';
 
-      const [overviewRes, invoicesRes] = await Promise.all([
-        fetchApi(`/api/v1/finance/taxes/overview${activeBranchId ? `?branchId=${activeBranchId}` : ''}`),
-        fetchApi(`/api/v1/finance/taxes/invoices?status=${statusFilter}${activeBranchId ? `&branchId=${activeBranchId}` : ''}`),
+      const [overviewRes, invoicesRes, branchRes] = await Promise.all([
+        fetchApi(
+          `/api/v1/finance/taxes/overview?periodType=${periodType}&year=${selectedYear}&month=${selectedMonth}&quarter=${selectedQuarter}${branchQuery}`
+        ),
+        fetchApi(
+          `/api/v1/finance/taxes/invoices?status=${statusFilter}${branchQuery}${searchQuery}`
+        ),
+        fetchApi('/api/v1/branches').catch(() => ({ data: [] })),
       ]);
+
+      if (branchRes?.data && Array.isArray(branchRes.data)) {
+        setBranches(branchRes.data);
+      }
 
       if (overviewRes?.data) {
         setTelemetry(overviewRes.data.telemetry);
         setSettings(overviewRes.data.settings);
         setTaxCodes(overviewRes.data.taxCodes || []);
 
-        // Sync settings form
         if (overviewRes.data.settings) {
           setEditTaxPin(overviewRes.data.settings.taxPin || '');
-          setEditVatRate(overviewRes.data.settings.vatRate || 16.0);
+          setEditVatRate(overviewRes.data.settings.vatRate ?? 16.0);
           setEditCateringLevy(overviewRes.data.settings.isCateringLevyEnabled ?? true);
-          setEditCateringRate(overviewRes.data.settings.cateringLevyRate || 2.0);
+          setEditCateringRate(overviewRes.data.settings.cateringLevyRate ?? 2.0);
           setEditEnvironment(overviewRes.data.settings.etimsEnvironment || 'SANDBOX');
           setEditDeviceSerial(overviewRes.data.settings.etimsDeviceSerial || '');
         }
@@ -151,7 +202,7 @@ export default function TaxesPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter]);
+  }, [statusFilter, invoiceSearch, selectedBranchId, periodType, selectedYear, selectedMonth, selectedQuarter]);
 
   useEffect(() => {
     loadTaxData();
@@ -183,6 +234,34 @@ export default function TaxesPage() {
     }
   };
 
+  const handleCreateTaxCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setIsCreatingCode(true);
+      const res = await fetchApi('/api/v1/finance/taxes/codes', {
+        method: 'POST',
+        body: JSON.stringify({
+          code: newCode.trim().toUpperCase(),
+          name: newCodeName.trim(),
+          rate: parseFloat(newCodeRate) || 0,
+          statutoryCode: newStatutoryCode.trim() || undefined,
+        }),
+      });
+
+      setIsAddCodeModalOpen(false);
+      setNewCode('');
+      setNewCodeName('');
+      setNewCodeRate('16');
+      setToastMessage({ text: res.message || 'Tax classification created.', type: 'success' });
+      setTimeout(() => setToastMessage(null), 4000);
+      loadTaxData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to create tax code');
+    } finally {
+      setIsCreatingCode(false);
+    }
+  };
+
   const handleRetryFiscalization = async (id: number) => {
     try {
       const res = await fetchApi('/api/v1/finance/taxes/retry', {
@@ -197,13 +276,52 @@ export default function TaxesPage() {
     }
   };
 
+  const handleExportItaxCsv = () => {
+    if (!telemetry) return;
+
+    const periodLabel =
+      periodType === 'YEAR'
+        ? `FY-${selectedYear}`
+        : periodType === 'QUARTER'
+        ? `${selectedYear}-Q${selectedQuarter}`
+        : `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+
+    const rows = [
+      ['KRA Statutory VAT-3 & Tourism Levy Return Schedule', periodLabel],
+      ['Taxpayer PIN', settings?.taxPin || 'NOT_REGISTERED'],
+      ['Branch Scope', selectedBranchId === 'ALL' ? 'ALL_BRANCHES' : `BRANCH_${selectedBranchId}`],
+      [],
+      ['Section', 'Line Item', 'Amount (KES)'],
+      ['1. Output Tax (Sales)', 'Gross Sales Billed', telemetry.salesOutputTax.grossSalesKes.toFixed(2)],
+      ['1. Output Tax (Sales)', 'Net Taxable Sales Base', telemetry.salesOutputTax.netTaxableSalesKes.toFixed(2)],
+      ['1. Output Tax (Sales)', 'Output VAT Collected (16%)', telemetry.salesOutputTax.outputVatKes.toFixed(2)],
+      ['1. Output Tax (Sales)', 'Tourism & Catering Levy (2%)', telemetry.salesOutputTax.cateringLevyKes.toFixed(2)],
+      ['2. Input Tax (Purchases)', 'Gross B2B Taxable Purchases', telemetry.purchasesInputTax.grossPurchasesKes.toFixed(2)],
+      ['2. Input Tax (Purchases)', 'Deductible Input VAT', telemetry.purchasesInputTax.inputVatKes.toFixed(2)],
+      ['3. Net Statutory Obligation', 'Net Payable VAT to KRA', telemetry.netVatObligation.netPayableVatKes.toFixed(2)],
+    ];
+
+    const csvContent =
+      'data:text/csv;charset=utf-8,' + rows.map((r) => r.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `KRA_VAT3_Return_${periodLabel}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-6 pb-12 font-sans">
       {/* 1. EXECUTIVE COMMAND HEADER */}
-      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Link href="/dashboard" className="text-xs font-semibold text-servora-deepTeal hover:text-servora-core flex items-center gap-1 transition-colors">
+            <Link
+              href="/dashboard"
+              className="text-xs font-semibold text-servora-deepTeal hover:text-servora-core flex items-center gap-1 transition-colors"
+            >
               Enterprise Control <ChevronRight size={12} />
             </Link>
             <span className="text-xs font-bold text-servora-navy">Statutory Fiscal Compliance</span>
@@ -213,11 +331,84 @@ export default function TaxesPage() {
             Statutory Tax Ledger & KRA eTIMS Fiscal Compliance
           </h1>
           <p className="text-xs text-servora-deepTeal mt-0.5">
-            Real-time Output VAT and Catering Levy accounting, B2B Input Tax credit deductions, and cryptographically verified eTIMS receipts.
+            Multi-period Output VAT and Catering Levy accounting, B2B Input Tax deductions, iTax VAT-3 export, and eTIMS OSCU receipts.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
+          {/* Branch Scope */}
+          <select
+            value={selectedBranchId}
+            onChange={(e) => setSelectedBranchId(e.target.value)}
+            className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+          >
+            <option value="ALL">All Branch Locations ({branches.length})</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name} ({b.code})
+              </option>
+            ))}
+          </select>
+
+          {/* Filing Period Granularity */}
+          <select
+            value={periodType}
+            onChange={(e) => setPeriodType(e.target.value as any)}
+            className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+          >
+            <option value="MONTH">Monthly Return</option>
+            <option value="QUARTER">Quarterly (Q1–Q4)</option>
+            <option value="YEAR">Full Fiscal Year</option>
+          </select>
+
+          {periodType === 'MONTH' && (
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(Number(e.target.value))}
+              className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+            >
+              {Array.from({ length: 12 }, (_, idx) => idx + 1).map((m) => (
+                <option key={m} value={m}>
+                  {new Date(2026, m - 1, 1).toLocaleString('en-US', { month: 'long' })}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {periodType === 'QUARTER' && (
+            <select
+              value={selectedQuarter}
+              onChange={(e) => setSelectedQuarter(Number(e.target.value))}
+              className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+            >
+              <option value={1}>Q1 (Jan – Mar)</option>
+              <option value={2}>Q2 (Apr – Jun)</option>
+              <option value={3}>Q3 (Jul – Sep)</option>
+              <option value={4}>Q4 (Oct – Dec)</option>
+            </select>
+          )}
+
+          {/* Rolling 11-Year Statutory Retention Selector */}
+          <select
+            value={selectedYear}
+            onChange={(e) => setSelectedYear(Number(e.target.value))}
+            className="px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs font-mono font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+          >
+            {availableYears.map((y) => (
+              <option key={y} value={y}>
+                FY {y}
+              </option>
+            ))}
+          </select>
+
+          <button
+            onClick={handleExportItaxCsv}
+            disabled={!telemetry}
+            className="px-3 py-2 bg-servora-navy text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-40"
+          >
+            <Download size={13} /> Export iTax CSV
+          </button>
+
           <button
             onClick={loadTaxData}
             title="Refresh Tax Ledger"
@@ -229,9 +420,13 @@ export default function TaxesPage() {
       </div>
 
       {toastMessage && (
-        <div className={`p-3.5 rounded-xl border text-xs font-medium flex items-center gap-2 ${
-          toastMessage.type === 'success' ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'
-        }`}>
+        <div
+          className={`p-3.5 rounded-xl border text-xs font-medium flex items-center gap-2 ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-rose-50 border-rose-200 text-rose-800'
+          }`}
+        >
           {toastMessage.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
           <span>{toastMessage.text}</span>
         </div>
@@ -246,7 +441,7 @@ export default function TaxesPage() {
               KES {telemetry ? telemetry.salesOutputTax.outputVatKes.toLocaleString() : '0'}
             </p>
             <span className="text-[10px] text-gray-500 font-medium">
-              From {telemetry?.salesOutputTax.paidOrdersCount || 0} Settled Dining Checks
+              From {telemetry?.salesOutputTax.paidOrdersCount || 0} Settled Checks
             </span>
           </div>
           <div className="p-2.5 bg-blue-50 text-servora-core rounded-xl">
@@ -272,9 +467,11 @@ export default function TaxesPage() {
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Net Payable VAT</span>
-            <p className={`text-xl font-bold font-mono mt-0.5 ${
-              telemetry && telemetry.netVatObligation.netPayableVatKes < 0 ? 'text-emerald-700' : 'text-rose-700'
-            }`}>
+            <p
+              className={`text-xl font-bold font-mono mt-0.5 ${
+                telemetry && telemetry.netVatObligation.netPayableVatKes < 0 ? 'text-emerald-700' : 'text-rose-700'
+              }`}
+            >
               KES {telemetry ? telemetry.netVatObligation.netPayableVatKes.toLocaleString() : '0'}
             </p>
             <span className="text-[10px] font-medium text-gray-500">
@@ -310,7 +507,7 @@ export default function TaxesPage() {
             }`}
           >
             <Receipt size={13} className="text-servora-core" />
-            <span>Monthly VAT Return Reconciliation</span>
+            <span>Statutory VAT Return Reconciliation</span>
           </button>
 
           <button
@@ -336,6 +533,16 @@ export default function TaxesPage() {
 
         {activeTab === 'ETIMS_DEVICES' && (
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Order #, CU #, Buyer PIN..."
+                value={invoiceSearch}
+                onChange={(e) => setInvoiceSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core"
+              />
+            </div>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
@@ -350,22 +557,38 @@ export default function TaxesPage() {
         )}
       </div>
 
-      {/* 4. TAB 1: MONTHLY STATUTORY VAT & LEVY COMPUTATION */}
+      {/* 4. TAB 1: STATUTORY VAT & LEVY COMPUTATION */}
       {activeTab === 'LEDGER' && (
         <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs space-y-4 p-5">
-          <div className="border-b border-gray-100 pb-3 flex justify-between items-center">
+          <div className="border-b border-gray-100 pb-3 flex flex-wrap justify-between items-center gap-2">
             <div>
               <h3 className="text-xs font-bold uppercase tracking-wider text-servora-navy">
                 KRA Statutory Return Audit & Balancing Computation
               </h3>
               <p className="text-[11px] text-gray-400">
-                Period: {telemetry ? `${telemetry.period.month}/${telemetry.period.year}` : 'Current Month'} &bull; Business PIN:{' '}
+                Period:{' '}
+                <strong className="text-servora-navy font-mono">
+                  {periodType === 'YEAR'
+                    ? `FY ${selectedYear}`
+                    : periodType === 'QUARTER'
+                    ? `Q${selectedQuarter} ${selectedYear}`
+                    : `${selectedMonth}/${selectedYear}`}
+                </strong>{' '}
+                &bull; Business PIN:{' '}
                 <strong className="text-servora-navy font-mono">{settings?.taxPin || 'Not Registered'}</strong>
               </p>
             </div>
-            <span className="text-xs font-mono font-bold px-2.5 py-1 bg-blue-50 text-servora-core border border-blue-200 rounded-lg">
-              Statutory Basis: Kenyan Tax Law (VAT Act 2013)
-            </span>
+
+            <div className="flex items-center gap-2">
+              {telemetry?.period.filingDeadlineDate && (
+                <span className="text-xs font-mono font-bold px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg flex items-center gap-1">
+                  <CalendarClock size={13} /> Due: {telemetry.period.filingDeadlineDate}
+                </span>
+              )}
+              <span className="text-xs font-mono font-bold px-2.5 py-1 bg-blue-50 text-servora-core border border-blue-200 rounded-lg">
+                VAT Act 2013 & Tourism Act
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -386,13 +609,13 @@ export default function TaxesPage() {
                   <span>KES {telemetry ? telemetry.salesOutputTax.netTaxableSalesKes.toLocaleString() : '0'}</span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>Standard 16% Output VAT:</span>
+                  <span>Standard {settings?.vatRate ?? 16}% Output VAT:</span>
                   <span className="font-bold text-blue-700">
                     KES {telemetry ? telemetry.salesOutputTax.outputVatKes.toLocaleString() : '0'}
                   </span>
                 </div>
                 <div className="flex justify-between text-gray-600">
-                  <span>Catering Training Levy (2%):</span>
+                  <span>Catering Training Levy ({settings?.cateringLevyRate ?? 2}%):</span>
                   <span className="text-amber-700">
                     KES {telemetry ? telemetry.salesOutputTax.cateringLevyKes.toLocaleString() : '0'}
                   </span>
@@ -420,9 +643,11 @@ export default function TaxesPage() {
                 </div>
                 <div className="flex justify-between text-gray-600 border-t border-gray-200 pt-1">
                   <span>Net Tax Payable to KRA:</span>
-                  <span className={`font-bold ${
-                    telemetry && telemetry.netVatObligation.netPayableVatKes < 0 ? 'text-emerald-700' : 'text-rose-700'
-                  }`}>
+                  <span
+                    className={`font-bold ${
+                      telemetry && telemetry.netVatObligation.netPayableVatKes < 0 ? 'text-emerald-700' : 'text-rose-700'
+                    }`}
+                  >
                     KES {telemetry ? telemetry.netVatObligation.netPayableVatKes.toLocaleString() : '0'}
                   </span>
                 </div>
@@ -467,7 +692,9 @@ export default function TaxesPage() {
                   fiscalInvoices.map((inv) => (
                     <tr key={inv.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-3 px-3 font-mono font-bold text-servora-navy">#{inv.id}</td>
-                      <td className="py-3 px-3 font-mono font-medium text-servora-navy">{inv.orderNumber || `Order #${inv.orderId}`}</td>
+                      <td className="py-3 px-3 font-mono font-medium text-servora-navy">
+                        {inv.orderNumber || `Order #${inv.orderId}`}
+                      </td>
                       <td className="py-3 px-3 font-mono text-gray-600">{inv.sdcId || 'OSCU-DEVICE-VIRTUAL'}</td>
                       <td className="py-3 px-3 font-mono text-gray-600">{inv.buyerKraPin || 'Consumer'}</td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-servora-navy">
@@ -494,16 +721,20 @@ export default function TaxesPage() {
                       <td className="py-3 px-3 font-mono text-[11px] text-gray-500">
                         {inv.cuInvoiceNumber || 'Pending Hash'}
                       </td>
-                      <td className="py-3 px-3 text-right whitespace-nowrap">
-                        {inv.fiscalStatus === 'FAILED' ? (
+                      <td className="py-3 px-3 text-right whitespace-nowrap space-x-1.5">
+                        <button
+                          onClick={() => setInspectedInvoice(inv)}
+                          className="px-2 py-1 bg-slate-50 border border-gray-200 hover:bg-gray-100 rounded-lg text-[11px] font-bold text-servora-navy cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Eye size={11} /> Inspect
+                        </button>
+                        {inv.fiscalStatus === 'FAILED' && (
                           <button
                             onClick={() => handleRetryFiscalization(inv.id)}
                             className="px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold rounded-lg transition-colors text-[11px] cursor-pointer inline-flex items-center gap-1"
                           >
-                            <RotateCw size={11} /> Retry KRA Sync
+                            <RotateCw size={11} /> Retry
                           </button>
-                        ) : (
-                          <span className="text-[11px] font-mono text-gray-400">Verified</span>
                         )}
                       </td>
                     </tr>
@@ -603,24 +834,185 @@ export default function TaxesPage() {
           </div>
 
           <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs space-y-3">
-            <h3 className="text-sm font-bold text-servora-navy flex items-center gap-2">
-              <SlidersHorizontal size={16} className="text-servora-core" />
-              Active Tax Codes & Classifications
-            </h3>
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-bold text-servora-navy flex items-center gap-2">
+                <SlidersHorizontal size={16} className="text-servora-core" />
+                Active Tax Codes & Classifications
+              </h3>
+              <button
+                onClick={() => setIsAddCodeModalOpen(true)}
+                className="px-2.5 py-1.5 bg-servora-core text-white rounded-lg text-[11px] font-bold hover:bg-blue-700 flex items-center gap-1 cursor-pointer"
+              >
+                <Plus size={12} /> Add Tax Code
+              </button>
+            </div>
             <p className="text-xs text-gray-500">System tax codes assigned to menu items and purchasing categories.</p>
 
-            <div className="divide-y divide-gray-100 text-xs">
-              {taxCodes.map((tc) => (
-                <div key={tc.id} className="py-2.5 flex justify-between items-center">
-                  <div>
-                    <span className="font-bold text-servora-navy block">{tc.name}</span>
-                    <span className="text-[10px] text-gray-400 font-mono">Code: {tc.code} &bull; KRA Classification: {tc.statutoryCode || 'None'}</span>
+            {taxCodes.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50 border border-dashed border-gray-200 rounded-xl text-xs text-gray-400">
+                No custom statutory tax codes configured yet. Click <strong>Add Tax Code</strong> to register KRA tax classifications (e.g. VAT-16, ZERO-0, EXEMPT).
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 text-xs">
+                {taxCodes.map((tc) => (
+                  <div key={tc.id} className="py-2.5 flex justify-between items-center">
+                    <div>
+                      <span className="font-bold text-servora-navy block">{tc.name}</span>
+                      <span className="text-[10px] text-gray-400 font-mono">
+                        Code: {tc.code} &bull; KRA Classification: {tc.statutoryCode || 'None'}
+                      </span>
+                    </div>
+                    <span className="font-mono font-bold text-servora-core bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                      {tc.rate}%
+                    </span>
                   </div>
-                  <span className="font-mono font-bold text-servora-core bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                    {tc.rate}%
-                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 7. MODAL: ADD TAX CLASSIFICATION CODE */}
+      {isAddCodeModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-servora-navy">Register Statutory Tax Code</h3>
+                <p className="text-[11px] text-gray-400">Define KRA eTIMS tax classification rate</p>
+              </div>
+              <button onClick={() => setIsAddCodeModalOpen(false)} className="text-gray-400 hover:text-black cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateTaxCode} className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-servora-navy mb-1">Tax Code *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. VAT-16"
+                    value={newCode}
+                    onChange={(e) => setNewCode(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-mono font-bold uppercase focus:outline-none"
+                  />
                 </div>
-              ))}
+                <div>
+                  <label className="block text-[11px] font-bold text-servora-navy mb-1">Rate (%) *</label>
+                  <input
+                    type="number"
+                    required
+                    step="0.5"
+                    min="0"
+                    max="100"
+                    value={newCodeRate}
+                    onChange={(e) => setNewCodeRate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-mono font-bold focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-servora-navy mb-1">Description / Name *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Standard Rate (16% VAT)"
+                  value={newCodeName}
+                  onChange={(e) => setNewCodeName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-servora-navy mb-1">KRA eTIMS Classification Code</label>
+                <select
+                  value={newStatutoryCode}
+                  onChange={(e) => setNewStatutoryCode(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-mono font-bold focus:outline-none"
+                >
+                  <option value="B">B — Standard Rated (16%)</option>
+                  <option value="A">A — Zero Rated (0%)</option>
+                  <option value="E">E — Exempt Goods & Services</option>
+                  <option value="LEVY">LEVY — Tourism & Catering Levy (2%)</option>
+                </select>
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCodeModalOpen(false)}
+                  className="flex-1 py-2.5 bg-gray-100 text-gray-700 font-bold rounded-xl cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingCode}
+                  className="flex-1 py-2.5 bg-servora-core text-white font-bold rounded-xl hover:bg-blue-700 cursor-pointer disabled:opacity-50"
+                >
+                  {isCreatingCode ? 'Saving...' : 'Save Tax Code'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 8. MODAL: E-TIMS FISCAL RECEIPT INSPECTOR */}
+      {inspectedInvoice && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-servora-navy">KRA eTIMS Fiscal Certificate</h3>
+                <p className="text-[11px] text-gray-400">
+                  Receipt #{inspectedInvoice.id} &bull; {inspectedInvoice.orderNumber}
+                </p>
+              </div>
+              <button onClick={() => setInspectedInvoice(null)} className="text-gray-400 hover:text-black cursor-pointer">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 border border-gray-200 rounded-xl font-mono text-xs space-y-1.5">
+              <div className="flex justify-between">
+                <span className="text-gray-500">CU Invoice #:</span>
+                <span className="font-bold text-servora-navy">{inspectedInvoice.cuInvoiceNumber || 'PENDING'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">SDC Serial ID:</span>
+                <span>{inspectedInvoice.sdcId || 'OSCU-SCU-2026-NBO'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Buyer KRA PIN:</span>
+                <span>{inspectedInvoice.buyerKraPin || 'B2C Walk-In'}</span>
+              </div>
+              <div className="flex justify-between border-t border-gray-200 pt-1.5">
+                <span className="text-gray-500">Gross Amount:</span>
+                <span className="font-bold">KES {inspectedInvoice.orderTotal.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Output VAT (16%):</span>
+                <span className="font-bold text-blue-700">KES {inspectedInvoice.orderTax.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-500">Catering Levy (2%):</span>
+                <span className="font-bold text-amber-700">KES {inspectedInvoice.orderLevy.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setInspectedInvoice(null)}
+                className="px-4 py-2 bg-servora-navy text-white text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Close Certificate
+              </button>
             </div>
           </div>
         </div>

@@ -2,6 +2,8 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as orderRepo from '../repositories/order.repository';
+import { listOrdersQuerySchema } from '../validators/order.validator';
+
 
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -72,23 +74,14 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
   }
 };
 
-export const getOrders = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const tenantId = req.user!.tenantId;
-    const allOrders = await orderRepo.fetchTenantOrders(tenantId);
-    res.status(200).json({ status: 'success', data: allOrders });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: 'Failed to fetch orders' });
-  }
-};
-
 export const getOpenOrders = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const openOrders = await orderRepo.fetchOpenOrders(tenantId);
+    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const openOrders = await orderRepo.fetchOpenOrders(tenantId, branchId);
     res.status(200).json({ status: 'success', data: openOrders });
   } catch (error: any) {
-    res.status(500).json({ status: 'error', message: 'Failed to fetch open orders' });
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch open orders' });
   }
 };
 
@@ -108,9 +101,56 @@ export const updateStatus = async (req: AuthRequest, res: Response): Promise<voi
 export const getTakeawayOrders = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const takeawayOrders = await orderRepo.fetchTakeawayOrders(tenantId);
+    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const takeawayOrders = await orderRepo.fetchTakeawayOrders(tenantId, branchId);
     res.status(200).json({ status: 'success', data: takeawayOrders });
   } catch (error: any) {
-    res.status(500).json({ status: 'error', message: 'Failed to fetch takeaway orders' });
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch takeaway orders' });
+  }
+};
+
+export const getOrders = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const parsed = listOrdersQuerySchema.safeParse(req.query);
+    const allOrders = await orderRepo.fetchTenantOrders(
+      tenantId,
+      parsed.success ? parsed.data : undefined
+    );
+    res.status(200).json({ status: 'success', data: allOrders });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch orders' });
+  }
+};
+
+export const getOrderDetail = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const orderId = parseInt(String(req.params.id), 10);
+    if (isNaN(orderId)) {
+      res.status(400).json({ status: 'error', message: 'Invalid order ID' });
+      return;
+    }
+
+    const detail = await orderRepo.fetchOrderDetailById(tenantId, orderId);
+    if (!detail) {
+      res.status(404).json({ status: 'error', message: 'Order record not found' });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', data: detail });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to load order details' });
+  }
+};
+
+export const getOnlineOrders = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const onlineOrders = await orderRepo.fetchOnlineStorefrontOrders(tenantId, branchId);
+    res.status(200).json({ status: 'success', data: onlineOrders });
+  } catch (error: any) {
+    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch online orders' });
   }
 };

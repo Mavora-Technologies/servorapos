@@ -7,51 +7,11 @@ import {
 } from '../validators/financial.validator';
 
 export const getOrCreateFinancialSettings = async (tenantId: number) => {
-  let [settings] = await db
+  const [settings] = await db
     .select()
     .from(tenantFinancialSettings)
     .where(eq(tenantFinancialSettings.tenantId, tenantId))
     .limit(1);
-
-  if (!settings) {
-    // Proactively load tenant metadata to pre-populate corporate tax PIN & currency
-    const [tenant] = await db
-      .select({ kraPin: tenants.kraPin, currency: tenants.currency })
-      .from(tenants)
-      .where(eq(tenants.id, tenantId))
-      .limit(1);
-
-    const [created] = await db
-      .insert(tenantFinancialSettings)
-      .values({
-        tenantId,
-        baseCurrency: tenant?.currency || 'KES',
-        taxPin: tenant?.kraPin || '',
-        vatRate: '16.00',
-        cateringLevyRate: '2.00',
-        serviceChargeRate: '5.00',
-        isVatInclusive: true,
-        isCateringLevyEnabled: true,
-        isServiceChargeEnabled: false,
-        etimsEnvironment: 'SANDBOX',
-        autoFiscalizeOnPayment: true,
-        etimsBranchCode: '00',
-        tipDistributionModel: 'HOURS_WEIGHTED',
-        defaultOvertimeMultiplier: '1.50',
-        holidayOvertimeMultiplier: '2.00',
-        maxDrawerCashThreshold: '50000.00',
-      })
-      .returning();
-
-    settings = created;
-
-    // Seed default statutory tax schedules
-    await db.insert(taxCodes).values([
-      { tenantId, code: 'VAT-16', name: 'Standard Rate Value Added Tax', rate: '16.00', statutoryCode: 'A' },
-      { tenantId, code: 'ZERO-RATED', name: 'Zero-Rated Supplies (0%)', rate: '0.00', statutoryCode: 'B' },
-      { tenantId, code: 'EXEMPT', name: 'Exempt Goods & Services', rate: '0.00', statutoryCode: 'C' },
-    ]);
-  }
 
   const tenantTaxCodes = await db
     .select()
@@ -60,7 +20,7 @@ export const getOrCreateFinancialSettings = async (tenantId: number) => {
     .orderBy(asc(taxCodes.id));
 
   return {
-    settings,
+    settings: settings || null,
     taxCodes: tenantTaxCodes,
   };
 };

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchTakeawayOrders = exports.updateOrderStatus = exports.fetchOpenOrders = exports.fetchTenantOrders = exports.createOrderRecord = void 0;
+exports.fetchOnlineStorefrontOrders = exports.fetchTakeawayOrders = exports.updateOrderStatus = exports.fetchOpenOrders = exports.fetchOrderDetailById = exports.fetchTenantOrders = exports.createOrderRecord = void 0;
 // apps/api/src/repositories/order.repository.ts
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
@@ -52,17 +52,15 @@ const createOrderRecord = async (tenantId, data, items) => {
             })
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantTables.id, newOrder.tableId), (0, drizzle_orm_1.eq)(schema_1.restaurantTables.tenantId, tenantId)));
         }
-        // 3. Record Treasury Payment & Increment Active Cash Drawer / Shift Balances
+        // 3. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Increment Active Cash Drawer / Shift Balances
         if (isPaid) {
             const normalizedMethod = String(data.paymentMethod || '').toUpperCase();
             const isCashTender = normalizedMethod === 'CASH' || normalizedMethod === 'SPLIT';
-            // Determine actual cash portion entering the physical drawer
             const cashInflow = normalizedMethod === 'CASH'
                 ? total
                 : normalizedMethod === 'SPLIT'
                     ? Math.min(total, Number(data.cashTendered) || 0)
                     : 0;
-            // Record INBOUND_AR payment in Treasury Ledger
             await tx.insert(schema_1.payments).values({
                 tenantId,
                 branchId: data.branchId ?? null,
@@ -82,9 +80,28 @@ const createOrderRecord = async (tenantId, data, items) => {
                 processedById: data.cashierId ?? null,
                 notes: `POS Settlement for ${orderNumber}`,
             });
-            // Update active Drawer Session, Cash Drawer & Cashier Shift for Cash inflow
+            const [finSettings] = await tx
+                .select({
+                autoFiscalize: schema_1.tenantFinancialSettings.autoFiscalizeOnPayment,
+                deviceSerial: schema_1.tenantFinancialSettings.etimsDeviceSerial,
+            })
+                .from(schema_1.tenantFinancialSettings)
+                .where((0, drizzle_orm_1.eq)(schema_1.tenantFinancialSettings.tenantId, tenantId))
+                .limit(1);
+            const shouldAutoSign = finSettings?.autoFiscalize !== false;
+            const cuInvoiceNo = shouldAutoSign ? `KRA-CU-${Date.now().toString().slice(-8)}` : null;
+            await tx.insert(schema_1.fiscalInvoices).values({
+                tenantId,
+                branchId: data.branchId ?? null,
+                orderId: newOrder.id,
+                invoiceType: 'SALE',
+                buyerKraPin: data.buyerKraPin ?? null,
+                cuInvoiceNumber: cuInvoiceNo,
+                sdcId: finSettings?.deviceSerial || 'OSCU-SCU-2026-NBO',
+                fiscalStatus: shouldAutoSign ? 'FISCALIZED' : 'PENDING',
+                fiscalizedAt: shouldAutoSign ? new Date() : null,
+            });
             if (isCashTender && cashInflow > 0) {
-                // Find active drawer session (prioritize explicitly selected cashDrawerId, fallback to cashier's active session)
                 const sessionFilters = [
                     (0, drizzle_orm_1.eq)(schema_1.drawerSessions.tenantId, tenantId),
                     (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.status} != 'CLOSED_RECONCILED'`,
@@ -119,7 +136,6 @@ const createOrderRecord = async (tenantId, data, items) => {
                     })
                         .where((0, drizzle_orm_1.eq)(schema_1.cashDrawers.id, activeSession.drawerId));
                 }
-                // Also update the linked OPEN cashierShift
                 const shiftFilters = [
                     (0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId),
                     (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'),
@@ -143,7 +159,6 @@ const createOrderRecord = async (tenantId, data, items) => {
                         .where((0, drizzle_orm_1.eq)(schema_1.cashierShifts.id, openShift.id));
                 }
             }
-            // Accrue Loyalty Points if a CRM Customer is attached
             if (data.customerId && total >= 100) {
                 const pointsEarned = Math.floor(total / 100);
                 const [profile] = await tx
@@ -257,20 +272,156 @@ const createOrderRecord = async (tenantId, data, items) => {
     });
 };
 exports.createOrderRecord = createOrderRecord;
-const fetchTenantOrders = async (tenantId) => {
-    return await db_1.db
-        .select()
+const fetchTenantOrders = async (tenantId, query) => {
+    const conditions = [(0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId)];
+    if (query?.branchId) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.branchId, query.branchId));
+    }
+    if (query?.status && query.status !== 'ALL') {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.status, query.status));
+    }
+    if (query?.paymentStatus && query.paymentStatus !== 'ALL') {
+        conditions.push((0, drizzle_orm_1.sql) `UPPER(${schema_1.orders.paymentStatus}) = UPPER(${query.paymentStatus})`);
+    }
+    if (query?.orderType && query.orderType !== 'ALL') {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.orderType, query.orderType));
+    }
+    if (query?.cashierId) {
+        conditions.push((0, drizzle_orm_1.eq)(schema_1.orders.cashierId, query.cashierId));
+    }
+    if (query?.startDate) {
+        conditions.push((0, drizzle_orm_1.gte)(schema_1.orders.createdAt, new Date(`${query.startDate}T00:00:00.000Z`)));
+    }
+    if (query?.endDate) {
+        conditions.push((0, drizzle_orm_1.lte)(schema_1.orders.createdAt, new Date(`${query.endDate}T23:59:59.999Z`)));
+    }
+    if (query?.minAmount !== undefined) {
+        conditions.push((0, drizzle_orm_1.sql) `CAST(${schema_1.orders.total} AS NUMERIC) >= ${query.minAmount}`);
+    }
+    if (query?.maxAmount !== undefined) {
+        conditions.push((0, drizzle_orm_1.sql) `CAST(${schema_1.orders.total} AS NUMERIC) <= ${query.maxAmount}`);
+    }
+    if (query?.hasKraPin === 'true') {
+        conditions.push((0, drizzle_orm_1.and)((0, drizzle_orm_1.isNotNull)(schema_1.orders.buyerKraPin), (0, drizzle_orm_1.sql) `TRIM(${schema_1.orders.buyerKraPin}) != ''`));
+    }
+    if (query?.search) {
+        const term = `%${query.search}%`;
+        conditions.push((0, drizzle_orm_1.or)((0, drizzle_orm_1.ilike)(schema_1.orders.orderNumber, term), (0, drizzle_orm_1.ilike)(schema_1.orders.customerName, term), (0, drizzle_orm_1.ilike)(schema_1.orders.customerPhone, term), (0, drizzle_orm_1.ilike)(schema_1.orders.tableName, term), (0, drizzle_orm_1.ilike)(schema_1.orders.buyerKraPin, term)));
+    }
+    const rows = await db_1.db
+        .select({
+        id: schema_1.orders.id,
+        branchId: schema_1.orders.branchId,
+        branchName: schema_1.branches.name,
+        cashierId: schema_1.orders.cashierId,
+        cashierName: (0, drizzle_orm_1.sql) `TRIM(CONCAT(${schema_1.users.firstName}, ' ', ${schema_1.users.lastName}))`,
+        orderNumber: schema_1.orders.orderNumber,
+        orderType: schema_1.orders.orderType,
+        status: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
+        tableName: schema_1.orders.tableName,
+        customerName: schema_1.orders.customerName,
+        customerPhone: schema_1.orders.customerPhone,
+        buyerKraPin: schema_1.orders.buyerKraPin,
+        subtotal: schema_1.orders.subtotal,
+        discountTotal: schema_1.orders.discountTotal,
+        tax: schema_1.orders.tax,
+        cateringLevy: schema_1.orders.cateringLevy,
+        total: schema_1.orders.total,
+        amountPaid: schema_1.orders.amountPaid,
+        createdAt: schema_1.orders.createdAt,
+        paymentMethod: (0, drizzle_orm_1.sql) `(SELECT p.payment_method FROM payments p WHERE p.order_id = ${schema_1.orders.id} ORDER BY p.id DESC LIMIT 1)`,
+        cuInvoiceNumber: (0, drizzle_orm_1.sql) `(SELECT f.cu_invoice_number FROM fiscal_invoices f WHERE f.order_id = ${schema_1.orders.id} ORDER BY f.id DESC LIMIT 1)`,
+    })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId))
-        .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
+        .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.cashierId, schema_1.users.id))
+        .where((0, drizzle_orm_1.and)(...conditions))
+        .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt))
+        .limit(query?.limit || 100);
+    if (query?.paymentMethod && query.paymentMethod !== 'ALL') {
+        return rows.filter((r) => (r.paymentMethod || '').toUpperCase() === query.paymentMethod.toUpperCase());
+    }
+    return rows;
 };
 exports.fetchTenantOrders = fetchTenantOrders;
-const fetchOpenOrders = async (tenantId) => {
-    return await db_1.db
-        .select()
+const fetchOrderDetailById = async (tenantId, orderId) => {
+    const [header] = await db_1.db
+        .select({
+        id: schema_1.orders.id,
+        branchName: schema_1.branches.name,
+        cashierName: (0, drizzle_orm_1.sql) `TRIM(CONCAT(${schema_1.users.firstName}, ' ', ${schema_1.users.lastName}))`,
+        orderNumber: schema_1.orders.orderNumber,
+        orderType: schema_1.orders.orderType,
+        status: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
+        tableName: schema_1.orders.tableName,
+        customerName: schema_1.orders.customerName,
+        customerPhone: schema_1.orders.customerPhone,
+        buyerKraPin: schema_1.orders.buyerKraPin,
+        subtotal: schema_1.orders.subtotal,
+        discountTotal: schema_1.orders.discountTotal,
+        tax: schema_1.orders.tax,
+        cateringLevy: schema_1.orders.cateringLevy,
+        serviceCharge: schema_1.orders.serviceCharge,
+        total: schema_1.orders.total,
+        amountPaid: schema_1.orders.amountPaid,
+        notes: schema_1.orders.notes,
+        createdAt: schema_1.orders.createdAt,
+        paymentMethod: (0, drizzle_orm_1.sql) `(SELECT p.payment_method FROM payments p WHERE p.order_id = ${schema_1.orders.id} ORDER BY p.id DESC LIMIT 1)`,
+        cuInvoiceNumber: (0, drizzle_orm_1.sql) `(SELECT f.cu_invoice_number FROM fiscal_invoices f WHERE f.order_id = ${schema_1.orders.id} ORDER BY f.id DESC LIMIT 1)`,
+        fiscalStatus: (0, drizzle_orm_1.sql) `(SELECT f.fiscal_status FROM fiscal_invoices f WHERE f.order_id = ${schema_1.orders.id} ORDER BY f.id DESC LIMIT 1)`,
+    })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.inArray)(schema_1.orders.status, ['Confirmed', 'Preparing', 'Ready', 'Sent-To-Kitchen'])))
-        .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
+        .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.cashierId, schema_1.users.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orders.id, orderId)))
+        .limit(1);
+    if (!header)
+        return null;
+    const lines = await db_1.db
+        .select({
+        id: schema_1.orderItems.id,
+        menuItemId: schema_1.orderItems.menuItemId,
+        itemName: schema_1.menuItems.name,
+        sku: schema_1.menuItems.sku,
+        quantity: schema_1.orderItems.quantity,
+        unitPrice: schema_1.orderItems.unitPrice,
+        totalPrice: schema_1.orderItems.totalPrice,
+        notes: schema_1.orderItems.notes,
+    })
+        .from(schema_1.orderItems)
+        .leftJoin(schema_1.menuItems, (0, drizzle_orm_1.eq)(schema_1.orderItems.menuItemId, schema_1.menuItems.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orderItems.orderId, orderId)));
+    return {
+        ...header,
+        items: lines,
+    };
+};
+exports.fetchOrderDetailById = fetchOrderDetailById;
+const fetchOpenOrders = async (tenantId, branchId) => {
+    return await db_1.db
+        .select({
+        id: schema_1.orders.id,
+        branchId: schema_1.orders.branchId,
+        branchName: schema_1.branches.name,
+        cashierName: (0, drizzle_orm_1.sql) `TRIM(CONCAT(${schema_1.users.firstName}, ' ', ${schema_1.users.lastName}))`,
+        orderNumber: schema_1.orders.orderNumber,
+        orderType: schema_1.orders.orderType,
+        status: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
+        tableName: schema_1.orders.tableName,
+        customerName: schema_1.orders.customerName,
+        customerPhone: schema_1.orders.customerPhone,
+        total: schema_1.orders.total,
+        createdAt: schema_1.orders.createdAt,
+        itemsCount: (0, drizzle_orm_1.sql) `(SELECT COALESCE(SUM(CAST(oi.quantity AS NUMERIC)), 0)::int FROM order_items oi WHERE oi.order_id = ${schema_1.orders.id})`,
+    })
+        .from(schema_1.orders)
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
+        .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.cashierId, schema_1.users.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), branchId ? (0, drizzle_orm_1.eq)(schema_1.orders.branchId, branchId) : undefined, (0, drizzle_orm_1.inArray)(schema_1.orders.status, ['Confirmed', 'Preparing', 'Ready', 'Sent-To-Kitchen'])))
+        .orderBy((0, drizzle_orm_1.asc)(schema_1.orders.createdAt)); // Oldest active tickets first (FIFO kitchen queue)
 };
 exports.fetchOpenOrders = fetchOpenOrders;
 const updateOrderStatus = async (tenantId, orderId, status) => {
@@ -293,11 +444,89 @@ const updateOrderStatus = async (tenantId, orderId, status) => {
     });
 };
 exports.updateOrderStatus = updateOrderStatus;
-const fetchTakeawayOrders = async (tenantId) => {
+const fetchTakeawayOrders = async (tenantId, branchId) => {
     return await db_1.db
-        .select()
+        .select({
+        id: schema_1.orders.id,
+        branchId: schema_1.orders.branchId,
+        branchName: schema_1.branches.name,
+        cashierName: (0, drizzle_orm_1.sql) `TRIM(CONCAT(${schema_1.users.firstName}, ' ', ${schema_1.users.lastName}))`,
+        orderNumber: schema_1.orders.orderNumber,
+        orderType: schema_1.orders.orderType,
+        status: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
+        customerName: schema_1.orders.customerName,
+        customerPhone: schema_1.orders.customerPhone,
+        buyerKraPin: schema_1.orders.buyerKraPin,
+        subtotal: schema_1.orders.subtotal,
+        tax: schema_1.orders.tax,
+        total: schema_1.orders.total,
+        createdAt: schema_1.orders.createdAt,
+        itemsCount: (0, drizzle_orm_1.sql) `(SELECT COALESCE(SUM(CAST(oi.quantity AS NUMERIC)), 0)::int FROM order_items oi WHERE oi.order_id = ${schema_1.orders.id})`,
+    })
         .from(schema_1.orders)
-        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orders.orderType, 'Takeaway')))
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
+        .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.cashierId, schema_1.users.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), branchId ? (0, drizzle_orm_1.eq)(schema_1.orders.branchId, branchId) : undefined, (0, drizzle_orm_1.or)((0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Takeaway%'), (0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Express%'))))
         .orderBy((0, drizzle_orm_1.desc)(schema_1.orders.createdAt));
 };
 exports.fetchTakeawayOrders = fetchTakeawayOrders;
+const fetchOnlineStorefrontOrders = async (tenantId, branchId) => {
+    const activeOrders = await db_1.db
+        .select({
+        id: schema_1.orders.id,
+        branchId: schema_1.orders.branchId,
+        branchName: schema_1.branches.name,
+        orderNumber: schema_1.orders.orderNumber,
+        orderType: schema_1.orders.orderType,
+        status: schema_1.orders.status,
+        paymentStatus: schema_1.orders.paymentStatus,
+        customerName: schema_1.orders.customerName,
+        customerPhone: schema_1.orders.customerPhone,
+        buyerKraPin: schema_1.orders.buyerKraPin,
+        subtotal: schema_1.orders.subtotal,
+        tax: schema_1.orders.tax,
+        total: schema_1.orders.total,
+        notes: schema_1.orders.notes,
+        createdAt: schema_1.orders.createdAt,
+        paymentMethod: (0, drizzle_orm_1.sql) `(SELECT p.payment_method FROM payments p WHERE p.order_id = ${schema_1.orders.id} ORDER BY p.id DESC LIMIT 1)`,
+    })
+        .from(schema_1.orders)
+        .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), branchId ? (0, drizzle_orm_1.eq)(schema_1.orders.branchId, branchId) : undefined, (0, drizzle_orm_1.or)((0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Online%'), (0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Web%'), (0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Delivery%'), (0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Takeaway%'), (0, drizzle_orm_1.ilike)(schema_1.orders.orderType, '%Express%')), (0, drizzle_orm_1.sql) `${schema_1.orders.status} NOT IN ('Completed', 'Cancelled')`))
+        .orderBy((0, drizzle_orm_1.asc)(schema_1.orders.createdAt));
+    if (activeOrders.length === 0)
+        return [];
+    const orderIds = activeOrders.map((o) => o.id);
+    const allLines = await db_1.db
+        .select({
+        id: schema_1.orderItems.id,
+        orderId: schema_1.orderItems.orderId,
+        quantity: schema_1.orderItems.quantity,
+        unitPrice: schema_1.orderItems.unitPrice,
+        totalPrice: schema_1.orderItems.totalPrice,
+        name: schema_1.menuItems.name,
+        notes: schema_1.orderItems.notes,
+    })
+        .from(schema_1.orderItems)
+        .leftJoin(schema_1.menuItems, (0, drizzle_orm_1.eq)(schema_1.orderItems.menuItemId, schema_1.menuItems.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.tenantId, tenantId), (0, drizzle_orm_1.inArray)(schema_1.orderItems.orderId, orderIds)));
+    const linesByOrderId = new Map();
+    for (const line of allLines) {
+        const existing = linesByOrderId.get(line.orderId) || [];
+        existing.push(line);
+        linesByOrderId.set(line.orderId, existing);
+    }
+    return activeOrders.map((o) => ({
+        ...o,
+        items: (linesByOrderId.get(o.id) || []).map((l) => ({
+            id: l.id,
+            quantity: Number(l.quantity),
+            name: l.name || 'Menu Item',
+            unitPrice: l.unitPrice,
+            totalPrice: l.totalPrice,
+            notes: l.notes,
+        })),
+    }));
+};
+exports.fetchOnlineStorefrontOrders = fetchOnlineStorefrontOrders;

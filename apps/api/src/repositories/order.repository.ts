@@ -1,9 +1,10 @@
 // apps/api/src/repositories/order.repository.ts
-import { eq, desc, and, inArray, sql } from 'drizzle-orm';
+import { eq, desc, and, inArray, sql, asc, or, ilike, gte, lte, isNotNull } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   orders,
   orderItems,
+  menuItems,
   recipes,
   recipeIngredients,
   inventoryItems,
@@ -16,7 +17,12 @@ import {
   customers,
   customerLoyaltyProfiles,
   loyaltyTransactionsLedger,
+  fiscalInvoices,
+  tenantFinancialSettings,
+  branches,
+  users,
 } from '../config/schema';
+import { ListOrdersQuery } from '../validators/order.validator';
 
 export const createOrderRecord = async (tenantId: number, data: any, items: any[]) => {
   return await db.transaction(async (tx) => {
@@ -75,12 +81,11 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         );
     }
 
-    // 3. Record Treasury Payment & Increment Active Cash Drawer / Shift Balances
+    // 3. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Increment Active Cash Drawer / Shift Balances
     if (isPaid) {
       const normalizedMethod = String(data.paymentMethod || '').toUpperCase();
       const isCashTender = normalizedMethod === 'CASH' || normalizedMethod === 'SPLIT';
 
-      // Determine actual cash portion entering the physical drawer
       const cashInflow =
         normalizedMethod === 'CASH'
           ? total
@@ -88,7 +93,6 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
           ? Math.min(total, Number(data.cashTendered) || 0)
           : 0;
 
-      // Record INBOUND_AR payment in Treasury Ledger
       await tx.insert(payments).values({
         tenantId,
         branchId: data.branchId ?? null,
@@ -109,9 +113,31 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         notes: `POS Settlement for ${orderNumber}`,
       });
 
-      // Update active Drawer Session, Cash Drawer & Cashier Shift for Cash inflow
+      const [finSettings] = await tx
+        .select({
+          autoFiscalize: tenantFinancialSettings.autoFiscalizeOnPayment,
+          deviceSerial: tenantFinancialSettings.etimsDeviceSerial,
+        })
+        .from(tenantFinancialSettings)
+        .where(eq(tenantFinancialSettings.tenantId, tenantId))
+        .limit(1);
+
+      const shouldAutoSign = finSettings?.autoFiscalize !== false;
+      const cuInvoiceNo = shouldAutoSign ? `KRA-CU-${Date.now().toString().slice(-8)}` : null;
+
+      await tx.insert(fiscalInvoices).values({
+        tenantId,
+        branchId: data.branchId ?? null,
+        orderId: newOrder.id,
+        invoiceType: 'SALE',
+        buyerKraPin: data.buyerKraPin ?? null,
+        cuInvoiceNumber: cuInvoiceNo,
+        sdcId: finSettings?.deviceSerial || 'OSCU-SCU-2026-NBO',
+        fiscalStatus: shouldAutoSign ? 'FISCALIZED' : 'PENDING',
+        fiscalizedAt: shouldAutoSign ? new Date() : null,
+      });
+
       if (isCashTender && cashInflow > 0) {
-        // Find active drawer session (prioritize explicitly selected cashDrawerId, fallback to cashier's active session)
         const sessionFilters = [
           eq(drawerSessions.tenantId, tenantId),
           sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`,
@@ -150,7 +176,6 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
             .where(eq(cashDrawers.id, activeSession.drawerId));
         }
 
-        // Also update the linked OPEN cashierShift
         const shiftFilters = [
           eq(cashierShifts.tenantId, tenantId),
           eq(cashierShifts.status, 'OPEN'),
@@ -176,7 +201,6 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         }
       }
 
-      // Accrue Loyalty Points if a CRM Customer is attached
       if (data.customerId && total >= 100) {
         const pointsEarned = Math.floor(total / 100);
         const [profile] = await tx
@@ -327,25 +351,178 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
   });
 };
 
-export const fetchTenantOrders = async (tenantId: number) => {
-  return await db
-    .select()
+export const fetchTenantOrders = async (tenantId: number, query?: ListOrdersQuery) => {
+  const conditions = [eq(orders.tenantId, tenantId)];
+
+  if (query?.branchId) {
+    conditions.push(eq(orders.branchId, query.branchId));
+  }
+  if (query?.status && query.status !== 'ALL') {
+    conditions.push(eq(orders.status, query.status));
+  }
+  if (query?.paymentStatus && query.paymentStatus !== 'ALL') {
+    conditions.push(sql`UPPER(${orders.paymentStatus}) = UPPER(${query.paymentStatus})`);
+  }
+  if (query?.orderType && query.orderType !== 'ALL') {
+    conditions.push(eq(orders.orderType, query.orderType));
+  }
+  if (query?.cashierId) {
+    conditions.push(eq(orders.cashierId, query.cashierId));
+  }
+  if (query?.startDate) {
+    conditions.push(gte(orders.createdAt, new Date(`${query.startDate}T00:00:00.000Z`)));
+  }
+  if (query?.endDate) {
+    conditions.push(lte(orders.createdAt, new Date(`${query.endDate}T23:59:59.999Z`)));
+  }
+  if (query?.minAmount !== undefined) {
+    conditions.push(sql`CAST(${orders.total} AS NUMERIC) >= ${query.minAmount}`);
+  }
+  if (query?.maxAmount !== undefined) {
+    conditions.push(sql`CAST(${orders.total} AS NUMERIC) <= ${query.maxAmount}`);
+  }
+  if (query?.hasKraPin === 'true') {
+    conditions.push(and(isNotNull(orders.buyerKraPin), sql`TRIM(${orders.buyerKraPin}) != ''`)!);
+  }
+  if (query?.search) {
+    const term = `%${query.search}%`;
+    conditions.push(
+      or(
+        ilike(orders.orderNumber, term),
+        ilike(orders.customerName, term),
+        ilike(orders.customerPhone, term),
+        ilike(orders.tableName, term),
+        ilike(orders.buyerKraPin, term)
+      )!
+    );
+  }
+
+  const rows = await db
+    .select({
+      id: orders.id,
+      branchId: orders.branchId,
+      branchName: branches.name,
+      cashierId: orders.cashierId,
+      cashierName: sql<string | null>`TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName}))`,
+      orderNumber: orders.orderNumber,
+      orderType: orders.orderType,
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+      tableName: orders.tableName,
+      customerName: orders.customerName,
+      customerPhone: orders.customerPhone,
+      buyerKraPin: orders.buyerKraPin,
+      subtotal: orders.subtotal,
+      discountTotal: orders.discountTotal,
+      tax: orders.tax,
+      cateringLevy: orders.cateringLevy,
+      total: orders.total,
+      amountPaid: orders.amountPaid,
+      createdAt: orders.createdAt,
+      paymentMethod: sql<string | null>`(SELECT p.payment_method FROM payments p WHERE p.order_id = ${orders.id} ORDER BY p.id DESC LIMIT 1)`,
+      cuInvoiceNumber: sql<string | null>`(SELECT f.cu_invoice_number FROM fiscal_invoices f WHERE f.order_id = ${orders.id} ORDER BY f.id DESC LIMIT 1)`,
+    })
     .from(orders)
-    .where(eq(orders.tenantId, tenantId))
-    .orderBy(desc(orders.createdAt));
+    .leftJoin(branches, eq(orders.branchId, branches.id))
+    .leftJoin(users, eq(orders.cashierId, users.id))
+    .where(and(...conditions))
+    .orderBy(desc(orders.createdAt))
+    .limit(query?.limit || 100);
+
+  if (query?.paymentMethod && query.paymentMethod !== 'ALL') {
+    return rows.filter(
+      (r) => (r.paymentMethod || '').toUpperCase() === query.paymentMethod!.toUpperCase()
+    );
+  }
+
+  return rows;
 };
 
-export const fetchOpenOrders = async (tenantId: number) => {
-  return await db
-    .select()
+export const fetchOrderDetailById = async (tenantId: number, orderId: number) => {
+  const [header] = await db
+    .select({
+      id: orders.id,
+      branchName: branches.name,
+      cashierName: sql<string | null>`TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName}))`,
+      orderNumber: orders.orderNumber,
+      orderType: orders.orderType,
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+      tableName: orders.tableName,
+      customerName: orders.customerName,
+      customerPhone: orders.customerPhone,
+      buyerKraPin: orders.buyerKraPin,
+      subtotal: orders.subtotal,
+      discountTotal: orders.discountTotal,
+      tax: orders.tax,
+      cateringLevy: orders.cateringLevy,
+      serviceCharge: orders.serviceCharge,
+      total: orders.total,
+      amountPaid: orders.amountPaid,
+      notes: orders.notes,
+      createdAt: orders.createdAt,
+      paymentMethod: sql<string | null>`(SELECT p.payment_method FROM payments p WHERE p.order_id = ${orders.id} ORDER BY p.id DESC LIMIT 1)`,
+      cuInvoiceNumber: sql<string | null>`(SELECT f.cu_invoice_number FROM fiscal_invoices f WHERE f.order_id = ${orders.id} ORDER BY f.id DESC LIMIT 1)`,
+      fiscalStatus: sql<string | null>`(SELECT f.fiscal_status FROM fiscal_invoices f WHERE f.order_id = ${orders.id} ORDER BY f.id DESC LIMIT 1)`,
+    })
     .from(orders)
+    .leftJoin(branches, eq(orders.branchId, branches.id))
+    .leftJoin(users, eq(orders.cashierId, users.id))
+    .where(and(eq(orders.tenantId, tenantId), eq(orders.id, orderId)))
+    .limit(1);
+
+  if (!header) return null;
+
+  const lines = await db
+    .select({
+      id: orderItems.id,
+      menuItemId: orderItems.menuItemId,
+      itemName: menuItems.name,
+      sku: menuItems.sku,
+      quantity: orderItems.quantity,
+      unitPrice: orderItems.unitPrice,
+      totalPrice: orderItems.totalPrice,
+      notes: orderItems.notes,
+    })
+    .from(orderItems)
+    .leftJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
+    .where(and(eq(orderItems.tenantId, tenantId), eq(orderItems.orderId, orderId)));
+
+  return {
+    ...header,
+    items: lines,
+  };
+};
+
+export const fetchOpenOrders = async (tenantId: number, branchId?: number) => {
+  return await db
+    .select({
+      id: orders.id,
+      branchId: orders.branchId,
+      branchName: branches.name,
+      cashierName: sql<string | null>`TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName}))`,
+      orderNumber: orders.orderNumber,
+      orderType: orders.orderType,
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+      tableName: orders.tableName,
+      customerName: orders.customerName,
+      customerPhone: orders.customerPhone,
+      total: orders.total,
+      createdAt: orders.createdAt,
+      itemsCount: sql<number>`(SELECT COALESCE(SUM(CAST(oi.quantity AS NUMERIC)), 0)::int FROM order_items oi WHERE oi.order_id = ${orders.id})`,
+    })
+    .from(orders)
+    .leftJoin(branches, eq(orders.branchId, branches.id))
+    .leftJoin(users, eq(orders.cashierId, users.id))
     .where(
       and(
         eq(orders.tenantId, tenantId),
+        branchId ? eq(orders.branchId, branchId) : undefined,
         inArray(orders.status, ['Confirmed', 'Preparing', 'Ready', 'Sent-To-Kitchen'])
       )
     )
-    .orderBy(desc(orders.createdAt));
+    .orderBy(asc(orders.createdAt)); // Oldest active tickets first (FIFO kitchen queue)
 };
 
 export const updateOrderStatus = async (tenantId: number, orderId: number, status: string) => {
@@ -375,10 +552,113 @@ export const updateOrderStatus = async (tenantId: number, orderId: number, statu
   });
 };
 
-export const fetchTakeawayOrders = async (tenantId: number) => {
+export const fetchTakeawayOrders = async (tenantId: number, branchId?: number) => {
   return await db
-    .select()
+    .select({
+      id: orders.id,
+      branchId: orders.branchId,
+      branchName: branches.name,
+      cashierName: sql<string | null>`TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName}))`,
+      orderNumber: orders.orderNumber,
+      orderType: orders.orderType,
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+      customerName: orders.customerName,
+      customerPhone: orders.customerPhone,
+      buyerKraPin: orders.buyerKraPin,
+      subtotal: orders.subtotal,
+      tax: orders.tax,
+      total: orders.total,
+      createdAt: orders.createdAt,
+      itemsCount: sql<number>`(SELECT COALESCE(SUM(CAST(oi.quantity AS NUMERIC)), 0)::int FROM order_items oi WHERE oi.order_id = ${orders.id})`,
+    })
     .from(orders)
-    .where(and(eq(orders.tenantId, tenantId), eq(orders.orderType, 'Takeaway')))
+    .leftJoin(branches, eq(orders.branchId, branches.id))
+    .leftJoin(users, eq(orders.cashierId, users.id))
+    .where(
+      and(
+        eq(orders.tenantId, tenantId),
+        branchId ? eq(orders.branchId, branchId) : undefined,
+        or(
+          ilike(orders.orderType, '%Takeaway%'),
+          ilike(orders.orderType, '%Express%')
+        )
+      )
+    )
     .orderBy(desc(orders.createdAt));
+};
+
+export const fetchOnlineStorefrontOrders = async (tenantId: number, branchId?: number) => {
+  const activeOrders = await db
+    .select({
+      id: orders.id,
+      branchId: orders.branchId,
+      branchName: branches.name,
+      orderNumber: orders.orderNumber,
+      orderType: orders.orderType,
+      status: orders.status,
+      paymentStatus: orders.paymentStatus,
+      customerName: orders.customerName,
+      customerPhone: orders.customerPhone,
+      buyerKraPin: orders.buyerKraPin,
+      subtotal: orders.subtotal,
+      tax: orders.tax,
+      total: orders.total,
+      notes: orders.notes,
+      createdAt: orders.createdAt,
+      paymentMethod: sql<string | null>`(SELECT p.payment_method FROM payments p WHERE p.order_id = ${orders.id} ORDER BY p.id DESC LIMIT 1)`,
+    })
+    .from(orders)
+    .leftJoin(branches, eq(orders.branchId, branches.id))
+    .where(
+      and(
+        eq(orders.tenantId, tenantId),
+        branchId ? eq(orders.branchId, branchId) : undefined,
+        or(
+          ilike(orders.orderType, '%Online%'),
+          ilike(orders.orderType, '%Web%'),
+          ilike(orders.orderType, '%Delivery%'),
+          ilike(orders.orderType, '%Takeaway%'),
+          ilike(orders.orderType, '%Express%')
+        ),
+        sql`${orders.status} NOT IN ('Completed', 'Cancelled')`
+      )
+    )
+    .orderBy(asc(orders.createdAt));
+
+  if (activeOrders.length === 0) return [];
+
+  const orderIds = activeOrders.map((o) => o.id);
+  const allLines = await db
+    .select({
+      id: orderItems.id,
+      orderId: orderItems.orderId,
+      quantity: orderItems.quantity,
+      unitPrice: orderItems.unitPrice,
+      totalPrice: orderItems.totalPrice,
+      name: menuItems.name,
+      notes: orderItems.notes,
+    })
+    .from(orderItems)
+    .leftJoin(menuItems, eq(orderItems.menuItemId, menuItems.id))
+    .where(and(eq(orderItems.tenantId, tenantId), inArray(orderItems.orderId, orderIds)));
+
+  const linesByOrderId = new Map<number, typeof allLines>();
+  for (const line of allLines) {
+    const existing = linesByOrderId.get(line.orderId) || [];
+    existing.push(line);
+    linesByOrderId.set(line.orderId, existing);
+  }
+
+  return activeOrders.map((o) => ({
+    ...o,
+    items: (linesByOrderId.get(o.id) || []).map((l) => ({
+      id: l.id,
+      quantity: Number(l.quantity),
+      name: l.name || 'Menu Item',
+      unitPrice: l.unitPrice,
+      totalPrice: l.totalPrice,
+      notes: l.notes,
+    })),
+  }));
 };

@@ -11,19 +11,11 @@ import {
   Scale,
   SlidersHorizontal,
   Wallet,
-  Building,
   ArrowUpRight,
   ArrowDownRight,
-  ShieldAlert,
   ShieldCheck,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
   ChevronRight,
   RefreshCw,
-  Coins,
-  Cpu,
-  FileCheck2,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -66,22 +58,37 @@ interface TreasuryLedgerItem {
   clearingAccount: string;
   transactionReference: string | null;
   amount: number;
+  branchName?: string | null;
   createdAt: string;
+}
+
+interface BranchOption {
+  id: number;
+  name: string;
+  code: string;
 }
 
 export default function FinanceHubPage() {
   const [data, setData] = useState<FinanceOverviewData | null>(null);
   const [recentLedger, setRecentLedger] = useState<TreasuryLedgerItem[]>([]);
-  const [period, setPeriod] = useState<'TODAY' | 'THIS_MONTH' | 'THIS_YEAR'>('THIS_MONTH');
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('ALL');
+  const [period, setPeriod] = useState<'TODAY' | 'THIS_MONTH' | 'THIS_QUARTER' | 'THIS_YEAR'>('THIS_MONTH');
   const [isLoading, setIsLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const activeBranchId = typeof window !== 'undefined' ? localStorage.getItem('servora_active_branch_id') : null;
-      const res = await fetchApi(
-        `/api/v1/finance/overview?period=${period}${activeBranchId ? `&branchId=${activeBranchId}` : ''}`
-      );
+      const branchParam = selectedBranchId !== 'ALL' ? `&branchId=${selectedBranchId}` : '';
+
+      const [res, branchRes] = await Promise.all([
+        fetchApi(`/api/v1/finance/overview?period=${period}${branchParam}`),
+        fetchApi('/api/v1/branches').catch(() => ({ data: [] })),
+      ]);
+
+      if (branchRes?.data && Array.isArray(branchRes.data)) {
+        setBranches(branchRes.data);
+      }
       if (res?.data) {
         setData(res.data.overview);
         setRecentLedger(res.data.recentLedger || []);
@@ -91,7 +98,7 @@ export default function FinanceHubPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [period]);
+  }, [period, selectedBranchId]);
 
   useEffect(() => {
     loadData();
@@ -105,10 +112,13 @@ export default function FinanceHubPage() {
   return (
     <div className="space-y-6 pb-12 font-sans">
       {/* 1. EXECUTIVE COMMAND HEADER */}
-      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+      <div className="bg-white p-5 rounded-2xl border border-gray-200 shadow-xs flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Link href="/dashboard" className="text-xs font-semibold text-servora-deepTeal hover:text-servora-core flex items-center gap-1 transition-colors">
+            <Link
+              href="/dashboard"
+              className="text-xs font-semibold text-servora-deepTeal hover:text-servora-core flex items-center gap-1 transition-colors"
+            >
               Enterprise Control <ChevronRight size={12} />
             </Link>
             <span className="text-xs font-bold text-servora-navy">Financial Management & Treasury</span>
@@ -122,9 +132,22 @@ export default function FinanceHubPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
+        <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto justify-between xl:justify-end">
+          <select
+            value={selectedBranchId}
+            onChange={(e) => setSelectedBranchId(e.target.value)}
+            className="px-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+          >
+            <option value="ALL">All Branch Locations ({branches.length})</option>
+            {branches.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name} ({b.code})
+              </option>
+            ))}
+          </select>
+
           <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-xl text-xs font-bold">
-            {(['TODAY', 'THIS_MONTH', 'THIS_YEAR'] as const).map((p) => (
+            {(['TODAY', 'THIS_MONTH', 'THIS_QUARTER', 'THIS_YEAR'] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -132,7 +155,13 @@ export default function FinanceHubPage() {
                   period === p ? 'bg-white text-servora-navy shadow-xs' : 'text-gray-500 hover:text-black'
                 }`}
               >
-                {p === 'TODAY' ? 'Today' : p === 'THIS_MONTH' ? 'This Month' : 'This Year'}
+                {p === 'TODAY'
+                  ? 'Today'
+                  : p === 'THIS_MONTH'
+                  ? 'This Month'
+                  : p === 'THIS_QUARTER'
+                  ? 'Quarter'
+                  : 'This Year'}
               </button>
             ))}
           </div>
@@ -180,9 +209,11 @@ export default function FinanceHubPage() {
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Net Operating Margin</span>
-            <p className={`text-xl font-bold font-mono mt-0.5 ${
-              summary && summary.netOperatingMarginKes < 0 ? 'text-rose-600' : 'text-emerald-700'
-            }`}>
+            <p
+              className={`text-xl font-bold font-mono mt-0.5 ${
+                summary && summary.netOperatingMarginKes < 0 ? 'text-rose-600' : 'text-emerald-700'
+              }`}
+            >
               KES {summary ? summary.netOperatingMarginKes.toLocaleString() : '0'}
             </p>
             <span className="text-[10px] font-medium text-gray-500">
@@ -226,8 +257,12 @@ export default function FinanceHubPage() {
             className="p-3.5 bg-slate-50 hover:bg-blue-50/50 border border-gray-200 rounded-xl transition-colors space-y-1 block"
           >
             <div className="flex justify-between items-center text-gray-500 font-bold text-[11px]">
-              <span className="flex items-center gap-1.5"><Receipt size={13} className="text-blue-600" /> Pending Claims</span>
-              <span className="font-mono text-blue-700 bg-blue-100/70 px-1.5 py-0.2 rounded text-[10px]">{queue?.pendingExpenseClaims || 0}</span>
+              <span className="flex items-center gap-1.5">
+                <Receipt size={13} className="text-blue-600" /> Pending Claims
+              </span>
+              <span className="font-mono text-blue-700 bg-blue-100/70 px-1.5 py-0.2 rounded text-[10px]">
+                {queue?.pendingExpenseClaims || 0}
+              </span>
             </div>
             <p className="text-sm font-bold font-mono text-servora-navy">
               KES {liquidity ? liquidity.pendingClaimsKes.toLocaleString() : '0'}
@@ -240,8 +275,12 @@ export default function FinanceHubPage() {
             className="p-3.5 bg-slate-50 hover:bg-amber-50/50 border border-gray-200 rounded-xl transition-colors space-y-1 block"
           >
             <div className="flex justify-between items-center text-gray-500 font-bold text-[11px]">
-              <span className="flex items-center gap-1.5"><SlidersHorizontal size={13} className="text-amber-600" /> Pending Adjustments</span>
-              <span className="font-mono text-amber-700 bg-amber-100/70 px-1.5 py-0.2 rounded text-[10px]">{queue?.pendingAdjustments || 0}</span>
+              <span className="flex items-center gap-1.5">
+                <SlidersHorizontal size={13} className="text-amber-600" /> Pending Adjustments
+              </span>
+              <span className="font-mono text-amber-700 bg-amber-100/70 px-1.5 py-0.2 rounded text-[10px]">
+                {queue?.pendingAdjustments || 0}
+              </span>
             </div>
             <p className="text-sm font-bold font-mono text-servora-navy">
               {queue?.pendingAdjustments || 0} Vouchers
@@ -254,8 +293,12 @@ export default function FinanceHubPage() {
             className="p-3.5 bg-slate-50 hover:bg-emerald-50/50 border border-gray-200 rounded-xl transition-colors space-y-1 block"
           >
             <div className="flex justify-between items-center text-gray-500 font-bold text-[11px]">
-              <span className="flex items-center gap-1.5"><Wallet size={13} className="text-emerald-600" /> Active Cash Tills</span>
-              <span className="font-mono text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded text-[10px]">{queue?.activeTillShifts || 0}</span>
+              <span className="flex items-center gap-1.5">
+                <Wallet size={13} className="text-emerald-600" /> Active Cash Tills
+              </span>
+              <span className="font-mono text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded text-[10px]">
+                {queue?.activeTillShifts || 0}
+              </span>
             </div>
             <p className="text-sm font-bold font-mono text-servora-navy">
               KES {liquidity ? liquidity.cashDrawerFloatKes.toLocaleString() : '0'}
@@ -268,8 +311,12 @@ export default function FinanceHubPage() {
             className="p-3.5 bg-slate-50 hover:bg-rose-50/50 border border-gray-200 rounded-xl transition-colors space-y-1 block"
           >
             <div className="flex justify-between items-center text-gray-500 font-bold text-[11px]">
-              <span className="flex items-center gap-1.5"><Scale size={13} className="text-rose-600" /> Unbalanced Shifts</span>
-              <span className="font-mono text-rose-700 bg-rose-100/70 px-1.5 py-0.2 rounded text-[10px]">{queue?.unbalancedShifts || 0}</span>
+              <span className="flex items-center gap-1.5">
+                <Scale size={13} className="text-rose-600" /> Unbalanced Shifts
+              </span>
+              <span className="font-mono text-rose-700 bg-rose-100/70 px-1.5 py-0.2 rounded text-[10px]">
+                {queue?.unbalancedShifts || 0}
+              </span>
             </div>
             <p className="text-sm font-bold font-mono text-rose-700">
               {queue?.unbalancedShifts || 0} Discrepancies
@@ -292,7 +339,9 @@ export default function FinanceHubPage() {
               className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-gray-100 rounded-xl transition-colors flex justify-between items-center group"
             >
               <div>
-                <span className="font-bold text-servora-navy block group-hover:text-servora-core">Accounts Payable (AP)</span>
+                <span className="font-bold text-servora-navy block group-hover:text-servora-core">
+                  Accounts Payable (AP)
+                </span>
                 <span className="text-[11px] text-gray-400">Procure-to-pay 3-way match & vendor aging</span>
               </div>
               <ArrowUpRight size={16} className="text-gray-400 group-hover:text-servora-core transition-transform" />
@@ -303,7 +352,9 @@ export default function FinanceHubPage() {
               className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-gray-100 rounded-xl transition-colors flex justify-between items-center group"
             >
               <div>
-                <span className="font-bold text-servora-navy block group-hover:text-servora-core">Corporate Expenses</span>
+                <span className="font-bold text-servora-navy block group-hover:text-servora-core">
+                  Corporate Expenses
+                </span>
                 <span className="text-[11px] text-gray-400">Employee claims, per diems & petty cash</span>
               </div>
               <ArrowUpRight size={16} className="text-gray-400 group-hover:text-servora-core transition-transform" />
@@ -314,7 +365,9 @@ export default function FinanceHubPage() {
               className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-gray-100 rounded-xl transition-colors flex justify-between items-center group"
             >
               <div>
-                <span className="font-bold text-servora-navy block group-hover:text-servora-core">Taxes & KRA eTIMS</span>
+                <span className="font-bold text-servora-navy block group-hover:text-servora-core">
+                  Taxes & KRA eTIMS
+                </span>
                 <span className="text-[11px] text-gray-400">Output/Input VAT returns & fiscal SDC devices</span>
               </div>
               <ArrowUpRight size={16} className="text-gray-400 group-hover:text-servora-core transition-transform" />
@@ -325,7 +378,9 @@ export default function FinanceHubPage() {
               className="p-3.5 bg-slate-50 hover:bg-slate-100 border border-gray-100 rounded-xl transition-colors flex justify-between items-center group"
             >
               <div>
-                <span className="font-bold text-servora-navy block group-hover:text-servora-core">General Ledger Adjustments</span>
+                <span className="font-bold text-servora-navy block group-hover:text-servora-core">
+                  General Ledger Adjustments
+                </span>
                 <span className="text-[11px] text-gray-400">Till write-offs & Maker-Checker journals</span>
               </div>
               <ArrowUpRight size={16} className="text-gray-400 group-hover:text-servora-core transition-transform" />
@@ -384,9 +439,9 @@ export default function FinanceHubPage() {
       <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs">
         <div className="p-4 border-b border-gray-100 flex justify-between items-center">
           <span className="text-xs font-bold uppercase tracking-wider text-servora-navy">
-            Recent Treasury Outflows & Payments Ledger
+            Recent Treasury Flows & Payments Ledger
           </span>
-          <span className="text-[11px] font-mono text-gray-400">Audit Log</span>
+          <span className="text-[11px] font-mono text-gray-400">Audit Log ({recentLedger.length})</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -397,6 +452,7 @@ export default function FinanceHubPage() {
                 <th className="py-2.5 px-3">Flow</th>
                 <th className="py-2.5 px-3">Method & Channel</th>
                 <th className="py-2.5 px-3">Clearing Account</th>
+                <th className="py-2.5 px-3">Branch</th>
                 <th className="py-2.5 px-3">Reference #</th>
                 <th className="py-2.5 px-3 text-right">Amount</th>
                 <th className="py-2.5 px-3">Status</th>
@@ -406,10 +462,10 @@ export default function FinanceHubPage() {
             <tbody className="divide-y divide-gray-100">
               {recentLedger.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-gray-400 italic">
+                  <td colSpan={9} className="py-12 text-center text-gray-400 italic">
                     <p className="font-bold text-servora-navy not-italic">No Treasury Payments on Record</p>
                     <p className="text-xs text-gray-500 not-italic">
-                      New tenants start with an unpolluted zero-state. Outbound AP payments and expense disbursements appear here automatically.
+                      New tenants start with an unpolluted zero-state. POS settlements, AP payments, and expense disbursements appear here automatically.
                     </p>
                   </td>
                 </tr>
@@ -417,9 +473,20 @@ export default function FinanceHubPage() {
                 recentLedger.map((pmt) => (
                   <tr key={pmt.id} className="hover:bg-slate-50/60 transition-colors">
                     <td className="py-3 px-3 font-mono font-bold text-servora-navy">{pmt.paymentNumber}</td>
-                    <td className="py-3 px-3 font-mono text-[10px] font-bold text-gray-500">{pmt.paymentFlow}</td>
+                    <td className="py-3 px-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[9.5px] font-mono font-bold uppercase ${
+                          pmt.paymentFlow === 'INBOUND_AR'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-800 border border-amber-200'
+                        }`}
+                      >
+                        {pmt.paymentFlow}
+                      </span>
+                    </td>
                     <td className="py-3 px-3">{pmt.paymentMethod.replace(/_/g, ' ')}</td>
                     <td className="py-3 px-3 text-gray-600">{pmt.clearingAccount}</td>
+                    <td className="py-3 px-3 text-gray-500">{pmt.branchName || 'All / Shared'}</td>
                     <td className="py-3 px-3 font-mono text-gray-500">{pmt.transactionReference || '—'}</td>
                     <td className="py-3 px-3 text-right font-mono font-bold text-servora-navy">
                       KES {pmt.amount.toLocaleString()}

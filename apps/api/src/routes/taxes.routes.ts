@@ -4,6 +4,7 @@ import {
   getTaxOverview,
   getFiscalInvoices,
   patchTaxSettings,
+  postCreateTaxCode,
   postRetryFiscalization,
 } from '../controllers/taxes.controller';
 
@@ -13,6 +14,7 @@ router.use(requireAuth);
 router.get('/overview', getTaxOverview);
 router.get('/invoices', getFiscalInvoices);
 router.patch('/settings', patchTaxSettings);
+router.post('/codes', postCreateTaxCode);
 router.post('/retry', postRetryFiscalization);
 
 export default router;

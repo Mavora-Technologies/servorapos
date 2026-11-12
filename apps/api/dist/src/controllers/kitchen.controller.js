@@ -33,38 +33,80 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getPerformance = exports.getHistory = exports.updateStatus = exports.getTickets = void 0;
+exports.getPerformance = exports.getHistory = exports.updateItemStatus = exports.updateStatus = exports.getTickets = exports.getStationsMeta = void 0;
 const kitchenService = __importStar(require("../services/kitchen.service"));
+const kitchen_validator_1 = require("../validators/kitchen.validator");
+const getStationsMeta = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const stations = await kitchenService.fetchTenantStations(tenantId);
+        res.status(200).json({ status: 'success', data: stations });
+    }
+    catch (error) {
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to load kitchen stations' });
+    }
+};
+exports.getStationsMeta = getStationsMeta;
 const getTickets = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const station = req.query.station;
-        const tickets = await kitchenService.fetchActiveTickets(tenantId, station);
+        const parsed = kitchen_validator_1.kitchenTicketsQuerySchema.safeParse(req.query);
+        const tickets = await kitchenService.fetchActiveTickets(tenantId, parsed.success ? parsed.data : {});
         res.status(200).json({ status: 'success', data: tickets });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: 'Failed to fetch tickets' });
+        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch tickets' });
     }
 };
 exports.getTickets = getTickets;
 const updateStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const id = req.params.id;
-        const { status } = req.body;
-        await kitchenService.advanceTicketStatus(tenantId, parseInt(id, 10), status);
-        res.status(200).json({ status: 'success', message: `Order marked as ${status}` });
+        const userId = req.user?.userId ?? req.user?.id ?? null;
+        const id = parseInt(String(req.params.id), 10);
+        if (isNaN(id)) {
+            res.status(400).json({ status: 'error', message: 'Invalid ticket ID' });
+            return;
+        }
+        const parsed = kitchen_validator_1.updateTicketStatusSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ status: 'error', message: 'Invalid ticket status' });
+            return;
+        }
+        await kitchenService.advanceTicketStatus(tenantId, userId, id, parsed.data.status);
+        res.status(200).json({ status: 'success', message: `Order marked as ${parsed.data.status}` });
     }
     catch (error) {
         res.status(400).json({ status: 'error', message: error.message });
     }
 };
 exports.updateStatus = updateStatus;
+const updateItemStatus = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const itemId = parseInt(String(req.params.itemId), 10);
+        if (isNaN(itemId)) {
+            res.status(400).json({ status: 'error', message: 'Invalid line item ID' });
+            return;
+        }
+        const parsed = kitchen_validator_1.updateKitchenItemStatusSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ status: 'error', message: 'Invalid line item status' });
+            return;
+        }
+        const updated = await kitchenService.advanceLineItemStatus(tenantId, itemId, parsed.data.kitchenStatus);
+        res.status(200).json({ status: 'success', data: updated });
+    }
+    catch (error) {
+        res.status(400).json({ status: 'error', message: error.message });
+    }
+};
+exports.updateItemStatus = updateItemStatus;
 const getHistory = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        // Call through kitchenService instead of kitchenRepo
-        const history = await kitchenService.fetchKitchenHistory(tenantId);
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const history = await kitchenService.fetchKitchenHistory(tenantId, branchId);
         res.status(200).json({ status: 'success', data: history });
     }
     catch (error) {
@@ -75,7 +117,8 @@ exports.getHistory = getHistory;
 const getPerformance = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const stats = await kitchenService.fetchKitchenPerformance(tenantId);
+        const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+        const stats = await kitchenService.fetchKitchenPerformance(tenantId, branchId);
         res.status(200).json({ status: 'success', data: stats });
     }
     catch (error) {
