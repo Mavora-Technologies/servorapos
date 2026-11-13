@@ -33,7 +33,8 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchKitchenPerformance = exports.fetchKitchenHistory = exports.advanceLineItemStatus = exports.advanceTicketStatus = exports.fetchActiveTickets = exports.fetchTenantStations = void 0;
+exports.saveKitchenGlobalSettings = exports.deleteKitchenStation = exports.updateKitchenStation = exports.createKitchenStation = exports.fetchStationsManagementOverview = exports.bumpStationQueueItems = exports.fetchStationWorkload = exports.fetchKitchenPerformance = exports.fetchKitchenHistory = exports.advanceLineItemStatus = exports.advanceTicketStatus = exports.fetchActiveTickets = exports.fetchTenantStations = void 0;
+// apps/api/src/services/kitchen.service.ts
 const kitchenRepo = __importStar(require("../repositories/kitchen.repository"));
 const fetchTenantStations = async (tenantId) => {
     return await kitchenRepo.getDistinctTenantKitchenStations(tenantId);
@@ -54,11 +55,50 @@ const advanceLineItemStatus = async (tenantId, orderItemId, kitchenStatus) => {
     return await kitchenRepo.updateLineItemKitchenStatus(tenantId, orderItemId, kitchenStatus);
 };
 exports.advanceLineItemStatus = advanceLineItemStatus;
-const fetchKitchenHistory = async (tenantId, branchId) => {
-    return await kitchenRepo.getKitchenHistoryTickets(tenantId, branchId);
+const fetchKitchenHistory = async (tenantId, query = { limit: 150 }) => {
+    return await kitchenRepo.getKitchenHistoryTickets(tenantId, query);
 };
 exports.fetchKitchenHistory = fetchKitchenHistory;
-const fetchKitchenPerformance = async (tenantId, branchId) => {
-    return await kitchenRepo.getKitchenPerformanceStats(tenantId, branchId);
+const fetchKitchenPerformance = async (tenantId, query = {}) => {
+    return await kitchenRepo.getKitchenPerformanceStats(tenantId, query);
 };
 exports.fetchKitchenPerformance = fetchKitchenPerformance;
+const fetchStationWorkload = async (tenantId, branchId) => {
+    return await kitchenRepo.getStationWorkloadSummary(tenantId, branchId);
+};
+exports.fetchStationWorkload = fetchStationWorkload;
+const bumpStationQueueItems = async (tenantId, userId, orderId, station) => {
+    return await kitchenRepo.bumpStationItemsOnOrder(tenantId, userId, orderId, station);
+};
+exports.bumpStationQueueItems = bumpStationQueueItems;
+const fetchStationsManagementOverview = async (tenantId, branchId) => {
+    const [stations, workloads, globalSettings, categories] = await Promise.all([
+        kitchenRepo.listConfiguredKitchenStations(tenantId, branchId),
+        kitchenRepo.getStationWorkloadSummary(tenantId, branchId),
+        kitchenRepo.getKitchenGlobalSettingsRecord(tenantId),
+        kitchenRepo.listTenantMenuCategoriesForRouting(tenantId),
+    ]);
+    return {
+        stations,
+        workloads,
+        globalSettings,
+        categories,
+    };
+};
+exports.fetchStationsManagementOverview = fetchStationsManagementOverview;
+const createKitchenStation = async (tenantId, userId, input) => {
+    return await kitchenRepo.createKitchenStationRecord(tenantId, userId, input);
+};
+exports.createKitchenStation = createKitchenStation;
+const updateKitchenStation = async (tenantId, userId, stationId, input) => {
+    return await kitchenRepo.updateKitchenStationRecord(tenantId, userId, stationId, input);
+};
+exports.updateKitchenStation = updateKitchenStation;
+const deleteKitchenStation = async (tenantId, userId, stationId) => {
+    return await kitchenRepo.deleteKitchenStationRecord(tenantId, userId, stationId);
+};
+exports.deleteKitchenStation = deleteKitchenStation;
+const saveKitchenGlobalSettings = async (tenantId, userId, input) => {
+    return await kitchenRepo.upsertKitchenGlobalSettingsRecord(tenantId, userId, input);
+};
+exports.saveKitchenGlobalSettings = saveKitchenGlobalSettings;

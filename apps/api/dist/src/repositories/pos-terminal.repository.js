@@ -1,11 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.validatePosPromoCode = exports.searchPosCustomersWithLoyalty = exports.getPosTerminalContext = void 0;
+// apps/api/src/repositories/pos-terminal.repository.ts
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
 const getPosTerminalContext = async (tenantId, userId, requestedBranchId) => {
-    // 1. Fetch Authorized Tenant Branches (via userBranchMemberships or all active tenant branches for Admins)
+    // 1. Fetch Authorized Tenant Branches
     const accessibleBranches = await db_1.db
         .select({
         id: schema_1.branches.id,
@@ -29,9 +30,9 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId) => {
         ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.cashDrawers.branchId, activeBranch.id), (0, drizzle_orm_1.isNull)(schema_1.cashDrawers.branchId))
         : undefined;
     const shiftBranchCondition = activeBranch ? (0, drizzle_orm_1.eq)(schema_1.cashierShifts.branchId, activeBranch.id) : undefined;
-    // 2. Parallel Fetch: Branch Drawers, Active Cashier Shift, Today's Custodian Assignment, Active Rewards & 86'd Items
+    // 2. Parallel Fetch: Drawers, Active Shift, Custodian Guardrails, Rewards, 86'd Items, Kitchen Stations & Catalog Routing
     const todayStr = new Date().toISOString().split('T')[0];
-    const [branchDrawers, [activeShift], [custodianAssignment], activeRewards, unavailableItems,] = await Promise.all([
+    const [branchDrawers, [activeShift], [custodianAssignment], activeRewards, unavailableItems, allTenantKitchenStations, tenantCatalogRouting,] = await Promise.all([
         db_1.db
             .select({
             id: schema_1.cashDrawers.id,
@@ -92,7 +93,90 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId) => {
                 .from(schema_1.menuItemAvailability)
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.branchId, activeBranch.id)))
             : Promise.resolve([]),
+        db_1.db
+            .select({
+            id: schema_1.kitchenStations.id,
+            branchId: schema_1.kitchenStations.branchId,
+            name: schema_1.kitchenStations.name,
+            code: schema_1.kitchenStations.code,
+            stationType: schema_1.kitchenStations.stationType,
+            colorHex: schema_1.kitchenStations.colorHex,
+            targetPrepTimeMinutes: schema_1.kitchenStations.targetPrepTimeMinutes,
+            assignedCategories: schema_1.kitchenStations.assignedCategories,
+            backupStationId: schema_1.kitchenStations.backupStationId,
+            isActive: schema_1.kitchenStations.isActive,
+        })
+            .from(schema_1.kitchenStations)
+            .where((0, drizzle_orm_1.eq)(schema_1.kitchenStations.tenantId, tenantId))
+            .orderBy((0, drizzle_orm_1.asc)(schema_1.kitchenStations.name)),
+        db_1.db
+            .select({
+            id: schema_1.menuItems.id,
+            kitchenStation: schema_1.menuItems.kitchenStation,
+            categoryName: schema_1.menuCategories.name,
+        })
+            .from(schema_1.menuItems)
+            .leftJoin(schema_1.menuCategories, (0, drizzle_orm_1.eq)(schema_1.menuItems.categoryId, schema_1.menuCategories.id))
+            .where((0, drizzle_orm_1.eq)(schema_1.menuItems.tenantId, tenantId)),
     ]);
+    // 3. Prefer branch-specific stations; fall back to tenant-wide shared stations if branch has none configured
+    const branchSpecificStations = activeBranch
+        ? allTenantKitchenStations.filter((s) => s.branchId === activeBranch.id)
+        : [];
+    const effectiveStations = branchSpecificStations.length > 0 ? branchSpecificStations : allTenantKitchenStations;
+    const stationById = new Map(allTenantKitchenStations.map((s) => [s.id, s]));
+    const resolveFailoverStation = (stationObj) => {
+        if (!stationObj.isActive && stationObj.backupStationId) {
+            const backup = stationById.get(stationObj.backupStationId);
+            if (backup && backup.isActive) {
+                return {
+                    stationName: backup.name,
+                    stationCode: backup.code,
+                    isFailover: true,
+                    originalStationName: stationObj.name,
+                };
+            }
+        }
+        return {
+            stationName: stationObj.name,
+            stationCode: stationObj.code,
+            isFailover: false,
+            originalStationName: stationObj.name,
+        };
+    };
+    // 4. Resolve default station per menu item (Category/Alias Routing -> Station Name/Code/Type -> Fallback)
+    const itemStationMap = {};
+    for (const item of tenantCatalogRouting) {
+        const catName = (item.categoryName || '').trim().toLowerCase();
+        const rawItemStation = (item.kitchenStation || '').trim();
+        const rawItemStationLower = rawItemStation.toLowerCase();
+        // Match by category name or station alias in assignedCategories (excluding 'all' wildcard)
+        const matchedByCategory = effectiveStations.find((st) => (st.assignedCategories || []).some((c) => {
+            const cLow = c.trim().toLowerCase();
+            return (cLow !== 'all' &&
+                (cLow === catName || (rawItemStationLower !== '' && cLow === rawItemStationLower)));
+        }));
+        if (matchedByCategory) {
+            itemStationMap[item.id] = resolveFailoverStation(matchedByCategory);
+            continue;
+        }
+        // Match by station display name, code, or BAR station type
+        const matchedByName = effectiveStations.find((st) => st.name.trim().toLowerCase() === rawItemStationLower ||
+            st.code.trim().toLowerCase() === rawItemStationLower ||
+            (st.stationType === 'BAR' &&
+                (rawItemStationLower.includes('bar') || rawItemStationLower.includes('beverage'))));
+        if (matchedByName) {
+            itemStationMap[item.id] = resolveFailoverStation(matchedByName);
+        }
+        else {
+            itemStationMap[item.id] = {
+                stationName: rawItemStation || 'Main Kitchen',
+                stationCode: null,
+                isFailover: false,
+                originalStationName: rawItemStation || 'Main Kitchen',
+            };
+        }
+    }
     return {
         branches: accessibleBranches,
         activeBranch,
@@ -119,6 +203,8 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId) => {
             rewardValue: Number(r.rewardValue),
         })),
         itemAvailability: unavailableItems,
+        kitchenStations: effectiveStations,
+        itemStationMap,
     };
 };
 exports.getPosTerminalContext = getPosTerminalContext;

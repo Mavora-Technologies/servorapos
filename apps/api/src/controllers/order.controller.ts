@@ -1,14 +1,39 @@
 // apps/api/src/controllers/order.controller.ts
 import { Response } from 'express';
+import { eq, and } from 'drizzle-orm';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { db } from '../config/db';
+import { users } from '../config/schema';
 import * as orderRepo from '../repositories/order.repository';
 import { listOrdersQuerySchema } from '../validators/order.validator';
 
+const resolveAuthenticatedUserId = async (req: AuthRequest): Promise<number | null> => {
+  const rawId =
+    (req.user as any)?.userId ??
+    (req.user as any)?.id ??
+    (req.user as any)?.sub ??
+    null;
+
+  if (rawId && !isNaN(Number(rawId))) {
+    return Number(rawId);
+  }
+
+  if (req.user?.email && req.user?.tenantId) {
+    const [u] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(and(eq(users.tenantId, req.user.tenantId), eq(users.email, req.user.email)))
+      .limit(1);
+    return u?.id ?? null;
+  }
+
+  return null;
+};
 
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const cashierId = (req.user as any)?.userId ?? (req.user as any)?.id ?? null;
+    const cashierId = await resolveAuthenticatedUserId(req);
 
     const {
       branchId,
@@ -16,6 +41,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       cashierShiftId,
       customerId,
       orderType,
+      targetStation,
       subtotal,
       discountTotal,
       tax,
@@ -31,6 +57,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       customerPhone,
       buyerKraPin,
       paymentMethod,
+      notes,
     } = req.body;
 
     const effectiveBranchId =
@@ -44,11 +71,12 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       tenantId,
       {
         branchId: effectiveBranchId,
-        cashierId: cashierId ? Number(cashierId) : null,
+        cashierId,
         cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
         cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
         customerId: customerId ? Number(customerId) : null,
         orderType,
+        targetStation,
         subtotal,
         discountTotal,
         tax,
@@ -63,6 +91,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
         customerPhone,
         buyerKraPin,
         paymentMethod,
+        notes,
       },
       items
     );
@@ -88,13 +117,14 @@ export const getOpenOrders = async (req: AuthRequest, res: Response): Promise<vo
 export const updateStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
+    const userId = await resolveAuthenticatedUserId(req);
     const id = req.params.id as string;
     const { status } = req.body;
 
-    await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status);
+    await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status, userId);
     res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
   } catch (error: any) {
-    res.status(400).json({ status: 'error', message: 'Failed to update order status' });
+    res.status(400).json({ status: 'error', message: error.message || 'Failed to update order status' });
   }
 };
 

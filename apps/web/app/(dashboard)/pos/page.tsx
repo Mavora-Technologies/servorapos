@@ -18,7 +18,6 @@ import {
   Layers,
   ShoppingCart,
   Smartphone,
-  AlertCircle,
   Wallet,
   Unlock,
   Percent,
@@ -36,6 +35,8 @@ import {
   UserCheck,
   Gift,
   Lock,
+  ChefHat,
+  ArrowRight,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -131,6 +132,26 @@ interface ItemAvailabilityFlag {
   remainingCount: number | null;
 }
 
+interface KitchenStationOption {
+  id: number;
+  branchId: number;
+  name: string;
+  code: string;
+  stationType: string;
+  colorHex: string;
+  targetPrepTimeMinutes: number;
+  assignedCategories: string[];
+  backupStationId: number | null;
+  isActive: boolean;
+}
+
+interface ItemStationMapping {
+  stationName: string;
+  stationCode: string | null;
+  isFailover: boolean;
+  originalStationName: string;
+}
+
 interface MenuItem {
   id: string;
   name: string;
@@ -144,6 +165,7 @@ interface MenuItem {
 interface CartItem extends MenuItem {
   cartItemId: string;
   quantity: number;
+  targetStation?: string;
   modifiers?: string[];
   notes?: string;
 }
@@ -205,6 +227,7 @@ interface ReceiptTemplate {
   showOrderType: boolean;
   showItemSku: boolean;
   showItemModifiers: boolean;
+  showKitchenNotes?: boolean;
   showTaxSummary: boolean;
   showEtimsQrCode: boolean;
   showFiscalDeviceSerial: boolean;
@@ -245,12 +268,16 @@ export default function POSPage() {
   const [activeShift, setActiveShift] = useState<ActiveCashierShift | null>(null);
   const [custodianGuardrails, setCustodianGuardrails] = useState<CustodianGuardrails | null>(null);
 
-  // Catalog & Availability Matrix
+  // Catalog, Availability & Prep Station Routing Matrix
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>(['All']);
   const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedStationFilter, setSelectedStationFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [availabilityMap, setAvailabilityMap] = useState<Record<number, ItemAvailabilityFlag>>({});
+  const [kitchenStations, setKitchenStations] = useState<KitchenStationOption[]>([]);
+  const [itemStationMap, setItemStationMap] = useState<Record<number, ItemStationMapping>>({});
+  const [orderTargetStation, setOrderTargetStation] = useState<string>('AUTO');
 
   // CRM Customer & Loyalty Engine States
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
@@ -302,121 +329,128 @@ export default function POSPage() {
   // Completed Receipt State
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
-  const loadInitialData = useCallback(async (overrideBranchId?: number) => {
-    try {
-      setIsLoading(true);
-      const savedBranchId =
-        overrideBranchId ||
-        (typeof window !== 'undefined'
-          ? Number(localStorage.getItem('servora_active_branch_id')) || undefined
-          : undefined);
+  const loadInitialData = useCallback(
+    async (overrideBranchId?: number) => {
+      try {
+        setIsLoading(true);
+        const savedBranchId =
+          overrideBranchId ||
+          (typeof window !== 'undefined'
+            ? Number(localStorage.getItem('servora_active_branch_id')) || undefined
+            : undefined);
 
-      const branchParam = savedBranchId ? `?branchId=${savedBranchId}` : '';
+        const branchParam = savedBranchId ? `?branchId=${savedBranchId}` : '';
 
-      const [
-        authRes,
-        posContextRes,
-        menuRes,
-        tablesRes,
-        serviceModelsRes,
-        finRes,
-        receiptRes,
-      ] = await Promise.all([
-        fetchApi('/api/v1/auth/me').catch(() => null),
-        fetchApi(`/api/v1/pos/context${branchParam}`).catch(() => null),
-        fetchApi(`/api/v1/menu/active${branchParam}`).catch(() => ({ data: { items: [], categories: [] } })),
-        fetchApi(`/api/v1/restaurant/tables${branchParam}`).catch(() => ({ data: [] })),
-        fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
-        fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
-        fetchApi('/api/v1/settings/receipts').catch(() => ({ data: [] })),
-      ]);
+        const [
+          authRes,
+          posContextRes,
+          menuRes,
+          tablesRes,
+          serviceModelsRes,
+          finRes,
+          receiptRes,
+        ] = await Promise.all([
+          fetchApi('/api/v1/auth/me').catch(() => null),
+          fetchApi(`/api/v1/pos/context${branchParam}`).catch(() => null),
+          fetchApi(`/api/v1/menu/active${branchParam}`).catch(() => ({
+            data: { items: [], categories: [] },
+          })),
+          fetchApi(`/api/v1/restaurant/tables${branchParam}`).catch(() => ({ data: [] })),
+          fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
+          fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
+          fetchApi('/api/v1/settings/receipts').catch(() => ({ data: [] })),
+        ]);
 
-      if (authRes?.data) {
-        setBusiness(authRes.data.business);
-        if (authRes.data.user) setCurrentUser(authRes.data.user);
-      }
-
-      if (posContextRes?.data) {
-        const ctx = posContextRes.data;
-        setBranches(ctx.branches || []);
-        setActiveBranch(ctx.activeBranch || authRes?.data?.branch || null);
-        if (ctx.activeBranch && typeof window !== 'undefined') {
-          localStorage.setItem('servora_active_branch_id', String(ctx.activeBranch.id));
+        if (authRes?.data) {
+          setBusiness(authRes.data.business);
+          if (authRes.data.user) setCurrentUser(authRes.data.user);
         }
 
-        setDrawers(ctx.drawers || []);
-        setActiveShift(ctx.activeShift || null);
-        setCustodianGuardrails(ctx.custodianGuardrails || null);
-        setLoyaltyRewards(ctx.loyaltyRewards || []);
+        if (posContextRes?.data) {
+          const ctx = posContextRes.data;
+          setBranches(ctx.branches || []);
+          setActiveBranch(ctx.activeBranch || authRes?.data?.branch || null);
+          if (ctx.activeBranch && typeof window !== 'undefined') {
+            localStorage.setItem('servora_active_branch_id', String(ctx.activeBranch.id));
+          }
 
-        // Auto-select assigned drawer or first open drawer
-        if (ctx.custodianGuardrails?.cashDrawerId) {
-          setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
-        } else if (ctx.drawers?.length > 0 && !selectedDrawerId) {
-          const openDrawer = ctx.drawers.find((d: CashDrawerOption) => d.status === 'OPEN');
-          setSelectedDrawerId(String((openDrawer || ctx.drawers[0]).id));
+          setDrawers(ctx.drawers || []);
+          setActiveShift(ctx.activeShift || null);
+          setCustodianGuardrails(ctx.custodianGuardrails || null);
+          setLoyaltyRewards(ctx.loyaltyRewards || []);
+          setKitchenStations(ctx.kitchenStations || []);
+          setItemStationMap(ctx.itemStationMap || {});
+
+          // Auto-select assigned drawer or first open drawer
+          if (ctx.custodianGuardrails?.cashDrawerId) {
+            setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
+          } else if (ctx.drawers?.length > 0 && !selectedDrawerId) {
+            const openDrawer = ctx.drawers.find((d: CashDrawerOption) => d.status === 'OPEN');
+            setSelectedDrawerId(String((openDrawer || ctx.drawers[0]).id));
+          }
+
+          // Build 86'd / low-stock lookup map
+          const availLookup: Record<number, ItemAvailabilityFlag> = {};
+          for (const flag of ctx.itemAvailability || []) {
+            availLookup[flag.menuItemId] = flag;
+          }
+          setAvailabilityMap(availLookup);
+        } else if (authRes?.data?.branch) {
+          setActiveBranch(authRes.data.branch);
         }
 
-        // Build 86'd / low-stock lookup map
-        const availLookup: Record<number, ItemAvailabilityFlag> = {};
-        for (const flag of ctx.itemAvailability || []) {
-          availLookup[flag.menuItemId] = flag;
+        if (menuRes?.data?.items?.length > 0) {
+          setMenuItems(menuRes.data.items);
+          setCategories(['All', ...(menuRes.data.categories || [])]);
+        } else {
+          // Fallback to /api/v1/menu/items if /active route wasn't matched
+          const fallbackRes = await fetchApi(`/api/v1/menu/items${branchParam}`).catch(() => null);
+          const rawItems = fallbackRes?.data?.items || fallbackRes?.data || [];
+          if (Array.isArray(rawItems) && rawItems.length > 0) {
+            const normalized = rawItems.map((i: any) => ({
+              id: String(i.id),
+              name: i.name,
+              category: i.categoryName || i.category?.name || i.category || 'Menu',
+              price: Number(i.price || 0),
+              isAvailable: i.isAvailable !== false,
+              sku: i.sku,
+              image: i.imageUrl || i.image,
+            }));
+            const uniqueCats = Array.from(new Set(normalized.map((i: any) => i.category))) as string[];
+            setMenuItems(normalized);
+            setCategories(['All', ...uniqueCats]);
+          }
         }
-        setAvailabilityMap(availLookup);
-      } else if (authRes?.data?.branch) {
-        setActiveBranch(authRes.data.branch);
-      }
 
-      if (menuRes?.data?.items?.length > 0) {
-        setMenuItems(menuRes.data.items);
-        setCategories(['All', ...(menuRes.data.categories || [])]);
-      } else {
-        // Fallback to /api/v1/menu/items if /active route wasn't matched
-        const fallbackRes = await fetchApi(`/api/v1/menu/items${branchParam}`).catch(() => null);
-        const rawItems = fallbackRes?.data?.items || fallbackRes?.data || [];
-        if (Array.isArray(rawItems) && rawItems.length > 0) {
-          const normalized = rawItems.map((i: any) => ({
-            id: String(i.id),
-            name: i.name,
-            category: i.categoryName || i.category?.name || i.category || 'Menu',
-            price: Number(i.price || 0),
-            isAvailable: i.isAvailable !== false,
-            sku: i.sku,
-            image: i.imageUrl || i.image,
-          }));
-          const uniqueCats = Array.from(new Set(normalized.map((i: any) => i.category))) as string[];
-          setMenuItems(normalized);
-          setCategories(['All', ...uniqueCats]);
+        if (tablesRes?.data) {
+          setTables(tablesRes.data);
         }
-      }
 
-      if (tablesRes?.data) {
-        setTables(tablesRes.data);
-      }
+        if (serviceModelsRes?.data && Array.isArray(serviceModelsRes.data)) {
+          const activeOnly = serviceModelsRes.data.filter((m: ServiceModel) => m.isActive);
+          setServiceModels(activeOnly);
+          const defaultModel =
+            activeOnly.find((m: ServiceModel) => m.type === 'DINE_IN') || activeOnly[0];
+          if (defaultModel) setActiveServiceModel(defaultModel);
+        }
 
-      if (serviceModelsRes?.data && Array.isArray(serviceModelsRes.data)) {
-        const activeOnly = serviceModelsRes.data.filter((m: ServiceModel) => m.isActive);
-        setServiceModels(activeOnly);
-        const defaultModel =
-          activeOnly.find((m: ServiceModel) => m.type === 'DINE_IN') || activeOnly[0];
-        if (defaultModel) setActiveServiceModel(defaultModel);
-      }
+        if (finRes?.data?.settings) {
+          setFinancialSettings(finRes.data.settings);
+        }
 
-      if (finRes?.data?.settings) {
-        setFinancialSettings(finRes.data.settings);
+        if (receiptRes?.data && Array.isArray(receiptRes.data)) {
+          const defaultTpl =
+            receiptRes.data.find((t: ReceiptTemplate) => (t as any).isDefault) || receiptRes.data[0];
+          if (defaultTpl) setReceiptTemplate(defaultTpl);
+        }
+      } catch (error) {
+        console.warn('POS: Initializing terminal state.', error);
+      } finally {
+        setIsLoading(false);
       }
-
-      if (receiptRes?.data && Array.isArray(receiptRes.data)) {
-        const defaultTpl =
-          receiptRes.data.find((t: ReceiptTemplate) => (t as any).isDefault) || receiptRes.data[0];
-        if (defaultTpl) setReceiptTemplate(defaultTpl);
-      }
-    } catch (error) {
-      console.warn('POS: Initializing terminal state.', error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [selectedDrawerId]);
+    },
+    [selectedDrawerId]
+  );
 
   useEffect(() => {
     loadInitialData();
@@ -451,6 +485,8 @@ export default function POSPage() {
     if (!idNum) return;
     setSelectedTableId('');
     setSelectedDrawerId('');
+    setSelectedStationFilter('ALL');
+    setOrderTargetStation('AUTO');
     loadInitialData(idNum);
   };
 
@@ -498,27 +534,71 @@ export default function POSPage() {
 
   const currencySymbol = business?.currency || financialSettings?.baseCurrency || 'KES';
 
+  // Unique station names available for catalog filtering
+  const availableStationNames = useMemo(() => {
+    const names = new Set<string>();
+    kitchenStations.forEach((st) => {
+      if (st.isActive) names.add(st.name);
+    });
+    Object.values(itemStationMap).forEach((m) => {
+      if (m?.stationName) names.add(m.stationName);
+    });
+    return Array.from(names).sort();
+  }, [kitchenStations, itemStationMap]);
+
+  // Resolve effective KDS target station for any catalog or cart item
+  const getEffectiveItemStation = useCallback(
+    (item: { id: string; targetStation?: string }) => {
+      if (orderTargetStation !== 'AUTO') {
+        return {
+          stationName: orderTargetStation,
+          isRedirected: true,
+          isFailover: false,
+        };
+      }
+      if (item.targetStation) {
+        return {
+          stationName: item.targetStation,
+          isRedirected: true,
+          isFailover: false,
+        };
+      }
+      const mapped = itemStationMap[Number(item.id)];
+      return {
+        stationName: mapped?.stationName || 'Main Kitchen',
+        isRedirected: false,
+        isFailover: mapped?.isFailover || false,
+      };
+    },
+    [orderTargetStation, itemStationMap]
+  );
+
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
+      const itemStation = itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
+      const matchesStation =
+        selectedStationFilter === 'ALL' || itemStation === selectedStationFilter;
       const matchesSearch =
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchesCategory && matchesSearch && item.isAvailable;
+      return matchesCategory && matchesStation && matchesSearch && item.isAvailable;
     });
-  }, [menuItems, selectedCategory, searchQuery]);
+  }, [menuItems, selectedCategory, selectedStationFilter, itemStationMap, searchQuery]);
 
   const addToCart = (item: MenuItem) => {
     const flag = availabilityMap[Number(item.id)];
     if (flag?.is86ed) return;
 
     setCart((prev) => {
-      const existing = prev.find((c) => c.id === item.id);
+      const existing = prev.find((c) => c.id === item.id && !c.notes && !c.targetStation);
       if (existing) {
         if (flag?.remainingCount !== null && flag?.remainingCount !== undefined) {
           if (existing.quantity >= flag.remainingCount) return prev;
         }
-        return prev.map((c) => (c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c));
+        return prev.map((c) =>
+          c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
+        );
       }
       return [
         ...prev,
@@ -551,11 +631,37 @@ export default function POSPage() {
       setSelectedTableId('');
       handleClearLoyaltyCustomer();
       setOrderDiscountPercent(0);
+      setOrderTargetStation('AUTO');
       setAppliedPromo(null);
       setPromoError(null);
       setGuestCount(1);
     }
   };
+
+  // Group active cart items by resolved KDS station for checkout preview
+  const stationRoutingPreview = useMemo(() => {
+    const grouped: Record<
+      string,
+      { stationName: string; unitsCount: number; isRedirected: boolean; isFailover: boolean }
+    > = {};
+
+    for (const item of cart) {
+      const resolved = getEffectiveItemStation(item);
+      if (!grouped[resolved.stationName]) {
+        grouped[resolved.stationName] = {
+          stationName: resolved.stationName,
+          unitsCount: 0,
+          isRedirected: resolved.isRedirected,
+          isFailover: resolved.isFailover,
+        };
+      }
+      grouped[resolved.stationName].unitsCount += item.quantity;
+      if (resolved.isRedirected) grouped[resolved.stationName].isRedirected = true;
+      if (resolved.isFailover) grouped[resolved.stationName].isFailover = true;
+    }
+
+    return Object.values(grouped);
+  }, [cart, getEffectiveItemStation]);
 
   // Real-Time Enterprise Financial & Loyalty Calculations
   const calculations = useMemo(() => {
@@ -667,7 +773,7 @@ export default function POSPage() {
     return 0;
   }, [paymentMethod, cashTendered, splitCashAmount, splitMpesaAmount, calculations.grandTotal]);
 
-  // Safe Drop Alert Telemetry Check (Checks Active Shift + Custodian Max Cash Limit)
+  // Safe Drop Alert Telemetry Check
   const isSafeDropWarning = useMemo(() => {
     if (!financialSettings?.enableSafeDropAlerts) return false;
     const currentBalance =
@@ -716,7 +822,7 @@ export default function POSPage() {
         });
       }
 
-      // 2. Post Order & Tender Settlement
+      // 2. Post Order, Tender Settlement & Station Routing Manifest
       const result = await fetchApi('/api/v1/orders', {
         method: 'POST',
         body: JSON.stringify({
@@ -733,6 +839,7 @@ export default function POSPage() {
           buyerKraPin: buyerKraPin.trim() || undefined,
           guestCount: activeServiceModel?.promptGuestCount ? guestCount : undefined,
           promoCode: appliedPromo?.code,
+          targetStation: orderTargetStation !== 'AUTO' ? orderTargetStation : undefined,
           subtotal: calculations.netAmount,
           tax: calculations.vatAmount,
           cateringLevy: calculations.levyAmount,
@@ -755,6 +862,9 @@ export default function POSPage() {
             unitPrice: i.price,
             totalPrice: i.price * i.quantity,
             sku: i.sku,
+            targetStation:
+              orderTargetStation !== 'AUTO' ? orderTargetStation : i.targetStation,
+            notes: i.notes,
           })),
         }),
       });
@@ -784,15 +894,23 @@ export default function POSPage() {
               result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
             notes: `POS Tender for ${customerName || 'Guest'}`,
           }),
-        }).catch(() => { });
+        }).catch(() => {});
       }
+
+      const dispatchedStations = Array.from(
+        new Set(stationRoutingPreview.map((s) => s.stationName))
+      );
 
       const generatedReceipt = {
         ...(result?.data || {}),
         orderNumber:
           result?.data?.orderNumber ||
           `INV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
-        items: [...cart],
+        items: cart.map((item) => ({
+          ...item,
+          resolvedStation: getEffectiveItemStation(item).stationName,
+        })),
+        dispatchedStations,
         ...calculations,
         paymentMethod,
         cashTendered:
@@ -809,8 +927,8 @@ export default function POSPage() {
         loyaltyTier: selectedCustomer?.tierName || null,
         loyaltyPointsBalance: selectedCustomer
           ? selectedCustomer.currentPoints -
-          (selectedReward?.pointsCost || 0) +
-          calculations.estimatedPointsEarned
+            (selectedReward?.pointsCost || 0) +
+            calculations.estimatedPointsEarned
           : null,
         servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
         drawerName: selectedDrawerObj?.name || 'Main Till',
@@ -832,6 +950,7 @@ export default function POSPage() {
 
       setCompletedOrder(generatedReceipt);
       setCart([]);
+      setOrderTargetStation('AUTO');
       setAppliedPromo(null);
       setSelectedReward(null);
       setOrderDiscountPercent(0);
@@ -1025,9 +1144,7 @@ export default function POSPage() {
               title="Blind Custody Active — Manage Shift"
             >
               <Unlock size={13} className="text-emerald-600" />
-              <span>
-                Shift #{activeShift.id} &bull; Active
-              </span>
+              <span>Shift #{activeShift.id} &bull; Active</span>
             </Link>
           )}
 
@@ -1045,15 +1162,21 @@ export default function POSPage() {
       <div className="flex lg:hidden bg-white p-1 rounded-xl border border-gray-200 shadow-xs shrink-0">
         <button
           onClick={() => setMobileTab('menu')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${mobileTab === 'menu' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
-            }`}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
+            mobileTab === 'menu'
+              ? 'bg-servora-navy text-white shadow-xs'
+              : 'text-gray-500 hover:text-servora-navy'
+          }`}
         >
           <Layers size={15} /> Catalog ({filteredItems.length})
         </button>
         <button
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${mobileTab === 'cart' ? 'bg-servora-navy text-white shadow-xs' : 'text-gray-500 hover:text-servora-navy'
-            }`}
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
+            mobileTab === 'cart'
+              ? 'bg-servora-navy text-white shadow-xs'
+              : 'text-gray-500 hover:text-servora-navy'
+          }`}
         >
           <ShoppingCart size={15} /> Current Order
           {totalItemsCount > 0 && (
@@ -1066,15 +1189,19 @@ export default function POSPage() {
 
       {/* MAIN SPLIT-VIEW VIEWPORT */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
-        {/* LEFT COLUMN: ITEM CATALOG & LOOKUP */}
+        {/* LEFT COLUMN: ITEM CATALOG & STATION LOOKUP */}
         <div
-          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
-            }`}
+          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
+            mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
+          }`}
         >
           <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 min-w-[200px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+                <Search
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                  size={15}
+                />
                 <input
                   type="text"
                   placeholder="Scan SKU or search dishes, beverages..."
@@ -1083,6 +1210,25 @@ export default function POSPage() {
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
                 />
               </div>
+
+              {/* Station Filter Dropdown */}
+              {availableStationNames.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
+                  <ChefHat size={13} className="text-servora-core" />
+                  <select
+                    value={selectedStationFilter}
+                    onChange={(e) => setSelectedStationFilter(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+                  >
+                    <option value="ALL">All Stations</option>
+                    {availableStationNames.map((stName) => (
+                      <option key={stName} value={stName}>
+                        {stName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Table assignment selector for Dine-in orders */}
               {activeServiceModel?.requiresTable && (
@@ -1103,7 +1249,8 @@ export default function POSPage() {
                           value={t.id}
                           disabled={isOccupied && !isCurrentlySelected}
                         >
-                          {t.tableLabel} ({t.status}) {isOccupied && !isCurrentlySelected ? '— In Use' : ''}
+                          {t.tableLabel} ({t.status}){' '}
+                          {isOccupied && !isCurrentlySelected ? '— In Use' : ''}
                         </option>
                       );
                     })}
@@ -1118,10 +1265,11 @@ export default function POSPage() {
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${selectedCategory === cat
-                    ? 'bg-servora-navy text-white shadow-xs'
-                    : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
-                    }`}
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    selectedCategory === cat
+                      ? 'bg-servora-navy text-white shadow-xs'
+                      : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
+                  }`}
                 >
                   {cat}
                 </button>
@@ -1129,7 +1277,7 @@ export default function POSPage() {
             </div>
           </div>
 
-          {/* Product Cards Grid with 86'd & Low-Stock Telemetry */}
+          {/* Product Cards Grid with 86'd, Low-Stock & Station Routing Telemetry */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
@@ -1139,7 +1287,9 @@ export default function POSPage() {
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400">
                 <Utensils size={40} className="mb-2 opacity-25" />
                 <p className="text-sm font-bold text-servora-navy">No products available</p>
-                <p className="text-xs text-gray-400">Refine search criteria or check menu configuration.</p>
+                <p className="text-xs text-gray-400">
+                  Refine search criteria or check menu configuration.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
@@ -1147,16 +1297,18 @@ export default function POSPage() {
                   const flag = availabilityMap[Number(item.id)];
                   const is86ed = flag?.is86ed === true;
                   const lowCount = flag?.remainingCount;
+                  const mappedStation = itemStationMap[Number(item.id)];
 
                   return (
                     <button
                       key={item.id}
                       onClick={() => addToCart(item)}
                       disabled={is86ed}
-                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-28 justify-between group ${is86ed
-                        ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
-                        : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
-                        }`}
+                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
+                        is86ed
+                          ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
+                          : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
+                      }`}
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
@@ -1177,12 +1329,21 @@ export default function POSPage() {
                           {item.name}
                         </span>
                       </div>
-                      <div className="flex justify-between items-center pt-1 border-t border-gray-50">
-                        <span className="text-xs font-mono font-bold text-servora-core">
-                          {currencySymbol} {item.price.toLocaleString()}
-                        </span>
-                        <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors">
-                          <Plus size={11} />
+
+                      <div className="space-y-1 pt-1 border-t border-gray-50">
+                        <div className="flex items-center gap-1 text-[9.5px] font-mono text-gray-500 truncate">
+                          <ChefHat size={10} className="text-servora-core shrink-0" />
+                          <span className="truncate">
+                            {mappedStation?.stationName || 'Main Kitchen'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-mono font-bold text-servora-core">
+                            {currencySymbol} {item.price.toLocaleString()}
+                          </span>
+                          <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors">
+                            <Plus size={11} />
+                          </div>
                         </div>
                       </div>
                     </button>
@@ -1193,10 +1354,11 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: ACTIVE CHECK, CRM LOYALTY & FISCAL LEDGER */}
+        {/* RIGHT COLUMN: ACTIVE CHECK, STATION ROUTING, CRM LOYALTY & FISCAL LEDGER */}
         <div
-          className={`w-full lg:w-[440px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
-            }`}
+          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
+            mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
+          }`}
         >
           {/* Dynamic Service Model Revenue Center Selectors */}
           <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
@@ -1208,10 +1370,11 @@ export default function POSPage() {
                   <button
                     key={model.id}
                     onClick={() => setActiveServiceModel(model)}
-                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${isSelected
-                      ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
-                      : 'text-gray-500 hover:text-servora-navy'
-                      }`}
+                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                      isSelected
+                        ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
+                        : 'text-gray-500 hover:text-servora-navy'
+                    }`}
                   >
                     <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
                     <span className="truncate">{model.name}</span>
@@ -1223,6 +1386,29 @@ export default function POSPage() {
             )}
           </div>
 
+          {/* Order-Wide KDS Prep Station Routing Bar */}
+          {kitchenStations.length > 0 && (
+            <div className="px-3 py-2 bg-blue-50/40 border-b border-gray-200 flex items-center justify-between gap-2 text-xs shrink-0">
+              <span className="font-bold text-servora-navy flex items-center gap-1.5">
+                <ChefHat size={13} className="text-servora-core" /> KDS Routing:
+              </span>
+              <select
+                value={orderTargetStation}
+                onChange={(e) => setOrderTargetStation(e.target.value)}
+                className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
+              >
+                <option value="AUTO">Auto-Route by Item / Category</option>
+                {kitchenStations
+                  .filter((s) => s.isActive)
+                  .map((st) => (
+                    <option key={st.id} value={st.name}>
+                      Redirect All &rarr; {st.name} ({st.code})
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+
           {/* CRM Member Lookup & Guest Identity Section */}
           <div className="p-3 border-b border-gray-200 bg-white space-y-2 shrink-0 text-xs">
             {activeServiceModel?.requiresTable && (
@@ -1231,7 +1417,8 @@ export default function POSPage() {
                   <Utensils size={13} /> Seating Assignment:
                 </span>
                 <span>
-                  {tables.find((t) => String(t.id) === selectedTableId)?.tableLabel || '⚠️ Table Required'}
+                  {tables.find((t) => String(t.id) === selectedTableId)?.tableLabel ||
+                    '⚠️ Table Required'}
                 </span>
               </div>
             )}
@@ -1239,7 +1426,10 @@ export default function POSPage() {
             {/* CRM & Loyalty Directory Search Bar */}
             {!selectedCustomer ? (
               <div className="relative">
-                <Award className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500" size={14} />
+                <Award
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500"
+                  size={14}
+                />
                 <input
                   type="text"
                   placeholder="Lookup CRM / Loyalty Member by phone, name, or PIN..."
@@ -1403,7 +1593,10 @@ export default function POSPage() {
               {!appliedPromo ? (
                 <>
                   <div className="relative flex-1">
-                    <Tag className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={12} />
+                    <Tag
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={12}
+                    />
                     <input
                       type="text"
                       placeholder="Promo Code (e.g. BRUNCH20)"
@@ -1440,7 +1633,7 @@ export default function POSPage() {
             {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
           </div>
 
-          {/* Cart Itemized List */}
+          {/* Cart Itemized List with Per-Item Station Override & Prep Note */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -1449,37 +1642,98 @@ export default function POSPage() {
                 <p className="text-[11px] text-gray-400">Select dishes or beverages from catalog</p>
               </div>
             ) : (
-              cart.map((item) => (
-                <div
-                  key={item.cartItemId}
-                  className="flex items-center justify-between bg-slate-50/60 border border-gray-200 p-2.5 rounded-xl shadow-xs"
-                >
-                  <div className="flex-1 pr-2">
-                    <h4 className="text-xs font-bold text-servora-navy line-clamp-1">{item.name}</h4>
-                    <p className="text-[11px] font-mono font-bold text-servora-core">
-                      {currencySymbol} {(item.price * item.quantity).toLocaleString()}
-                    </p>
-                  </div>
+              cart.map((item) => {
+                const defaultSt =
+                  itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
+                const resolvedSt = getEffectiveItemStation(item);
 
-                  <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-gray-200 shadow-xs">
-                    <button
-                      onClick={() => updateQuantity(item.cartItemId, -1)}
-                      className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
-                    >
-                      {item.quantity === 1 ? <Trash2 size={12} /> : <Minus size={12} />}
-                    </button>
-                    <span className="text-xs font-bold text-servora-navy w-5 text-center font-mono">
-                      {item.quantity}
-                    </span>
-                    <button
-                      onClick={() => updateQuantity(item.cartItemId, 1)}
-                      className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer"
-                    >
-                      <Plus size={12} />
-                    </button>
+                return (
+                  <div
+                    key={item.cartItemId}
+                    className="bg-slate-50/70 border border-gray-200 p-2.5 rounded-xl shadow-xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 pr-2">
+                        <h4 className="text-xs font-bold text-servora-navy line-clamp-1">
+                          {item.name}
+                        </h4>
+                        <p className="text-[11px] font-mono font-bold text-servora-core">
+                          {currencySymbol} {(item.price * item.quantity).toLocaleString()}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-gray-200 shadow-xs">
+                        <button
+                          onClick={() => updateQuantity(item.cartItemId, -1)}
+                          className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                        >
+                          {item.quantity === 1 ? <Trash2 size={12} /> : <Minus size={12} />}
+                        </button>
+                        <span className="text-xs font-bold text-servora-navy w-5 text-center font-mono">
+                          {item.quantity}
+                        </span>
+                        <button
+                          onClick={() => updateQuantity(item.cartItemId, 1)}
+                          className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer"
+                        >
+                          <Plus size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Per-Item KDS Station Redirect & Kitchen Note */}
+                    <div className="flex items-center gap-1.5 pt-1 border-t border-gray-100">
+                      <select
+                        value={
+                          orderTargetStation !== 'AUTO'
+                            ? orderTargetStation
+                            : item.targetStation || ''
+                        }
+                        disabled={orderTargetStation !== 'AUTO'}
+                        onChange={(e) => {
+                          const val = e.target.value || undefined;
+                          setCart((prev) =>
+                            prev.map((c) =>
+                              c.cartItemId === item.cartItemId ? { ...c, targetStation: val } : c
+                            )
+                          );
+                        }}
+                        title="Redirect this item to a specific kitchen/bar station"
+                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${
+                          resolvedSt.isRedirected
+                            ? 'bg-amber-50 border-amber-300 text-amber-800'
+                            : 'bg-white border-gray-200 text-servora-navy'
+                        }`}
+                      >
+                        <option value="">Default ({defaultSt})</option>
+                        {kitchenStations
+                          .filter((s) => s.isActive)
+                          .map((st) => (
+                            <option key={st.id} value={st.name}>
+                              &rarr; {st.name}
+                            </option>
+                          ))}
+                      </select>
+
+                      <input
+                        type="text"
+                        placeholder="+ Prep note..."
+                        value={item.notes || ''}
+                        onChange={(e) =>
+                          setCart((prev) =>
+                            prev.map((c) =>
+                              c.cartItemId === item.cartItemId
+                                ? { ...c, notes: e.target.value }
+                                : c
+                            )
+                          )
+                        }
+                        className="flex-1 min-w-[80px] bg-white border border-gray-200 rounded-md px-2 py-0.5 text-[10px] text-gray-700 focus:outline-none focus:border-servora-core"
+                      />
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -1544,7 +1798,7 @@ export default function POSPage() {
 
               {calculations.discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>Total Discounts & Rewards</span>
+                  <span>Total Discounts &amp; Rewards</span>
                   <span className="font-mono">
                     -{currencySymbol}{' '}
                     {calculations.discountAmount.toLocaleString(undefined, {
@@ -1595,13 +1849,15 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* TENDER SETTLEMENT MODAL */}
+      {/* TENDER SETTLEMENT & STATION ROUTING MODAL */}
       {isPaymentModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-servora-navy">Tender Settlement & Routing</h3>
+                <h3 className="text-sm font-bold text-servora-navy">
+                  Tender Settlement &amp; KDS Routing
+                </h3>
                 <p className="text-[11px] text-gray-500">
                   {activeBranch?.name || 'Outlet'} &bull;{' '}
                   {selectedDrawerObj?.name || 'Register'} &bull;{' '}
@@ -1631,15 +1887,41 @@ export default function POSPage() {
               </span>
             </div>
 
+            {/* KDS Prep Station Dispatch Preview */}
+            {stationRoutingPreview.length > 0 && (
+              <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl space-y-1.5 text-xs">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-servora-navy flex items-center gap-1">
+                  <ChefHat size={12} className="text-servora-core" /> KDS Prep Station Dispatch
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {stationRoutingPreview.map((st) => (
+                    <span
+                      key={st.stationName}
+                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-mono font-bold border inline-flex items-center gap-1 ${
+                        st.isRedirected || st.isFailover
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-white text-servora-navy border-gray-200'
+                      }`}
+                    >
+                      <ArrowRight size={10} className="text-servora-core" />
+                      {st.stationName}: {st.unitsCount} item(s)
+                      {st.isRedirected ? ' (Redirected)' : st.isFailover ? ' (Failover)' : ''}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-4 gap-1.5">
               {(['Cash', 'M-Pesa', 'Card', 'Split'] as PaymentMethod[]).map((method) => (
                 <button
                   key={method}
                   onClick={() => setPaymentMethod(method)}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${paymentMethod === method
-                    ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
-                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                    paymentMethod === method
+                      ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
                 >
                   {method}
                 </button>
@@ -1738,7 +2020,7 @@ export default function POSPage() {
               ) : (
                 <>
                   <CheckCircle size={15} />
-                  Authorize Transaction & Generate Thermal Slip
+                  Authorize Transaction &amp; Route to KDS
                 </>
               )}
             </button>
@@ -1751,8 +2033,9 @@ export default function POSPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
           <div
             id="thermal-receipt-printable"
-            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
-              }`}
+            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
+              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
+            }`}
           >
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
               <div className="text-center space-y-0.5">
@@ -1781,6 +2064,11 @@ export default function POSPage() {
                 <p className="text-[10px]">
                   {completedOrder.timestamp} &bull; {completedOrder.tableName}
                 </p>
+                {completedOrder.dispatchedStations?.length > 0 && (
+                  <p className="text-[9.5px] font-bold">
+                    KDS Stations: {completedOrder.dispatchedStations.join(', ')}
+                  </p>
+                )}
               </div>
 
               <div className="dashed-divider"></div>
@@ -1816,13 +2104,18 @@ export default function POSPage() {
 
               <div className="space-y-1">
                 {completedOrder.items.map((i: any) => (
-                  <div key={i.cartItemId} className="flex-between text-[11px]">
-                    <span className="font-bold max-w-[70%] break-words">
-                      {i.quantity}x {i.name}
-                    </span>
-                    <span className="font-bold whitespace-nowrap">
-                      {(i.price * i.quantity).toLocaleString()}
-                    </span>
+                  <div key={i.cartItemId} className="space-y-0.5">
+                    <div className="flex-between text-[11px]">
+                      <span className="font-bold max-w-[70%] break-words">
+                        {i.quantity}x {i.name}
+                      </span>
+                      <span className="font-bold whitespace-nowrap">
+                        {(i.price * i.quantity).toLocaleString()}
+                      </span>
+                    </div>
+                    {receiptTemplate?.showKitchenNotes && i.notes && (
+                      <p className="text-[9.5px] italic pl-2">* {i.notes}</p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1831,7 +2124,7 @@ export default function POSPage() {
 
               <div className="space-y-1 text-[11px]">
                 <div className="flex-between">
-                  <span>Net Food & Beverage:</span>
+                  <span>Net Food &amp; Beverage:</span>
                   <span>
                     {currencySymbol}{' '}
                     {completedOrder.netAmount.toLocaleString(undefined, {

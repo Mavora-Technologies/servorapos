@@ -34,13 +34,34 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getOnlineOrders = exports.getOrderDetail = exports.getOrders = exports.getTakeawayOrders = exports.updateStatus = exports.getOpenOrders = exports.createOrder = void 0;
+const drizzle_orm_1 = require("drizzle-orm");
+const db_1 = require("../config/db");
+const schema_1 = require("../config/schema");
 const orderRepo = __importStar(require("../repositories/order.repository"));
 const order_validator_1 = require("../validators/order.validator");
+const resolveAuthenticatedUserId = async (req) => {
+    const rawId = req.user?.userId ??
+        req.user?.id ??
+        req.user?.sub ??
+        null;
+    if (rawId && !isNaN(Number(rawId))) {
+        return Number(rawId);
+    }
+    if (req.user?.email && req.user?.tenantId) {
+        const [u] = await db_1.db
+            .select({ id: schema_1.users.id })
+            .from(schema_1.users)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.users.tenantId, req.user.tenantId), (0, drizzle_orm_1.eq)(schema_1.users.email, req.user.email)))
+            .limit(1);
+        return u?.id ?? null;
+    }
+    return null;
+};
 const createOrder = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const cashierId = req.user?.userId ?? req.user?.id ?? null;
-        const { branchId, cashDrawerId, cashierShiftId, customerId, orderType, subtotal, discountTotal, tax, cateringLevy, serviceCharge, packingCharge, total, cashTendered, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod, } = req.body;
+        const cashierId = await resolveAuthenticatedUserId(req);
+        const { branchId, cashDrawerId, cashierShiftId, customerId, orderType, targetStation, subtotal, discountTotal, tax, cateringLevy, serviceCharge, packingCharge, total, cashTendered, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod, notes, } = req.body;
         const effectiveBranchId = branchId !== undefined && branchId !== null
             ? Number(branchId)
             : req.user?.defaultBranchId
@@ -48,11 +69,12 @@ const createOrder = async (req, res) => {
                 : null;
         const order = await orderRepo.createOrderRecord(tenantId, {
             branchId: effectiveBranchId,
-            cashierId: cashierId ? Number(cashierId) : null,
+            cashierId,
             cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
             cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
             customerId: customerId ? Number(customerId) : null,
             orderType,
+            targetStation,
             subtotal,
             discountTotal,
             tax,
@@ -67,6 +89,7 @@ const createOrder = async (req, res) => {
             customerPhone,
             buyerKraPin,
             paymentMethod,
+            notes,
         }, items);
         res.status(201).json({ status: 'success', data: order });
     }
@@ -91,13 +114,14 @@ exports.getOpenOrders = getOpenOrders;
 const updateStatus = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
+        const userId = await resolveAuthenticatedUserId(req);
         const id = req.params.id;
         const { status } = req.body;
-        await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status);
+        await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status, userId);
         res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: 'Failed to update order status' });
+        res.status(400).json({ status: 'error', message: error.message || 'Failed to update order status' });
     }
 };
 exports.updateStatus = updateStatus;

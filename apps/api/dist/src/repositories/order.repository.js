@@ -39,6 +39,7 @@ const createOrderRecord = async (tenantId, data, items) => {
             serviceCharge: serviceCharge.toFixed(2),
             total: total.toFixed(2),
             amountPaid: isPaid ? total.toFixed(2) : '0.00',
+            notes: data.notes ?? null,
             inventoryDeducted: false,
         })
             .returning();
@@ -204,12 +205,75 @@ const createOrderRecord = async (tenantId, data, items) => {
                 }
             }
         }
-        // 4. Insert Order Items & Execute Recipe/BOM Stock Deductions
+        // 4. Resolve Station Routing (Order Override -> Line Override -> Branch Category Routing -> Menu Item Station + Failover)
+        const [branchStations, catalogItems] = await Promise.all([
+            tx
+                .select()
+                .from(schema_1.kitchenStations)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.kitchenStations.tenantId, tenantId), data.branchId ? (0, drizzle_orm_1.eq)(schema_1.kitchenStations.branchId, Number(data.branchId)) : undefined)),
+            tx
+                .select({
+                id: schema_1.menuItems.id,
+                name: schema_1.menuItems.name,
+                kitchenStation: schema_1.menuItems.kitchenStation,
+                categoryName: schema_1.menuCategories.name,
+            })
+                .from(schema_1.menuItems)
+                .leftJoin(schema_1.menuCategories, (0, drizzle_orm_1.eq)(schema_1.menuItems.categoryId, schema_1.menuCategories.id))
+                .where((0, drizzle_orm_1.eq)(schema_1.menuItems.tenantId, tenantId)),
+        ]);
+        const stationById = new Map(branchStations.map((s) => [s.id, s]));
+        const catalogById = new Map(catalogItems.map((m) => [m.id, m]));
+        const applyFailover = (stationName) => {
+            const matched = branchStations.find((s) => s.name.trim().toLowerCase() === stationName.trim().toLowerCase());
+            if (matched && !matched.isActive && matched.backupStationId) {
+                const backup = stationById.get(matched.backupStationId);
+                if (backup && backup.isActive) {
+                    return {
+                        resolvedName: backup.name,
+                        stationCode: backup.code,
+                        wasFailover: true,
+                    };
+                }
+            }
+            return {
+                resolvedName: matched ? matched.name : stationName,
+                stationCode: matched?.code || null,
+                wasFailover: false,
+            };
+        };
+        const stationRoutingManifest = [];
+        // 5. Insert Order Items with Station Routing Tag & Execute Recipe/BOM Stock Deductions
         for (const item of items) {
             const quantity = Number(item.quantity) || 1;
             const unitPrice = Number(item.price || item.unitPrice) || 0;
             const totalPrice = quantity * unitPrice;
             const menuItemId = parseInt(String(item.menuItemId || item.id), 10);
+            const catalogEntry = !isNaN(menuItemId) ? catalogById.get(menuItemId) : undefined;
+            // Determine default station from branch category routing or menu item
+            let defaultStation = catalogEntry?.kitchenStation || 'Main Kitchen';
+            if (catalogEntry?.categoryName) {
+                const catLower = catalogEntry.categoryName.trim().toLowerCase();
+                const catStation = branchStations.find((st) => (st.assignedCategories || []).some((c) => c.trim().toLowerCase() === catLower));
+                if (catStation)
+                    defaultStation = catStation.name;
+            }
+            // Check order-wide or line-specific station redirect from POS
+            const requestedStation = (data.targetStation && String(data.targetStation).trim()) ||
+                (item.targetStation && String(item.targetStation).trim()) ||
+                defaultStation;
+            const { resolvedName, stationCode, wasFailover } = applyFailover(requestedStation);
+            const wasRedirected = resolvedName.trim().toLowerCase() !== defaultStation.trim().toLowerCase();
+            const cleanPrepNote = item.notes ? String(item.notes).trim() : '';
+            const encodedNotes = `[STATION:${resolvedName}]${cleanPrepNote ? ` ${cleanPrepNote}` : ''}`;
+            stationRoutingManifest.push({
+                itemName: item.name || catalogEntry?.name || `Item #${menuItemId}`,
+                quantity,
+                routedStation: resolvedName,
+                stationCode,
+                wasRedirected,
+                wasFailover,
+            });
             await tx
                 .insert(schema_1.orderItems)
                 .values({
@@ -219,6 +283,8 @@ const createOrderRecord = async (tenantId, data, items) => {
                 quantity: quantity.toFixed(2),
                 unitPrice: unitPrice.toFixed(2),
                 totalPrice: totalPrice.toFixed(2),
+                kitchenStatus: 'New',
+                notes: encodedNotes,
             })
                 .returning();
             if (!isNaN(menuItemId)) {
@@ -268,7 +334,24 @@ const createOrderRecord = async (tenantId, data, items) => {
             }
         }
         await tx.update(schema_1.orders).set({ inventoryDeducted: true }).where((0, drizzle_orm_1.eq)(schema_1.orders.id, newOrder.id));
-        return newOrder;
+        await tx.insert(schema_1.auditLogs).values({
+            tenantId,
+            branchId: data.branchId ?? null,
+            userId: data.cashierId ?? null,
+            action: 'POS_ORDER_ROUTED_TO_STATIONS',
+            module: 'POS',
+            entityType: 'orders',
+            entityId: String(newOrder.id),
+            reason: `Order ${orderNumber} routed across ${Array.from(new Set(stationRoutingManifest.map((r) => r.routedStation))).join(', ')}`,
+            newValues: {
+                orderNumber,
+                stationRoutingManifest,
+            },
+        });
+        return {
+            ...newOrder,
+            stationRouting: stationRoutingManifest,
+        };
     });
 };
 exports.createOrderRecord = createOrderRecord;
@@ -388,6 +471,7 @@ const fetchOrderDetailById = async (tenantId, orderId) => {
         quantity: schema_1.orderItems.quantity,
         unitPrice: schema_1.orderItems.unitPrice,
         totalPrice: schema_1.orderItems.totalPrice,
+        routedStation: (0, drizzle_orm_1.sql) `NULLIF(SUBSTRING(${schema_1.orderItems.notes} FROM '\\[STATION:([^\\]]+)\\]'), '')`,
         notes: schema_1.orderItems.notes,
     })
         .from(schema_1.orderItems)
@@ -421,10 +505,10 @@ const fetchOpenOrders = async (tenantId, branchId) => {
         .leftJoin(schema_1.branches, (0, drizzle_orm_1.eq)(schema_1.orders.branchId, schema_1.branches.id))
         .leftJoin(schema_1.users, (0, drizzle_orm_1.eq)(schema_1.orders.cashierId, schema_1.users.id))
         .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), branchId ? (0, drizzle_orm_1.eq)(schema_1.orders.branchId, branchId) : undefined, (0, drizzle_orm_1.inArray)(schema_1.orders.status, ['Confirmed', 'Preparing', 'Ready', 'Sent-To-Kitchen'])))
-        .orderBy((0, drizzle_orm_1.asc)(schema_1.orders.createdAt)); // Oldest active tickets first (FIFO kitchen queue)
+        .orderBy((0, drizzle_orm_1.asc)(schema_1.orders.createdAt));
 };
 exports.fetchOpenOrders = fetchOpenOrders;
-const updateOrderStatus = async (tenantId, orderId, status) => {
+const updateOrderStatus = async (tenantId, orderId, status, userId = null) => {
     return await db_1.db.transaction(async (tx) => {
         const [updatedOrder] = await tx
             .update(schema_1.orders)
@@ -439,6 +523,18 @@ const updateOrderStatus = async (tenantId, orderId, status) => {
                 updatedAt: new Date(),
             })
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantTables.id, updatedOrder.tableId), (0, drizzle_orm_1.eq)(schema_1.restaurantTables.tenantId, tenantId)));
+        }
+        if (updatedOrder) {
+            await tx.insert(schema_1.auditLogs).values({
+                tenantId,
+                branchId: updatedOrder.branchId ?? null,
+                userId,
+                action: `ORDER_STATUS_${status.toUpperCase()}`,
+                module: 'POS',
+                entityType: 'orders',
+                entityId: String(orderId),
+                reason: `Order ${updatedOrder.orderNumber} updated to ${status}`,
+            });
         }
         return updatedOrder;
     });
