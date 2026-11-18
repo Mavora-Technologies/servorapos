@@ -1,28 +1,80 @@
-import Link from "next/link";
-import Header from "../../components/layout/Header";
-import Footer from "../../components/layout/Footer";
+// apps/web/app/hardware-pos/page.tsx
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import Header from '../../components/layout/Header';
+import Footer from '../../components/layout/Footer';
+import { buildPageMetadata } from '@/lib/seo';
+import { JsonLd, buildBreadcrumbSchema, buildFaqSchema } from '@/components/seo/JsonLd';
+
+export const metadata: Metadata = buildPageMetadata({
+  title: 'POS Hardware, Touch Terminals & Thermal Printers in Kenya | Servora',
+  description:
+    'Turnkey POS hardware procurement and installation in Nairobi, Kenya by Mavora Technologies. Touchscreen POS terminals, 80mm thermal printers, RJ11 cash drawers, and KDS displays built for Servora.',
+  path: '/hardware-pos',
+  keywords: [
+    'POS Hardware Kenya',
+    'Touch POS Terminals Nairobi',
+    'Thermal Receipt Printers Kenya',
+    'Cash Drawers for Restaurants Nairobi',
+    'Kitchen Display System Hardware',
+    'Servora POS Hardware Bundles',
+  ],
+});
+
+const HARDWARE_FAQS = [
+  {
+    question: 'Does Mavora Technologies supply and install POS hardware in Kenya?',
+    answer:
+      'Yes. Mavora Technologies sources, configures, quality-tests, and installs touchscreen POS terminals, 80mm/58mm thermal receipt printers, RJ11 cash drawers, barcode scanners, and Kitchen Display System (KDS) screens across Nairobi and Kenya.',
+  },
+  {
+    question: 'Can Servora run on existing restaurant tablets or Windows terminals?',
+    answer:
+      'Yes. Servora is a cloud-based web application compatible with Windows POS terminals, Android tablets, iPads, and standard desktop browsers, supporting ESC/POS thermal printers and standard network or USB peripherals.',
+  },
+];
 
 export default function HardwarePosPage() {
   return (
     <div className="flex flex-col min-h-screen w-full bg-servora-pale text-servora-navy selection:bg-servora-teal selection:text-white overflow-x-hidden">
+      <JsonLd
+        data={[
+          buildBreadcrumbSchema([
+            { name: 'Home', path: '/' },
+            { name: 'Hardware & POS', path: '/hardware-pos' },
+          ]),
+          buildFaqSchema(HARDWARE_FAQS),
+        ]}
+      />
       <Header />
 
       <main className="flex-grow w-full">
-        
         {/* --- HERO SECTION --- */}
-        <section className="relative overflow-hidden pt-16 pb-16 sm:pt-20 sm:pb-24 w-full px-4 sm:px-8 lg:px-16 bg-white border-b border-gray-100">
+        <section className="relative overflow-hidden pt-12 pb-16 sm:pt-16 sm:pb-24 w-full px-4 sm:px-8 lg:px-16 bg-white border-b border-gray-100">
           <div className="w-full max-w-5xl mx-auto flex flex-col items-center text-center">
+            <nav aria-label="Breadcrumb" className="mb-4 text-xs text-servora-deepTeal">
+              <ol className="inline-flex items-center gap-1.5">
+                <li>
+                  <Link href="/" className="hover:text-servora-core font-semibold">
+                    Home
+                  </Link>
+                </li>
+                <li>/</li>
+                <li className="font-bold text-servora-navy">POS Hardware &amp; Terminals</li>
+              </ol>
+            </nav>
+
             <span className="text-servora-teal font-bold tracking-wider uppercase text-xs mb-3">
-              Reliable Hospitality Hardware & Procurement
+              Reliable Hospitality Hardware &amp; Procurement
             </span>
             <h1 className="w-full text-3xl font-extrabold tracking-tight text-servora-navy sm:text-4xl lg:text-5xl leading-[1.15]">
-              Enterprise-Grade POS Hardware & <br className="hidden sm:inline" />
+              Enterprise-Grade POS Hardware &amp;{' '}
               <span className="bg-gradient-to-r from-servora-core via-servora-bright to-servora-teal bg-clip-text text-transparent">
                 Peripherals for Kenya
               </span>
             </h1>
             <p className="mt-6 max-w-3xl text-base sm:text-lg leading-relaxed text-servora-deepTeal">
-              Equip your restaurant, bar, café, or cloud kitchen with high-speed touch terminals, thermal receipt printers, secure cash drawers, and offline-ready POS setups.
+              Equip your hotel F&amp;B outlet, restaurant, bar, café, or cloud kitchen with high-speed touch terminals, thermal receipt printers, secure cash drawers, and KDS displays configured by Mavora Technologies.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
               <Link
@@ -46,33 +98,39 @@ export default function HardwarePosPage() {
           <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
             <div className="lg:col-span-2">
               <span className="inline-flex items-center rounded-md bg-servora-teal/20 px-2.5 py-1 text-xs font-semibold text-servora-teal ring-1 ring-inset ring-servora-teal/30 mb-3">
-                Full-Service Procurement & Outsourcing
+                Full-Service Procurement &amp; Outsourcing
               </span>
               <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-3">
-                We Outsource & Source Custom Hardware For You
+                We Source, Configure &amp; Install Custom POS Hardware For You
               </h2>
               <p className="text-xs sm:text-sm text-servora-pale/80 leading-relaxed max-w-2xl">
-                Don’t have time to navigate suppliers or worry about compatibility? Mavora Technologies sources, imports, tests, and configures all required POS hardware, thermal printers, barcode scanners, and kitchen display tablets specifically tailored to your venue’s footprint.
+                Avoid incompatible drivers and unverified suppliers. Mavora Technologies Ltd sources, imports, stress-tests, and configures all POS terminals, 80mm thermal printers, barcode scanners, and kitchen display tablets specifically tailored to your venue’s layout.
               </p>
             </div>
             <div className="flex flex-col sm:flex-row lg:flex-col gap-3 justify-end">
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
                 <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
-                <span className="text-xs font-medium text-white">Custom Vendor Sourcing & Imports</span>
+                <span className="text-xs font-medium text-white">Custom Vendor Sourcing &amp; Imports</span>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
                 <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
-                <span className="text-xs font-medium text-white">Pre-Configured & Quality Tested</span>
+                <span className="text-xs font-medium text-white">Pre-Configured &amp; Quality Tested</span>
               </div>
               <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
                 <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
-                <span className="text-xs font-medium text-white">On-Site Installation in Kenya</span>
+                <span className="text-xs font-medium text-white">On-Site Installation Across Kenya</span>
               </div>
             </div>
           </div>
@@ -82,17 +140,20 @@ export default function HardwarePosPage() {
         <section className="py-16 sm:py-24 w-full px-4 sm:px-8 lg:px-16">
           <div className="w-full max-w-7xl mx-auto">
             <div className="text-center max-w-2xl mx-auto mb-16">
-              <h2 className="text-xs font-bold text-servora-teal uppercase tracking-widest">Optimized for Servora POS</h2>
-              <p className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">Recommended Hardware Bundles</p>
+              <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
+                Optimized for Servora POS
+              </span>
+              <h2 className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">
+                Recommended Hospitality Hardware Bundles
+              </h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              
               {/* Item 1 */}
               <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
                   <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </div>
@@ -102,17 +163,23 @@ export default function HardwarePosPage() {
                   </p>
                   <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
                       <span>Splash-proof front bezel</span>
                     </li>
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
                       <span>Integrated customer display option</span>
                     </li>
                   </ul>
                 </div>
                 <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">In Stock / Sourced On Demand</span>
+                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
+                    In Stock / Sourced On Demand
+                  </span>
                 </div>
               </div>
 
@@ -120,27 +187,33 @@ export default function HardwarePosPage() {
               <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
                   <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
                     </svg>
                   </div>
                   <h3 className="text-lg font-bold text-servora-navy mb-2">Thermal Receipt Printers</h3>
                   <p className="text-xs text-servora-deepTeal leading-relaxed mb-6">
-                    High-speed 80mm and 58mm thermal printers for instant customer receipts and kitchen tickets (KDS fallback).
+                    High-speed 80mm and 58mm thermal printers for instant fiscal customer receipts and kitchen order tickets.
                   </p>
                   <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
-                      <span>Ethernet, USB, & Wi-Fi connectivity</span>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>Ethernet, USB, &amp; Wi-Fi connectivity</span>
                     </li>
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
-                      <span>Auto-cutter with audio buzzer</span>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>Auto-cutter with kitchen audio buzzer</span>
                     </li>
                   </ul>
                 </div>
                 <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">In Stock / Sourced On Demand</span>
+                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
+                    In Stock / Sourced On Demand
+                  </span>
                 </div>
               </div>
 
@@ -148,35 +221,62 @@ export default function HardwarePosPage() {
               <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
                   <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                     </svg>
                   </div>
                   <h3 className="text-lg font-bold text-servora-navy mb-2">Secure Cash Drawers</h3>
                   <p className="text-xs text-servora-deepTeal leading-relaxed mb-6">
-                    Heavy-duty steel cash drawers with RJ11/12 printer kick interfaces for secure shift reconciliation and cash management.
+                    Heavy-duty steel cash drawers with RJ11/12 printer kick interfaces for secure shift reconciliation and cash custody.
                   </p>
                   <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
                       <span>5 bill slots / 8 coin compartments</span>
                     </li>
                     <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7"/></svg>
+                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
                       <span>3-position key lock security</span>
                     </li>
                   </ul>
                 </div>
                 <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">In Stock / Sourced On Demand</span>
+                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
+                    In Stock / Sourced On Demand
+                  </span>
                 </div>
               </div>
-
             </div>
           </div>
         </section>
 
-        {/* --- CALL TO ACTION BANNER (Clean Corporate Card Style) --- */}
+        {/* --- HARDWARE FAQS --- */}
+        <section className="py-16 w-full bg-white border-t border-gray-100 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-2xl font-bold text-servora-navy text-center mb-8">
+              POS Hardware &amp; Compatibility Questions
+            </h2>
+            <div className="space-y-4">
+              {HARDWARE_FAQS.map((faq) => (
+                <article
+                  key={faq.question}
+                  className="rounded-2xl bg-servora-pale border border-gray-200 p-6"
+                >
+                  <h3 className="text-base font-bold text-servora-navy">{faq.question}</h3>
+                  <p className="mt-2 text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                    {faq.answer}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* --- CALL TO ACTION BANNER --- */}
         <section className="py-16 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
           <div className="w-full max-w-7xl mx-auto rounded-2xl bg-white p-8 sm:p-12 border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
             <div>
@@ -187,7 +287,7 @@ export default function HardwarePosPage() {
                 Need Us to Handle Your Hardware Procurement?
               </h2>
               <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed max-w-xl">
-                Contact our team to outline your outlet’s technical brief. We will procure, configure, and install everything on-site.
+                Contact our Kilimani team via WhatsApp to outline your outlet’s technical brief. We will procure, configure, and install everything on-site.
               </p>
             </div>
 
@@ -201,7 +301,6 @@ export default function HardwarePosPage() {
             </div>
           </div>
         </section>
-
       </main>
 
       <Footer />

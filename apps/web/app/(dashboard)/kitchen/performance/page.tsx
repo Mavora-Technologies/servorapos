@@ -671,4 +671,4 @@ export default function KitchenPerformancePage() {
       )}
     </div>
   );
-}
+} 

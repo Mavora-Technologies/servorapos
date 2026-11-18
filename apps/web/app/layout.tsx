@@ -1,114 +1,90 @@
-import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
+// apps/web/app/layout.tsx
+import type { Metadata, Viewport } from 'next';
+import { Inter } from 'next/font/google';
+import './globals.css';
+import { SITE_CONFIG } from '@/lib/seo';
+import { JsonLd, getGlobalEntityGraph } from '@/components/seo/JsonLd';
 
-// Configure Inter (Google Font) for a standard corporate SaaS aesthetic
 const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
 });
 
 export const viewport: Viewport = {
-  themeColor: "#041F56", // Servora Primary Navy
-  width: "device-width",
+  themeColor: '#041F56',
+  width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://servora.co"),
+  metadataBase: new URL(SITE_CONFIG.url),
   title: {
-    template: "%s | Servora POS by Mavora Technologies",
-    default: "Servora POS | Best Restaurant Management & POS Software in Kenya",
+    default: 'Hotel & Restaurant Management System | Servora Kenya',
+    template: '%s | Servora',
   },
-  description: "Servora is a premium cloud-based restaurant operations and Point of Sale (POS) platform by Mavora Technologies. Seamlessly manage multi-branch orders, inventory, recipe costing, KDS, and M-Pesa payments in Kenya.",
-  keywords: [
-    // Local & Regional High-Intent Keywords (Kenya / East Africa)
-    "Best restaurant POS in Kenya",
-    "Point of sale system Nairobi",
-    "M-Pesa POS integration for restaurants",
-    "Restaurant management software Kenya",
-    "Bar and restaurant POS software Nairobi",
-    "Cloud kitchen software Kenya",
-    "Hotel POS system East Africa",
-    // Core Functional Keywords
-    "Multi-branch restaurant software",
-    "Kitchen display system KDS",
-    "Recipe and food costing software",
-    "Offline-aware restaurant POS",
-    "Inventory management for restaurants",
-    "Table and floor management POS",
-    "Cashier shift reconciliation software",
-    // Brand & Corporate Keywords
-    "Mavora Technologies",
-    "Servora POS",
-    "Servora restaurant platform"
-  ],
-  authors: [{ name: "Mavora Technologies", url: "https://servora.co" }],
-  creator: "Mavora Technologies",
-  publisher: "Mavora Technologies",
+  description:
+    'Manage hotel and restaurant operations with Servora. Streamline reservations, POS sales, orders, inventory, payments and reporting through one integrated hospitality platform.',
+  applicationName: SITE_CONFIG.name,
+  authors: [{ name: SITE_CONFIG.parentCompany.name, url: SITE_CONFIG.parentCompany.url }],
+  creator: SITE_CONFIG.parentCompany.name,
+  publisher: SITE_CONFIG.parentCompany.name,
   formatDetection: {
     email: false,
     address: false,
     telephone: false,
   },
-  // Advanced GEO & Regional Targeting Tags for Search Engines & AI Crawlers
   other: {
-    "geo.region": "KE",
-    "geo.placename": "Nairobi",
-    "geo.position": "-1.2921;36.8219",
-    "ICBM": "-1.2921, 36.8219",
-    "distribution": "global",
-    "rating": "general",
+    'geo.region': 'KE',
+    'geo.placename': 'Nairobi',
+    'geo.position': '-1.2921;36.8219',
+    ICBM: '-1.2921, 36.8219',
   },
   robots: {
     index: true,
     follow: true,
-    nocache: false,
     googleBot: {
       index: true,
       follow: true,
-      noimageindex: false,
-      "max-video-preview": -1,
-      "max-image-preview": "large",
-      "max-snippet": -1,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
     },
   },
   openGraph: {
-    title: "Servora POS | Simplify Service. Grow Smarter.",
-    description: "The premium restaurant operations and POS platform for modern hospitality businesses in Kenya and beyond. Featuring M-Pesa integration and real-time inventory tracking.",
-    url: "https://servora.co",
-    siteName: "Servora POS",
+    type: 'website',
+    url: SITE_CONFIG.url,
+    siteName: SITE_CONFIG.name,
+    locale: SITE_CONFIG.locale,
+    title: 'Hotel & Restaurant Management System | Servora Kenya',
+    description:
+      'Simplify hotel and restaurant operations with Servora by Mavora Technologies.',
     images: [
       {
-        url: "/android-chrome-512x512.jpg", 
+        url: SITE_CONFIG.ogImage,
         width: 512,
         height: 512,
-        alt: "Servora POS Logo - Mavora Technologies",
+        alt: 'Servora Hotel & Restaurant Management Platform by Mavora Technologies',
       },
     ],
-    locale: "en_KE",
-    type: "website",
   },
   twitter: {
-    card: "summary_large_image",
-    title: "Servora POS | Simplify Service. Grow Smarter.",
-    description: "The premium restaurant operations and POS platform for modern hospitality businesses built by Mavora Technologies.",
-    images: ["/android-chrome-512x512.jpg"], 
+    card: 'summary_large_image',
+    title: 'Hotel & Restaurant Management System | Servora',
+    description:
+      'Integrated hotel and restaurant management software by Mavora Technologies.',
+    images: [SITE_CONFIG.ogImage],
   },
   icons: {
     icon: [
-      { url: "/favicon.ico" }, 
-      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" }, 
-      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" }, 
+      { url: '/favicon.ico' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
     ],
-    apple: [
-      { url: "/apple-touch-icon.png" }, 
-    ],
+    apple: [{ url: '/apple-touch-icon.png' }],
     other: [
-      { url: "/android-chrome-192x192.png", sizes: "192x192", type: "image/png" }, 
-      { url: "/android-chrome-512x512.jpg", sizes: "512x512", type: "image/jpeg" }, 
+      { url: '/android-chrome-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/android-chrome-512x512.jpg', sizes: '512x512', type: 'image/jpeg' },
     ],
   },
 };
@@ -118,94 +94,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Advanced Schema.org JSON-LD for GEO (Generative Engine Optimization) & Rich Snippets
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
-        "@type": "SoftwareApplication",
-        "name": "Servora POS",
-        "operatingSystem": "Cloud-based, Web, PWA, iOS, Android",
-        "applicationCategory": "BusinessApplication",
-        "genre": "Restaurant Point of Sale & Operations Management Software",
-        "description": "A premium multi-tenant restaurant operations and POS platform built by Mavora Technologies, featuring M-Pesa integration, inventory tracking, kitchen display system (KDS), and offline resilience.",
-        "softwareVersion": "1.0",
-        "releaseNotes": "https://servora.co/changelog",
-        "countriesSupported": "KE, Global",
-        "provider": {
-          "@type": "Organization",
-          "name": "Mavora Technologies",
-          "url": "https://servora.co",
-          "logo": "https://servora.co/logo.png",
-          "address": {
-            "@type": "PostalAddress",
-            "addressLocality": "Nairobi",
-            "addressCountry": "KE"
-          },
-          "contactPoint": {
-            "@type": "ContactPoint",
-            "contactType": "Customer Support",
-            "areaServed": "KE",
-            "availableLanguage": ["English", "Swahili"]
-          }
-        },
-        "offers": {
-          "@type": "AggregateOffer",
-          "priceCurrency": "KES",
-          "lowPrice": "0",
-          "offerCount": "3"
-        }
-      },
-      {
-        "@type": "LocalBusiness",
-        "name": "Mavora Technologies / Servora POS",
-        "image": "https://servora.co/logo.png",
-        "@id": "https://servora.co",
-        "url": "https://servora.co",
-        "telephone": "+254700000000",
-        "address": {
-          "@type": "PostalAddress",
-          "addressLocality": "Nairobi",
-          "addressCountry": "KE"
-        },
-        "geo": {
-          "@type": "GeoCoordinates",
-          "latitude": -1.2921,
-          "longitude": 36.8219
-        },
-        "openingHoursSpecification": {
-          "@type": "OpeningHoursSpecification",
-          "dayOfWeek": [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-            "Sunday"
-          ],
-          "opens": "00:00",
-          "closes": "23:59"
-        },
-        "sameAs": [
-          "https://github.com/mavoratech"
-        ]
-      }
-    ]
-  };
-
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} h-full antialiased`}
-    >
+    <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <head>
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
+        <JsonLd data={getGlobalEntityGraph()} />
       </head>
-      <body className={`${inter.className} min-h-full flex flex-col bg-servora-pale text-servora-navy text-sm selection:bg-servora-bright selection:text-white`}>
+      <body
+        className={`${inter.className} min-h-full flex flex-col bg-servora-pale text-servora-navy text-sm selection:bg-servora-bright selection:text-white`}
+      >
         {children}
       </body>
     </html>

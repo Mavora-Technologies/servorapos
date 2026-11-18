@@ -1,3 +1,4 @@
+// apps/web/components/layout/Header.tsx
 "use client";
 
 import { useState } from "react";
@@ -46,7 +47,7 @@ export default function Header() {
           </Link>
 
           {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-8 text-xs font-semibold text-servora-navy">
+          <nav className="hidden md:flex items-center gap-7 text-xs font-semibold text-servora-navy">
             <Link href="/features" className="hover:text-servora-core transition-colors py-2 relative after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-servora-core hover:after:w-full after:transition-all">
               Features
             </Link>
@@ -78,6 +79,10 @@ export default function Header() {
                     <p className="text-xs font-bold text-servora-navy group-hover:text-servora-core">Restaurants & Cafés</p>
                     <p className="text-[11px] text-servora-deepTeal mt-0.5">High-speed table service, split billing & modifier management.</p>
                   </Link>
+                  <Link href="/solutions/hotels" className="group rounded-xl p-3 hover:bg-servora-pale transition-colors">
+                    <p className="text-xs font-bold text-servora-navy group-hover:text-servora-core">Hotel F&B & Outlets</p>
+                    <p className="text-[11px] text-servora-deepTeal mt-0.5">Multi-outlet dining, lounge billing & central store transfers.</p>
+                  </Link>
                   <Link href="/solutions/cloud-kitchens" className="group rounded-xl p-3 hover:bg-servora-pale transition-colors">
                     <p className="text-xs font-bold text-servora-navy group-hover:text-servora-core">Cloud Kitchens</p>
                     <p className="text-[11px] text-servora-deepTeal mt-0.5">Multi-channel order aggregation & dedicated kitchen display.</p>
@@ -90,9 +95,11 @@ export default function Header() {
               )}
             </div>
 
-            <Link href="/hardware-pos" className="hover:text-servora-core transition-colors py-2">Hardware & POS</Link>
+            <Link href="/hospitality-software-kenya" className="hover:text-servora-core transition-colors py-2">Kenya & EA</Link>
+            <Link href="/resources" className="hover:text-servora-core transition-colors py-2">Resources</Link>
+            <Link href="/hardware-pos" className="hover:text-servora-core transition-colors py-2">Hardware</Link>
             <Link href="/pricing" className="hover:text-servora-core transition-colors py-2">Pricing</Link>
-            <Link href="/about" className="hover:text-servora-core transition-colors py-2">About Us</Link>
+            <Link href="/about" className="hover:text-servora-core transition-colors py-2">About</Link>
             <Link href="/contact" className="hover:text-servora-core transition-colors py-2">Contact</Link>
           </nav>
 
@@ -105,20 +112,20 @@ export default function Header() {
               Sign In
             </Link>
             <Link
-              href="/login"
+              href="/contact"
               className="flex h-10 items-center justify-center rounded-xl bg-servora-core px-6 text-xs font-bold text-white shadow-md shadow-servora-core/25 transition-all hover:bg-blue-700 hover:shadow-lg"
             >
-              Get Started Free
+              Book Demo
             </Link>
           </div>
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-3">
             <Link
-              href="/login"
+              href="/contact"
               className="flex h-8 items-center justify-center rounded-lg bg-servora-core px-3 text-xs font-bold text-white shadow-sm"
             >
-              Get Started
+              Demo
             </Link>
             
             <button
@@ -141,16 +148,13 @@ export default function Header() {
       {/* Revamped Corporate Mobile Slide-Over Drawer */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[99999] md:hidden">
-          {/* Backdrop Overlay with blur */}
           <div 
             className="fixed inset-0 bg-servora-navy/60 backdrop-blur-md transition-opacity animate-in fade-in duration-200"
             onClick={() => setMobileMenuOpen(false)}
           />
 
-          {/* Drawer Panel - Spanning ~70% with curved left edges */}
           <div className="fixed inset-y-0 right-0 w-[72%] sm:w-[48%] bg-white h-full shadow-2xl flex flex-col z-[100000] p-4 overflow-y-auto rounded-l-3xl animate-in slide-in-from-right duration-300">
             
-            {/* Corporate Header Section */}
             <div className="flex flex-col gap-2 pb-3 border-b border-gray-100 bg-white">
               <div className="flex items-center justify-between">
                 <Link href="/" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2">
@@ -179,10 +183,7 @@ export default function Header() {
               </div>
             </div>
 
-            {/* Drawer Navigation Pill Cards */}
             <nav className="flex flex-col space-y-2 pt-3.5 text-xs font-bold text-servora-navy bg-white">
-              
-              {/* Features */}
               <Link 
                 href="/features" 
                 onClick={() => setMobileMenuOpen(false)}
@@ -214,6 +215,9 @@ export default function Header() {
                     <Link href="/solutions/restaurants" onClick={() => setMobileMenuOpen(false)} className="py-1.5 px-2.5 rounded-lg bg-white hover:text-servora-core shadow-2xs truncate">
                       Restaurants & Cafés
                     </Link>
+                    <Link href="/solutions/hotels" onClick={() => setMobileMenuOpen(false)} className="py-1.5 px-2.5 rounded-lg bg-white hover:text-servora-core shadow-2xs truncate">
+                      Hotel F&B & Outlets
+                    </Link>
                     <Link href="/solutions/cloud-kitchens" onClick={() => setMobileMenuOpen(false)} className="py-1.5 px-2.5 rounded-lg bg-white hover:text-servora-core shadow-2xs truncate">
                       Cloud Kitchens
                     </Link>
@@ -224,7 +228,30 @@ export default function Header() {
                 )}
               </div>
 
-              {/* Hardware */}
+              <Link 
+                href="/hospitality-software-kenya" 
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-gray-100/80 bg-servora-pale/30 hover:bg-servora-core hover:text-white transition-all group shadow-2xs"
+              >
+                <div className="w-6 h-6 rounded-xl bg-white text-servora-core flex items-center justify-center shadow-2xs group-hover:bg-white/20 group-hover:text-white transition-colors flex-shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/></svg>
+                </div>
+                <span className="flex-grow truncate">Kenya & East Africa</span>
+                <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
+              </Link>
+
+              <Link 
+                href="/resources" 
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-2xl border border-gray-100/80 bg-servora-pale/30 hover:bg-servora-core hover:text-white transition-all group shadow-2xs"
+              >
+                <div className="w-6 h-6 rounded-xl bg-white text-servora-core flex items-center justify-center shadow-2xs group-hover:bg-white/20 group-hover:text-white transition-colors flex-shrink-0">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                </div>
+                <span className="flex-grow truncate">Resources & Guides</span>
+                <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
+              </Link>
+
               <Link 
                 href="/hardware-pos" 
                 onClick={() => setMobileMenuOpen(false)}
@@ -237,7 +264,6 @@ export default function Header() {
                 <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
               </Link>
 
-              {/* Pricing */}
               <Link 
                 href="/pricing" 
                 onClick={() => setMobileMenuOpen(false)}
@@ -250,7 +276,6 @@ export default function Header() {
                 <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
               </Link>
 
-              {/* About */}
               <Link 
                 href="/about" 
                 onClick={() => setMobileMenuOpen(false)}
@@ -263,7 +288,6 @@ export default function Header() {
                 <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
               </Link>
 
-              {/* Contact */}
               <Link 
                 href="/contact" 
                 onClick={() => setMobileMenuOpen(false)}
@@ -275,25 +299,16 @@ export default function Header() {
                 <span className="flex-grow truncate">Contact Sales</span>
                 <span className="text-gray-300 group-hover:text-white text-xs">&rsaquo;</span>
               </Link>
-
             </nav>
 
-            {/* Drawer Footer Actions */}
             <div className="border-t border-gray-100 pt-3 mt-auto flex flex-col gap-2 bg-white">
               <Link 
-                href="/login" 
+                href="/contact" 
                 onClick={() => setMobileMenuOpen(false)}
                 className="flex items-center justify-center gap-1.5 w-full py-3 rounded-2xl bg-gradient-to-r from-servora-core to-blue-700 text-white font-bold text-xs shadow-md transition-all hover:opacity-95 truncate px-2"
               >
-                <span>Get Started Free</span>
+                <span>Book a Live Demo</span>
                 <span>&rarr;</span>
-              </Link>
-              <Link 
-                href="/login" 
-                onClick={() => setMobileMenuOpen(false)}
-                className="block text-center w-full py-2.5 rounded-2xl border border-gray-200 font-bold text-xs text-servora-navy hover:border-servora-core transition-colors truncate px-2"
-              >
-                Sign In
               </Link>
             </div>
 

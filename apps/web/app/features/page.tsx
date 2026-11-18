@@ -1,35 +1,93 @@
-import Link from "next/link";
-import Header from "../../components/layout/Header";
-import Footer from "../../components/layout/Footer";
+// apps/web/app/features/page.tsx
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import Header from '../../components/layout/Header';
+import Footer from '../../components/layout/Footer';
+import { SITE_CONFIG, buildPageMetadata } from '@/lib/seo';
+import { JsonLd, buildBreadcrumbSchema, buildFaqSchema } from '@/components/seo/JsonLd';
+
+export const metadata: Metadata = buildPageMetadata({
+  title: 'Hospitality & Restaurant Management Features | POS, KDS, Inventory & M-Pesa',
+  description:
+    'Explore Servora features by Mavora Technologies: cloud restaurant POS, Kitchen Display System (KDS), recipe BOM costing, supplier procurement, M-Pesa Daraja payments, staff shifts, and multi-branch reporting.',
+  path: '/features',
+  keywords: [
+    'Hospitality Management Software Features',
+    'Restaurant POS System Kenya',
+    'Kitchen Display System KDS',
+    'Restaurant Recipe Costing Software',
+    'Hospitality Inventory Management',
+    'M-Pesa Integrated POS System',
+    'Multi-Branch Restaurant Management',
+  ],
+});
+
+const FEATURES_FAQS = [
+  {
+    question: 'Does Servora deduct ingredient inventory automatically when an order is sold?',
+    answer:
+      'Yes. Menu items in Servora link to Bill of Materials (BOM) recipes with exact ingredient quantities, unit conversions (such as grams to kilograms or milliliters to liters), and wastage percentages. Every POS sale automatically deducts ingredient stock and records an immutable stock movement.',
+  },
+  {
+    question: 'Can Servora route items from a single order to different kitchen and bar stations?',
+    answer:
+      'Yes. Servora supports multi-station Kitchen Display System (KDS) routing across Grill, Bar, Cold Pantry, Pastry, and Expediter screens, complete with target/warning/critical SLA timers, failover backup stations, and staff execution audit logs.',
+  },
+  {
+    question: 'How does Servora handle procurement and supplier deliveries?',
+    answer:
+      'Servora includes an end-to-end procurement workflow covering department purchase requests, supplier purchase orders (POs), goods received notes (GRNs) with accepted/rejected quantity checks, supplier invoices, and vendor returns.',
+  },
+];
 
 export default function FeaturesPage() {
   return (
     <div className="flex flex-col min-h-screen w-full bg-servora-pale text-servora-navy selection:bg-servora-teal selection:text-white overflow-x-hidden">
+      <JsonLd
+        data={[
+          buildBreadcrumbSchema([
+            { name: 'Home', path: '/' },
+            { name: 'Features', path: '/features' },
+          ]),
+          buildFaqSchema(FEATURES_FAQS),
+        ]}
+      />
       <Header />
 
       <main className="flex-grow w-full">
-        
-        {/* --- HERO SECTION --- */}
-        <section className="relative overflow-hidden pt-16 pb-16 sm:pt-20 sm:pb-24 w-full px-4 sm:px-8 lg:px-16 bg-white border-b border-gray-100">
+        {/* --- BREADCRUMB & HERO SECTION --- */}
+        <section className="relative overflow-hidden pt-12 pb-16 sm:pt-16 sm:pb-24 w-full px-4 sm:px-8 lg:px-16 bg-white border-b border-gray-100">
           <div className="w-full max-w-5xl mx-auto flex flex-col items-center text-center">
+            <nav aria-label="Breadcrumb" className="mb-4 text-xs text-servora-deepTeal">
+              <ol className="inline-flex items-center gap-1.5">
+                <li>
+                  <Link href="/" className="hover:text-servora-core font-semibold">
+                    Home
+                  </Link>
+                </li>
+                <li>/</li>
+                <li className="font-bold text-servora-navy">Platform Features</li>
+              </ol>
+            </nav>
+
             <span className="text-servora-teal font-bold tracking-wider uppercase text-xs mb-3">
-              Platform Capabilities
+              Unified Hospitality Operations Suite
             </span>
             <h1 className="w-full text-3xl font-extrabold tracking-tight text-servora-navy sm:text-4xl lg:text-5xl leading-[1.15]">
-              Engineered for Complete <br className="hidden sm:inline" />
+              Engineered for Complete{' '}
               <span className="bg-gradient-to-r from-servora-core via-servora-bright to-servora-teal bg-clip-text text-transparent">
-                Restaurant & POS Control
+                Hotel F&amp;B &amp; Restaurant Control
               </span>
             </h1>
             <p className="mt-6 max-w-3xl text-base sm:text-lg leading-relaxed text-servora-deepTeal">
-              Discover how Servora unifies front-of-house checkout, kitchen dispatch, stock room procurement, M-Pesa payments, and multi-branch management into a single cloud platform.
+              {SITE_CONFIG.canonicalBrandDefinition} Explore every integrated module connecting front-of-house service, culinary stations, stockrooms, finance, and workforce operations.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
               <Link
-                href="/login"
+                href="/contact"
                 className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-7 text-sm font-semibold text-white shadow-md transition-all hover:bg-blue-700"
               >
-                Start Free Trial
+                Request a Live Demo
               </Link>
               <Link
                 href="/pricing"
@@ -41,111 +99,171 @@ export default function FeaturesPage() {
           </div>
         </section>
 
-        {/* --- FEATURES GRID SECTION --- */}
+        {/* --- CORE MODULES GRID SECTION --- */}
         <section className="py-16 sm:py-24 w-full px-4 sm:px-8 lg:px-16">
           <div className="w-full max-w-7xl mx-auto">
             <div className="text-center max-w-2xl mx-auto mb-16">
-              <h2 className="text-xs font-bold text-servora-teal uppercase tracking-widest">Core Modules</h2>
-              <p className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">Built for the Realities of Kenyan Hospitality</p>
+              <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
+                Core Platform Modules
+              </span>
+              <h2 className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">
+                Built for the Operational Realities of Kenyan &amp; East African Hospitality
+              </h2>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              
-              {/* Feature 1 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 1 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    01
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">High-Speed Touch POS</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Lightning-fast order entry, intuitive menu grids, modifier prompts, and offline-aware resilience designed for busy rush hours.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    High-Speed Point of Sale (POS)
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Touch-optimized order entry supporting Dine-In, Takeaway, Delivery, and Bar Tabs. Configure custom modifiers, combo bundles, promotional codes, split tenders, and offline-resilient checkout.
                   </p>
                 </div>
-              </div>
+                <Link
+                  href="/solutions/restaurants"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  Restaurant POS Workflows &rarr;
+                </Link>
+              </article>
 
-              {/* Feature 2 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 2 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    02
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Kitchen Display System (KDS)</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Replace paper tickets with real-time digital kitchen screens. Color-coded order aging timers ensure zero lost tickets or delayed courses.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    Kitchen Display System (KDS) &amp; Station Routing
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Automatically split and route tickets across Grill, Bar, Cold Pantry, and Expediter screens. Enforce target/warning/critical cook SLAs, backup station failover, and full staff bump audit trails.
                   </p>
                 </div>
-              </div>
+                <Link
+                  href="/solutions/cloud-kitchens"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  Cloud Kitchen &amp; KDS Dispatch &rarr;
+                </Link>
+              </article>
 
-              {/* Feature 3 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 3 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    03
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">M-Pesa Daraja Integration</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Native STK push checkout and automated transaction reconciliation to verify customer payments instantly at the register.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    Safaricom M-Pesa Daraja &amp; Fiscal Compliance
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Trigger instant M-Pesa STK Push payment requests from the register and reconcile C2B Till/Paybill callbacks automatically, paired with 16% VAT, 2% Catering Levy, and KRA eTIMS invoicing.
                   </p>
                 </div>
-              </div>
+                <Link
+                  href="/hardware-pos"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  POS Terminals &amp; Thermal Printers &rarr;
+                </Link>
+              </article>
 
-              {/* Feature 4 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 4 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    04
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Inventory & Recipe Costing</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Automatic stock deduction per item sold, theoretical vs. actual waste tracking, and low-stock threshold alerts.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    Recipe Costing &amp; Inventory Control
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Link every dish to a Bill of Materials (BOM) recipe for automatic stock deduction on sale. Track batch expiry dates, storage bins, blind cycle counts, waste logs, and theoretical vs. actual food cost.
                   </p>
                 </div>
-              </div>
+                <Link
+                  href="/solutions/bars-lounges"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  Bar Pour-Cost &amp; Stock Control &rarr;
+                </Link>
+              </article>
 
-              {/* Feature 5 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 5 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    05
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Multi-Branch Management</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Manage multiple outlets, regional menus, centralized purchasing, and consolidated executive reporting from a single dashboard.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    Supplier Procurement &amp; Inter-Branch Transfers
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Manage vendor directories, purchase requests, purchase orders (POs), goods received notes (GRNs), supplier invoices, and cold-chain inter-branch stock transfers across outlets.
                   </p>
                 </div>
-              </div>
+                <Link
+                  href="/contact"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  Multi-Branch Supply Chain Demo &rarr;
+                </Link>
+              </article>
 
-              {/* Feature 6 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
+              {/* Module 6 */}
+              <article className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
                 <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                    </svg>
+                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-6">
+                    06
                   </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Real-Time Analytics</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed">
-                    Track hourly sales velocity, top-performing menu items, staff shift reconciliation, and tax reports instantly.
+                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                    Workforce Shifts, Cash Custody &amp; BI Analytics
+                  </h3>
+                  <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-4">
+                    Enforce granular RBAC permissions, employee shift schedules, clock-in attendance, blind till reconciliations, manager shift handovers, and executive revenue and menu profitability analytics.
                   </p>
                 </div>
-              </div>
-
+                <Link
+                  href="/pricing"
+                  className="text-xs font-bold text-servora-core hover:underline"
+                >
+                  Compare Editions &amp; Seat Plans &rarr;
+                </Link>
+              </article>
             </div>
           </div>
         </section>
 
-        {/* --- CALL TO ACTION BANNER (Clean Corporate Card Style) --- */}
+        {/* --- FEATURE FAQS (AEO / GEO) --- */}
+        <section className="py-16 w-full bg-white border-t border-gray-100 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-2xl font-bold text-servora-navy text-center mb-8">
+              Technical &amp; Operational Feature Questions
+            </h2>
+            <div className="space-y-4">
+              {FEATURES_FAQS.map((faq) => (
+                <article
+                  key={faq.question}
+                  className="rounded-2xl bg-servora-pale border border-gray-200 p-6"
+                >
+                  <h3 className="text-base font-bold text-servora-navy">{faq.question}</h3>
+                  <p className="mt-2 text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                    {faq.answer}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* --- CALL TO ACTION BANNER --- */}
         <section className="py-16 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
           <div className="w-full max-w-7xl mx-auto rounded-2xl bg-white p-8 sm:p-12 border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
             <div>
@@ -156,7 +274,7 @@ export default function FeaturesPage() {
                 Ready to Experience Servora in Action?
               </h2>
               <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed max-w-xl">
-                Contact our Kilimani team or schedule a personalized walkthrough to see how Servora elevates restaurant operations.
+                Contact our Kilimani engineering and onboarding team to schedule a tailored walkthrough for your hotel F&amp;B or restaurant operations.
               </p>
             </div>
 
@@ -165,12 +283,11 @@ export default function FeaturesPage() {
                 href="/contact"
                 className="inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-7 text-sm font-semibold text-white shadow-md transition-all hover:bg-blue-700"
               >
-                Contact Sales Team
+                Book Live Demo
               </Link>
             </div>
           </div>
         </section>
-
       </main>
 
       <Footer />
