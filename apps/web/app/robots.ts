@@ -2,6 +2,9 @@
 import type { MetadataRoute } from 'next';
 import { SITE_CONFIG } from '@/lib/seo';
 
+// Required for static exports (output: 'export')
+export const dynamic = 'force-static';
+
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
@@ -16,6 +19,7 @@ export default function robots(): MetadataRoute.Robots {
           '/hardware-pos',
           '/solutions/',
           '/resources/',
+          '/hospitality-software-kenya',
           '/privacy',
           '/terms',
         ],
