@@ -2,6 +2,9 @@
 import type { MetadataRoute } from 'next';
 import { SITE_CONFIG } from '@/lib/seo';
 
+// Required for static exports (output: 'export')
+export const dynamic = 'force-static';
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();
 
@@ -14,8 +17,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: '/features', changeFrequency: 'weekly', priority: 0.9 },
     { path: '/pricing', changeFrequency: 'weekly', priority: 0.85 },
     { path: '/solutions/restaurants', changeFrequency: 'weekly', priority: 0.85 },
+    { path: '/solutions/hotels', changeFrequency: 'weekly', priority: 0.85 },
     { path: '/solutions/bars-lounges', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/solutions/cloud-kitchens', changeFrequency: 'weekly', priority: 0.8 },
+    { path: '/hospitality-software-kenya', changeFrequency: 'weekly', priority: 0.85 },
+    { path: '/resources', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/hardware-pos', changeFrequency: 'monthly', priority: 0.75 },
     { path: '/about', changeFrequency: 'monthly', priority: 0.7 },
     { path: '/contact', changeFrequency: 'monthly', priority: 0.75 },
