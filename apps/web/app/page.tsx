@@ -3,13 +3,14 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
+import FaqAccordionClient from '@/components/marketing/FaqAccordionClient';
 import { SITE_CONFIG, buildPageMetadata } from '@/lib/seo';
 import { JsonLd, buildFaqSchema } from '@/components/seo/JsonLd';
 
 export const metadata: Metadata = buildPageMetadata({
   title: 'Hotel & Restaurant Management System | Servora Kenya',
   description:
-    'Manage hotel and restaurant operations with Servora. Streamline reservations, POS sales, orders, inventory, payments and business reporting from one integrated platform.',
+    'Manage hotel and restaurant operations with Servora. Streamline reservations, POS sales, orders, inventory, payments, and business reporting from one integrated platform.',
   path: '/',
   keywords: [
     'Hotel and Restaurant Management System',
@@ -26,7 +27,7 @@ const HOMEPAGE_FAQS = [
   {
     question: 'What is Servora and who developed it?',
     answer:
-      'Servora is a hotel, restaurant and hospitality management platform developed by Mavora Technologies Ltd in Nairobi, Kenya. It helps hospitality businesses streamline daily operations through integrated management of POS sales, orders, table reservations, kitchen display routing, inventory, procurement, M-Pesa payments, staff shifts, and executive reporting.',
+      'Servora is a hotel, restaurant, and hospitality management platform developed by Mavora Technologies Ltd in Nairobi, Kenya[cite: 3]. It helps hospitality businesses streamline daily operations through integrated management of POS sales, orders, table reservations, kitchen display routing, inventory, procurement, M-Pesa payments, staff shifts, and executive reporting.',
   },
   {
     question: 'Which hospitality businesses can use Servora?',
@@ -57,409 +58,375 @@ export default function Home() {
       <Header />
 
       <main className="flex-grow w-full">
-        {/* --- HERO SECTION --- */}
-        <section className="relative overflow-hidden pt-12 pb-16 sm:pt-16 sm:pb-24 lg:pt-20 lg:pb-28 w-full px-4 sm:px-8 lg:px-16">
-          <div
-            aria-hidden="true"
-            className="absolute -top-40 left-1/2 -z-10 -translate-x-1/2 transform-gpu blur-3xl sm:-top-80 w-full"
-          >
-            <div
-              className="aspect-[1155/678] w-full max-w-7xl mx-auto bg-gradient-to-tr from-[#0554F4] to-[#0C88FB] opacity-15"
+        {/* --- MINIMIZED PREMIUM HERO SECTION --- */}
+        <section className="relative overflow-hidden pt-8 pb-12 sm:pt-12 sm:pb-16 lg:pt-16 lg:pb-20 w-full px-4 sm:px-8 lg:px-16 bg-gradient-to-b from-white via-servora-pale/50 to-servora-pale">
+          <div aria-hidden="true" className="absolute top-0 left-1/2 -z-10 -translate-x-1/2 transform-gpu blur-3xl w-full max-w-7xl overflow-hidden pointer-events-none">
+            <div 
+              className="aspect-[1155/678] w-full bg-gradient-to-tr from-servora-core to-servora-bright opacity-10 rounded-full"
               style={{
-                clipPath:
-                  'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.6% 76.8%, 76.1% 97.7%, 74.1% 44.1%)',
+                clipPath: 'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.6% 76.8%, 76.1% 97.7%, 74.1% 44.1%)'
               }}
             />
           </div>
 
-          <div className="w-full flex flex-col items-center text-center">
-            <div className="inline-flex items-center gap-x-2 rounded-full bg-white px-3.5 py-1.5 text-xs font-semibold text-servora-navy shadow-sm ring-1 ring-inset ring-servora-core/15 mb-6">
-              <span className="inline-block h-2 w-2 rounded-full bg-servora-teal animate-pulse" />
-              <span className="text-servora-teal font-bold uppercase tracking-wider text-[10px]">
-                Servora &bull; Simplify Service. Grow Smarter.
+          <div className="w-full max-w-7xl mx-auto flex flex-col items-center text-center">
+            {/* Pill Badge */}
+            <div className="inline-flex items-center gap-x-2 rounded-full bg-white px-3.5 py-1.5 text-xs font-bold text-servora-navy shadow-sm ring-1 ring-inset ring-servora-core/15 mb-5 transition-transform hover:scale-105 duration-200">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-servora-teal opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-servora-teal" />
               </span>
+              <span className="text-servora-teal uppercase tracking-widest text-[10px]">Servora 2.0</span>
               <span className="text-gray-300">|</span>
-              <span className="text-servora-deepTeal">By Mavora Technologies Ltd</span>
+              <span className="text-servora-deepTeal">Smart Hospitality Management by Mavora Technologies[cite: 3]</span>
             </div>
 
-            <h1 className="w-full max-w-5xl text-3xl font-extrabold tracking-tight text-servora-navy sm:text-5xl lg:text-6xl leading-[1.15]">
-              Hotel &amp; Restaurant Management Software for{' '}
+            {/* Headline */}
+            <h1 className="w-full max-w-4xl text-3xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-servora-navy leading-[1.15]">
+              Complete Hotel &amp; Restaurant Management.<br className="hidden sm:inline" />{" "}
               <span className="bg-gradient-to-r from-servora-core via-servora-bright to-servora-teal bg-clip-text text-transparent">
-                Smarter Hospitality Operations
+                All in One Platform.
               </span>
             </h1>
 
-            <p className="mt-6 max-w-3xl text-base sm:text-lg leading-relaxed text-servora-deepTeal">
-              Servora is an integrated hotel and restaurant management platform designed to simplify hospitality operations. Manage table reservations, guest dining services, POS sales, kitchen orders, inventory, procurement, M-Pesa payments, staff shifts, and business performance through one connected system.
+            {/* Subtitle */}
+            <p className="mt-4 max-w-2xl text-sm sm:text-base leading-relaxed text-servora-deepTeal font-normal">
+              Run your hospitality business smarter with Servora. Connect POS sales, restaurant operations, kitchen workflows, inventory, procurement, payments, and business intelligence through one integrated management platform.
             </p>
 
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
+            {/* CTA Group */}
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-center gap-3 w-full sm:w-auto">
               <Link
                 href="/contact"
-                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-7 text-sm font-semibold text-white shadow-md shadow-servora-core/20 transition-all hover:bg-blue-700 hover:shadow-lg"
+                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-xl bg-servora-core px-7 text-xs font-bold text-white shadow-lg shadow-servora-core/25 transition-all hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98]"
               >
-                Request a Live Demo
+                Request a Live Demo &rarr;
               </Link>
               <Link
                 href="/features"
-                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-7 text-sm font-semibold text-servora-navy shadow-sm transition-all hover:border-servora-core hover:text-servora-core"
+                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-xl border border-gray-200 bg-white px-7 text-xs font-bold text-servora-navy shadow-xs transition-all hover:border-servora-core hover:text-servora-core hover:scale-[1.02]"
               >
-                Explore Platform Features
+                Explore the Platform
               </Link>
             </div>
 
-            <div className="mt-12 pt-8 border-t border-gray-200/60 grid grid-cols-2 gap-4 sm:grid-cols-4 w-full max-w-5xl text-left text-xs text-servora-deepTeal font-medium">
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Safaricom M-Pesa Daraja Integration</span>
+            {/* Capability Bar */}
+            <div className="mt-10 pt-6 border-t border-gray-200/60 grid grid-cols-2 md:grid-cols-4 gap-4 w-full max-w-5xl text-left">
+              <div className="flex flex-col gap-0.5 p-3 rounded-xl bg-white/80 backdrop-blur-xs border border-gray-100 shadow-2xs">
+                <span className="text-[10px] font-bold text-servora-teal uppercase tracking-wider">Safaricom Daraja</span>
+                <span className="text-base sm:text-lg font-extrabold text-servora-navy font-mono">100% Native</span>
+                <span className="text-[10px] text-servora-deepTeal">Instant STK Push &amp; C2B Matching</span>
               </div>
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Multi-Branch &amp; Outlet Isolation</span>
+              <div className="flex flex-col gap-0.5 p-3 rounded-xl bg-white/80 backdrop-blur-xs border border-gray-100 shadow-2xs">
+                <span className="text-[10px] font-bold text-servora-teal uppercase tracking-wider">Offline Resilience</span>
+                <span className="text-base sm:text-lg font-extrabold text-servora-navy font-mono">Zero Downtime</span>
+                <span className="text-[10px] text-servora-deepTeal">Local SQLite &amp; Auto Cloud Sync</span>
               </div>
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Offline-Resilient POS Checkout</span>
+              <div className="flex flex-col gap-0.5 p-3 rounded-xl bg-white/80 backdrop-blur-xs border border-gray-100 shadow-xs">
+                <span className="text-[10px] font-bold text-servora-teal uppercase tracking-wider">Recipe Control</span>
+                <span className="text-base sm:text-lg font-extrabold text-servora-navy font-mono">Gram-Level</span>
+                <span className="text-[10px] text-servora-deepTeal">Automated BOM Stock Deduction</span>
               </div>
-              <div className="flex items-center gap-2">
-                <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-                <span>Real-Time Recipe &amp; BOM Costing</span>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* --- SYSTEM PREVIEW CARD --- */}
-        <section
-          aria-label="Servora Live Operations Console Preview"
-          className="pb-16 sm:pb-24 w-full px-4 sm:px-8 lg:px-16"
-        >
-          <div className="w-full rounded-2xl bg-servora-navy p-4 sm:p-8 shadow-2xl ring-1 ring-white/10">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-6">
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 rounded-full bg-red-500/80" />
-                <div className="w-3 h-3 rounded-full bg-amber-500/80" />
-                <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
-                <span className="ml-2 text-xs font-mono text-gray-400">
-                  servora.mavoratechnologies.com / pos-checkout
-                </span>
-              </div>
-              <span className="inline-flex items-center rounded-md bg-servora-teal/20 px-2.5 py-1 text-[10px] font-medium text-servora-teal ring-1 ring-inset ring-servora-teal/30">
-                Unified Hospitality Cloud
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-white">
-              <div className="rounded-xl bg-white/5 p-5 border border-white/10">
-                <p className="text-xs text-gray-400">Multi-Tender POS &amp; M-Pesa</p>
-                <p className="text-xl sm:text-2xl font-bold text-white mt-1">
-                  Instant STK &amp; Till Sync
-                </p>
-                <span className="text-[11px] text-emerald-400 font-medium">
-                  Automated KRA eTIMS fiscal invoice &amp; shift ledger
-                </span>
-              </div>
-              <div className="rounded-xl bg-white/5 p-5 border border-white/10">
-                <p className="text-xs text-gray-400">Kitchen Display System (KDS)</p>
-                <p className="text-xl sm:text-2xl font-bold text-servora-bright mt-1">
-                  Station-Level Routing
-                </p>
-                <span className="text-[11px] text-servora-teal font-medium">
-                  Real-time cook timers, SLA alerts &amp; staff audit trail
-                </span>
-              </div>
-              <div className="rounded-xl bg-white/5 p-5 border border-white/10">
-                <p className="text-xs text-gray-400">Inventory &amp; Procurement</p>
-                <p className="text-xl sm:text-2xl font-bold text-amber-400 mt-1">
-                  Gram-Level BOM Control
-                </p>
-                <span className="text-[11px] text-amber-300 font-medium">
-                  Batch expiry, supplier POs, GRNs &amp; waste tracking
-                </span>
+              <div className="flex flex-col gap-0.5 p-3 rounded-xl bg-white/80 backdrop-blur-xs border border-gray-100 shadow-xs">
+                <span className="text-[10px] font-bold text-servora-teal uppercase tracking-wider">Local Support</span>
+                <span className="text-base sm:text-lg font-extrabold text-servora-navy font-mono">Kilimani, Nairobi</span>
+                <span className="text-[10px] text-servora-deepTeal">On-Site Hardware Setup &amp; Training</span>
               </div>
             </div>
           </div>
         </section>
 
         {/* --- WHAT IS SERVORA (GEO ENTITY DEFINITION BLOCK) --- */}
-        <section className="py-16 w-full bg-white border-t border-gray-100 px-4 sm:px-8 lg:px-16">
-          <div className="max-w-5xl mx-auto rounded-2xl bg-servora-pale border border-servora-core/15 p-6 sm:p-10">
-            <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
-              Platform Overview
+        <section className="py-20 w-full bg-white px-4 sm:px-8 lg:px-16">
+          <div className="max-w-5xl mx-auto rounded-3xl bg-gradient-to-br from-servora-pale to-white border border-servora-core/20 p-8 sm:p-12 shadow-sm">
+            <span className="text-xs font-bold text-servora-teal uppercase tracking-widest bg-servora-core/10 px-3 py-1 rounded-full">
+              Enterprise Authority
             </span>
-            <h2 className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">
+            <h2 className="mt-4 text-3xl sm:text-4xl font-extrabold text-servora-navy tracking-tight">
               What Is Servora?
             </h2>
-            <p className="mt-4 text-sm sm:text-base text-servora-deepTeal leading-relaxed">
+            <p className="mt-4 text-base sm:text-lg text-servora-deepTeal leading-relaxed">
               {SITE_CONFIG.canonicalBrandDefinition} Built for modern hospitality enterprises in Kenya, East Africa, and international markets, Servora eliminates disconnected tills, manual stock sheets, and delayed end-of-day reconciliations.
             </p>
           </div>
         </section>
 
-        {/* --- CORE INTEGRATED OPERATIONS CAPABILITIES --- */}
-        <section className="py-16 w-full bg-white px-4 sm:px-8 lg:px-16">
+        {/* --- PLATFORM OVERVIEW (BENTO GRID) --- */}
+        <section className="py-20 w-full bg-servora-pale px-4 sm:px-8 lg:px-16 border-t border-gray-200/60">
           <div className="max-w-7xl mx-auto">
-            <div className="w-full mb-12 text-center">
+            <div className="text-center max-w-3xl mx-auto mb-16">
               <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
-                Integrated Hospitality Operations
+                Everything Your Hospitality Business Needs
               </span>
-              <h2 className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">
-                Connected Point of Sale, Kitchen, Inventory, Workforce &amp; BI
+              <h2 className="mt-2 text-3xl sm:text-4xl font-extrabold text-servora-navy tracking-tight">
+                One Connected Platform for Complete Control
               </h2>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 w-full">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   01
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Point of Sale &amp; M-Pesa Payments
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Point of Sale &amp; Sales Management
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
-                  High-speed checkout supporting Dine-In, Takeaway, Delivery, and Bar Tabs. Process cash, card, split tenders, and instant Safaricom M-Pesa STK Push payments with automated cashier drawer custody.
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                  High-speed checkout supporting Dine-In, Takeaway, Delivery, and Bar Tabs. Process cash, card, split tenders, and instant Safaricom M-Pesa STK Push payments.
                 </p>
               </div>
 
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   02
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Kitchen Display System (KDS) &amp; Orders
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Kitchen Display System &amp; Orders
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
-                  Route order items automatically to Grill, Bar, Cold Pantry, or Expediter screens. Monitor live prep timers, SLA breach alerts, station bump velocity, and complete staff execution history.
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                  Route order items automatically to Grill, Bar, Cold Pantry, or Expediter screens. Monitor live prep timers, SLA breach alerts, and complete staff execution history.
                 </p>
               </div>
 
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   03
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Inventory, Recipes &amp; Procurement
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Inventory &amp; Recipe Management
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
-                  Automate ingredient deduction via recipe BOMs, track batch expiry and waste logs, manage suppliers, and streamline purchase requests, purchase orders, and goods received notes (GRNs).
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                  Automate ingredient deduction via recipe BOMs, track batch expiry and waste logs, manage suppliers, and streamline purchase orders and goods received notes (GRNs).
                 </p>
               </div>
 
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   04
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Dining Floor, Reservations &amp; CRM
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Table Reservations &amp; Guest Management
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
-                  Manage dining areas, live table occupancy, guest reservations, waitlists, customer profiles, tiered loyalty rewards, and targeted SMS/email retention campaigns.
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                  Manage dining areas, live table occupancy, guest reservations, waitlists, customer profiles, and targeted SMS/email retention campaigns.
                 </p>
               </div>
 
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   05
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Staff &amp; Shift Custody Management
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Staff &amp; Shift Management
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
                   Control role-based access permissions (RBAC), employee shift rosters, clock-in attendance, cashier till assignments, discount limits, and manager shift handovers.
                 </p>
               </div>
 
-              <div className="p-6 rounded-xl bg-servora-pale border border-gray-100 transition-all hover:border-servora-core/30 hover:shadow-md">
-                <div className="w-10 h-10 rounded-lg bg-servora-core/10 text-servora-core flex items-center justify-center font-bold mb-4">
+              <div className="p-8 rounded-2xl bg-white border border-gray-200/80 shadow-sm transition-all hover:border-servora-core hover:shadow-lg group">
+                <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center font-bold text-base mb-6 group-hover:bg-servora-core group-hover:text-white transition-colors">
                   06
                 </div>
-                <h3 className="text-base font-bold text-servora-navy mb-2">
-                  Reporting &amp; Business Intelligence
+                <h3 className="text-lg font-bold text-servora-navy mb-3">
+                  Business Intelligence &amp; Analytics
                 </h3>
-                <p className="text-xs text-servora-deepTeal leading-relaxed">
-                  Make data-driven decisions with executive revenue dashboards, food cost variance reports, menu engineering profitability matrices, tax summaries, and multi-branch comparisons.
+                <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                  Make data-driven decisions with executive revenue dashboards, food cost variance reports, menu engineering profitability matrices, and multi-branch comparisons.
                 </p>
               </div>
             </div>
 
-            <div className="mt-10 text-center">
+            <div className="mt-12 text-center">
               <Link
                 href="/features"
-                className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1"
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-servora-navy text-white text-xs font-bold hover:bg-servora-core transition-all shadow-md"
               >
-                Inspect All Hospitality &amp; Restaurant Modules &rarr;
+                <span>Inspect All Hospitality &amp; Restaurant Modules</span>
+                <span>&rarr;</span>
               </Link>
             </div>
           </div>
         </section>
 
-        {/* --- SOLUTIONS & VERTICALS HIGHLIGHT --- */}
-        <section className="py-20 w-full bg-servora-pale px-4 sm:px-8 lg:px-16 border-t border-gray-200/60">
+        {/* --- INDUSTRY-SPECIFIC SOLUTIONS --- */}
+        <section className="py-24 w-full bg-white px-4 sm:px-8 lg:px-16 border-t border-gray-200/60">
           <div className="max-w-7xl mx-auto">
-            <div className="text-center max-w-2xl mx-auto mb-16">
+            <div className="text-center max-w-3xl mx-auto mb-16">
               <span className="text-servora-teal font-bold uppercase tracking-widest text-xs">
-                Who Servora Is Designed For
+                Built for Every Hospitality Business
               </span>
-              <h2 className="text-3xl font-extrabold text-servora-navy mt-2 sm:text-4xl">
-                Hotel F&amp;B and Restaurant Management Solutions
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-servora-navy mt-2 tracking-tight">
+                Tailored Industry Verticals Across Kenya &amp; Beyond
               </h2>
-              <p className="text-sm text-servora-deepTeal mt-3">
-                Whether you operate a single café, a multi-branch restaurant chain, a high-volume bar, or a hotel restaurant and lounge, Servora scales with your operational footprint.
+              <p className="text-sm sm:text-base text-servora-deepTeal mt-4">
+                Whether you manage a bustling Kilimani café, a hotel F&amp;B group, a high-volume lounge, or a cloud kitchen, Servora adapts seamlessly.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <div className="bg-white p-7 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+              <div className="bg-servora-pale p-8 rounded-3xl border border-gray-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
                 <div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                  <h3 className="text-xl font-bold text-servora-navy mb-3">
                     Restaurants &amp; Cafés
                   </h3>
                   <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-6">
                     Full table service, visual floor layouts, split guest checks, modifier groups, reservations, and instant kitchen ticket dispatch.
                   </p>
                 </div>
-                <Link
-                  href="/solutions/restaurants"
-                  className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1"
-                >
-                  Explore Restaurant Management Software &rarr;
+                <Link href="/solutions/restaurants" className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1">
+                  Explore Restaurant Solutions &rarr;
                 </Link>
               </div>
 
-              <div className="bg-white p-7 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between">
+              <div className="bg-servora-pale p-8 rounded-3xl border border-gray-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
                 <div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">
-                    Hotel Restaurants &amp; Hospitality Groups
+                  <h3 className="text-xl font-bold text-servora-navy mb-3">
+                    Hotels &amp; Resorts
                   </h3>
                   <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-6">
-                    Centralized multi-outlet food and beverage POS, central store stock transfers, banquet and lounge billing, and branch-level financial reporting.
+                    Centralized multi-outlet food and beverage POS, central store stock transfers, banquet billing, and branch-level financial reporting.
                   </p>
                 </div>
-                <Link
-                  href="/features"
-                  className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1"
-                >
-                  Explore Multi-Branch Operations &rarr;
+                <Link href="/solutions/hotels" className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1">
+                  Explore Hotel F&amp;B &rarr;
                 </Link>
               </div>
 
-              <div className="bg-white p-7 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between">
+              <div className="bg-servora-pale p-8 rounded-3xl border border-gray-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
                 <div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">
+                  <h3 className="text-xl font-bold text-servora-navy mb-3">
                     Bars &amp; Lounges
                   </h3>
                   <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-6">
-                    Fast bar-tab management, blind cashier shift reconciliation, safe-drop alerts, pour-cost recipe tracking, and strict stock variance audits.
+                    Fast bar-tab management, blind cashier shift reconciliation, pour-cost recipe tracking, and strict stock variance audits.
                   </p>
                 </div>
-                <Link
-                  href="/solutions/bars-lounges"
-                  className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1"
-                >
-                  Explore Bar &amp; Lounge POS &rarr;
+                <Link href="/solutions/bars-lounges" className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1">
+                  Explore Bars &amp; Lounges &rarr;
                 </Link>
               </div>
 
-              <div className="bg-white p-7 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-between">
+              <div className="bg-servora-pale p-8 rounded-3xl border border-gray-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition-all">
                 <div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">
-                    Cloud Kitchens &amp; Quick Service
+                  <h3 className="text-xl font-bold text-servora-navy mb-3">
+                    Cloud Kitchens
                   </h3>
                   <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed mb-6">
                     Express counter ordering, takeaway and delivery dispatch tracking, dedicated prep station KDS screens, and automated recipe stock depletion.
                   </p>
                 </div>
-                <Link
-                  href="/solutions/cloud-kitchens"
-                  className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1"
-                >
-                  Explore Cloud Kitchen Software &rarr;
+                <Link href="/solutions/cloud-kitchens" className="text-xs font-bold text-servora-core hover:underline inline-flex items-center gap-1">
+                  Explore Cloud Kitchens &rarr;
                 </Link>
               </div>
             </div>
           </div>
         </section>
 
-        {/* --- KENYAN PAYMENT & HARDWARE SPOTLIGHT --- */}
-        <section className="py-20 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+        {/* --- CONNECTED HOSPITALITY OPERATIONS WORKFLOW --- */}
+        <section className="py-24 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center max-w-3xl mx-auto mb-16">
+              <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
+                Seamless Operational Architecture
+              </span>
+              <h2 className="mt-2 text-3xl sm:text-4xl font-extrabold text-servora-navy tracking-tight">
+                How Servora Connects Every Transaction
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-2xs flex flex-col gap-3">
+                <span className="text-xs font-mono font-bold text-servora-core">STEP 01</span>
+                <h3 className="text-base font-bold text-servora-navy">Customer Order &amp; POS</h3>
+                <p className="text-xs text-servora-deepTeal leading-relaxed">
+                  Waiter or customer places an order via touchscreen POS, QR code, or room tab.
+                </p>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-2xs flex flex-col gap-3">
+                <span className="text-xs font-mono font-bold text-servora-core">STEP 02</span>
+                <h3 className="text-base font-bold text-servora-navy">Kitchen Display &amp; Routing</h3>
+                <p className="text-xs text-servora-deepTeal leading-relaxed">
+                  Items route instantly to station KDS screens with live cook timers and SLA alerts.
+                </p>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-sm flex flex-col gap-3 border-l-4 border-l-servora-core">
+                <span className="text-xs font-mono font-bold text-servora-core">STEP 03</span>
+                <h3 className="text-base font-bold text-servora-navy">Recipe BOM Stock Deduction</h3>
+                <p className="text-xs text-servora-deepTeal leading-relaxed">
+                  Exact ingredient quantities are automatically deducted from stock based on active recipes.
+                </p>
+              </div>
+
+              <div className="p-6 rounded-2xl bg-white border border-gray-200 shadow-2xs flex flex-col gap-3">
+                <span className="text-xs font-mono font-bold text-servora-core">STEP 04</span>
+                <h3 className="text-base font-bold text-servora-navy">Payment &amp; Analytics</h3>
+                <p className="text-xs text-servora-deepTeal leading-relaxed">
+                  M-Pesa reconciliation updates the cashier ledger and feeds real-time BI dashboards.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* --- BUILT FOR KENYA AND EAST AFRICA --- */}
+        <section className="py-24 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
           <div className="max-w-7xl mx-auto flex flex-col lg:flex-row items-center gap-12">
             <div className="flex-1 flex flex-col gap-6">
               <span className="text-servora-teal font-bold uppercase tracking-widest text-xs">
-                Why Choose Servora &bull; Built for Kenya &amp; East Africa
+                Localized Infrastructure &bull; Built for Kenya &amp; East Africa
               </span>
-              <h2 className="text-3xl font-extrabold text-servora-navy sm:text-4xl leading-tight">
-                Engineered for Safaricom M-Pesa, KRA eTIMS &amp; Enterprise POS Hardware
+              <h2 className="text-3xl sm:text-4xl font-extrabold text-servora-navy leading-tight tracking-tight">
+                Hospitality Technology Designed for the African Market
               </h2>
-              <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
-                Servora integrates natively with the Safaricom Daraja API for instant STK Push payment verification and C2B till matching, eliminating unverified mobile money slips and accelerating peak-hour checkout. Paired with our POS hardware consultation in Nairobi, hospitality operators get a dependable end-to-end deployment.
+              <p className="text-sm sm:text-base text-servora-deepTeal leading-relaxed">
+                Servora integrates natively with the Safaricom Daraja API for instant STK Push payment verification and C2B till matching, eliminating unverified mobile money slips and accelerating peak-hour checkout. Paired with our enterprise hardware procurement in Kilimani, Nairobi, you get a turnkey solution.
               </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs font-semibold text-servora-navy">
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-servora-pale border border-gray-100">
-                  <span className="w-2 h-2 rounded-full bg-servora-teal" />
-                  <span>Instant M-Pesa STK Push &amp; Till Callback</span>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 text-xs font-bold text-servora-navy">
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-servora-pale border border-gray-200 shadow-2xs">
+                  <span className="w-2.5 h-2.5 rounded-full bg-servora-teal flex-shrink-0" />
+                  <span>Safaricom M-Pesa Daraja API Integration</span>
                 </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-servora-pale border border-gray-100">
-                  <span className="w-2 h-2 rounded-full bg-servora-teal" />
-                  <span>Thermal Receipt Printer &amp; Drawer Sync</span>
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-servora-pale border border-gray-200 shadow-2xs">
+                  <span className="w-2.5 h-2.5 rounded-full bg-servora-teal flex-shrink-0" />
+                  <span>Kenyan Shilling (KES) Currency Support</span>
                 </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-servora-pale border border-gray-100">
-                  <span className="w-2 h-2 rounded-full bg-servora-teal" />
-                  <span>Offline Survivability &amp; Conflict Sync</span>
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-servora-pale border border-gray-200 shadow-2xs">
+                  <span className="w-2.5 h-2.5 rounded-full bg-servora-teal flex-shrink-0" />
+                  <span>KRA eTIMS Fiscal Invoicing Readiness</span>
                 </div>
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-servora-pale border border-gray-100">
-                  <span className="w-2 h-2 rounded-full bg-servora-teal" />
-                  <span>16% VAT, 2% Catering Levy &amp; eTIMS Ready</span>
+                <div className="flex items-center gap-3 p-4 rounded-2xl bg-servora-pale border border-gray-200 shadow-2xs">
+                  <span className="w-2.5 h-2.5 rounded-full bg-servora-teal flex-shrink-0" />
+                  <span>Local Onboarding &amp; Technical Support</span>
                 </div>
               </div>
 
-              <div className="pt-4 flex flex-wrap gap-3">
+              <div className="pt-4">
                 <Link
-                  href="/hardware-pos"
-                  className="inline-flex h-11 items-center justify-center rounded-lg bg-servora-navy px-7 text-xs font-bold text-white shadow-md transition-all hover:bg-servora-core"
+                  href="/hospitality-software-kenya"
+                  className="inline-flex h-12 items-center justify-center rounded-2xl bg-servora-navy px-8 text-xs font-bold text-white shadow-md transition-all hover:bg-servora-core"
                 >
-                  Explore POS Hardware &amp; Terminals
-                </Link>
-                <Link
-                  href="/pricing"
-                  className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-7 text-xs font-bold text-servora-navy transition-all hover:border-servora-core hover:text-servora-core"
-                >
-                  View Software Plans
+                  Explore Kenya &amp; East Africa Hub &rarr;
                 </Link>
               </div>
             </div>
 
-            <div className="flex-1 w-full rounded-2xl bg-servora-pale p-8 border border-gray-200/80 shadow-lg flex flex-col justify-center gap-6">
+            <div className="flex-1 w-full rounded-3xl bg-servora-pale p-8 sm:p-10 border border-gray-200/80 shadow-xl flex flex-col justify-center gap-6">
               <div className="border-b border-gray-200 pb-4">
-                <span className="text-[10px] font-bold text-servora-core uppercase tracking-wider">
-                  Developed by Mavora Technologies Ltd
-                </span>
-                <h3 className="text-xl font-bold text-servora-navy mt-1">
-                  Local Engineering &amp; Hospitality Support
-                </h3>
+                <span className="text-[11px] font-bold text-servora-core uppercase tracking-wider">Developed by Mavora Technologies Ltd[cite: 3]</span>
+                <h3 className="text-xl font-bold text-servora-navy mt-1">Local Engineering &amp; Hospitality Support</h3>
               </div>
               <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
                 Work directly with our Nairobi engineering and onboarding team to configure your menus, recipes, kitchen prep stations, tax rules, and branch terminals.
               </p>
-              <div className="p-4 rounded-xl bg-white border border-gray-200 flex flex-col gap-2">
-                <span className="text-xs font-bold text-servora-navy">
-                  Mavora Technologies Ltd — Nairobi Office
-                </span>
-                <span className="text-xs text-servora-deepTeal font-mono">
-                  Concert House, Wood Avenue, Kilimani - Nairobi, Kenya
-                </span>
-                <a
-                  href={`tel:${SITE_CONFIG.parentCompany.telephone}`}
-                  className="text-xs font-bold text-servora-core hover:underline"
-                >
+              <div className="p-5 rounded-2xl bg-white border border-gray-200 flex flex-col gap-2">
+                <span className="text-xs font-bold text-servora-navy">Mavora Technologies Ltd — Nairobi Office</span>
+                <span className="text-xs text-servora-deepTeal font-mono">Concert House, Wood Avenue, Kilimani - Nairobi, Kenya</span>
+                <a href={`tel:${SITE_CONFIG.parentCompany.telephone}`} className="text-xs font-bold text-servora-core hover:underline">
                   {SITE_CONFIG.parentCompany.displayPhone}
                 </a>
               </div>
@@ -467,59 +434,50 @@ export default function Home() {
           </div>
         </section>
 
-        {/* --- FREQUENTLY ASKED QUESTIONS (AEO / GEO STRUCTURED ANSWERS) --- */}
-        <section className="py-20 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+        {/* --- FREQUENTLY ASKED QUESTIONS --- */}
+        <section className="py-24 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
           <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-12">
+            <div className="text-center mb-16">
               <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
                 Answers &amp; Capabilities
               </span>
-              <h2 className="mt-2 text-2xl sm:text-3xl font-extrabold text-servora-navy">
+              <h2 className="mt-2 text-3xl sm:text-4xl font-extrabold text-servora-navy tracking-tight">
                 Frequently Asked Questions About Servora
               </h2>
             </div>
 
-            <div className="space-y-4">
-              {HOMEPAGE_FAQS.map((faq) => (
-                <article
-                  key={faq.question}
-                  className="bg-white rounded-2xl border border-gray-200 p-6 shadow-xs"
-                >
-                  <h3 className="text-base font-bold text-servora-navy">{faq.question}</h3>
-                  <p className="mt-2 text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
-                    {faq.answer}
-                  </p>
-                </article>
-              ))}
-            </div>
+            {/* Expandable Accordion Client Component */}
+            <FaqAccordionClient faqs={HOMEPAGE_FAQS} />
           </div>
         </section>
 
         {/* --- FINAL CONVERSION CTA --- */}
-        <section className="py-20 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
-          <div className="max-w-7xl mx-auto rounded-3xl bg-servora-navy p-8 sm:p-14 text-white shadow-2xl flex flex-col items-center text-center relative overflow-hidden">
-            <div className="absolute -right-20 -bottom-20 w-96 h-96 rounded-full bg-servora-core/20 blur-3xl pointer-events-none" />
-            <span className="inline-block rounded-full bg-servora-teal/20 px-3.5 py-1 text-xs font-bold text-servora-teal uppercase tracking-wider mb-4">
-              Get Started with Servora
+        <section className="py-24 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto rounded-3xl bg-gradient-to-br from-servora-navy via-[#072a6b] to-servora-core p-8 sm:p-16 text-white shadow-2xl flex flex-col items-center text-center relative overflow-hidden ring-1 ring-white/15">
+            {/* Ambient background glow */}
+            <div className="absolute -right-20 -bottom-20 w-96 h-96 rounded-full bg-servora-teal/20 blur-3xl pointer-events-none" />
+            
+            <span className="inline-block rounded-full bg-servora-teal/20 px-4 py-1.5 text-xs font-bold text-servora-teal uppercase tracking-wider mb-6 ring-1 ring-inset ring-servora-teal/30">
+              Ready to Transform Your Operations?
             </span>
-            <h2 className="text-3xl sm:text-4xl font-extrabold mb-4 tracking-tight">
-              Simplify Your Hotel &amp; Restaurant Operations Today
+            <h2 className="text-3xl sm:text-5xl font-extrabold mb-4 tracking-tight leading-tight max-w-4xl text-white">
+              Ready to Transform Your Hospitality Operations?
             </h2>
-            <p className="text-xs sm:text-sm text-gray-300 max-w-2xl mb-8 leading-relaxed">
-              Experience dependable checkout, instant M-Pesa reconciliation, kitchen station routing, and precise recipe inventory control built by Mavora Technologies.
+            <p className="text-sm sm:text-base text-gray-200 max-w-2xl mb-10 leading-relaxed font-normal">
+              Discover how Servora can simplify your restaurant and hotel operations through connected technology, intelligent inventory management, and real-time business insights.
             </p>
             <div className="flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto">
               <Link
                 href="/contact"
-                className="w-full sm:w-auto inline-flex h-12 items-center justify-center rounded-xl bg-servora-core px-8 text-sm font-bold text-white shadow-lg shadow-servora-core/30 transition-all hover:bg-blue-600"
+                className="w-full sm:w-auto inline-flex h-13 items-center justify-center rounded-2xl bg-white px-9 text-sm font-bold text-servora-navy shadow-xl transition-all hover:bg-servora-pale hover:scale-105"
               >
-                Book a Consultation &amp; Demo
+                Book a Live Demo &rarr;
               </Link>
               <Link
-                href="/pricing"
-                className="w-full sm:w-auto inline-flex h-12 items-center justify-center rounded-xl border border-white/20 bg-white/10 px-8 text-sm font-bold text-white transition-all hover:bg-white/20"
+                href="/contact"
+                className="w-full sm:w-auto inline-flex h-13 items-center justify-center rounded-2xl border border-white/30 bg-white/10 px-9 text-sm font-bold text-white transition-all hover:bg-white/20 hover:scale-105 backdrop-blur-xs"
               >
-                Compare Pricing Plans
+                Contact Our Team
               </Link>
             </div>
           </div>
