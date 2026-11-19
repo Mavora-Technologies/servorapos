@@ -234,7 +234,7 @@ export default function PricingPlansClient() {
 
                 <div className="mt-8 pt-4 border-t border-gray-100">
                   <Link
-                    href={`/contact?plan=${plan.id}&billing=${billingInterval}`}
+                    href={`/register?plan=${plan.id}&billing=${billingInterval}`}
                     className={`w-full inline-flex h-12 items-center justify-center rounded-xl text-xs font-bold transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-servora-core ${
                       plan.recommended
                         ? 'bg-servora-core text-white hover:bg-blue-700 shadow-md shadow-servora-core/20'

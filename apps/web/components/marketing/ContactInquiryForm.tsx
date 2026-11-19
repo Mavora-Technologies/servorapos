@@ -1,261 +1,684 @@
 // apps/web/components/marketing/ContactInquiryForm.tsx
 'use client';
 
-import { useState } from 'react';
-import { SITE_CONFIG } from '@/lib/seo';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 const WHATSAPP_NUMBER = '254795707823';
 
+const BUSINESS_TYPES = [
+  'Restaurant',
+  'Café',
+  'Hotel or Resort',
+  'Bar or Lounge',
+  'Fast Food / Quick Service',
+  'Bakery',
+  'Cloud Kitchen',
+  'Catering Business',
+  'Multi-Branch Hospitality Group',
+  'Other',
+] as const;
+
+const OUTLET_COUNTS = [
+  '1 outlet',
+  '2–3 outlets',
+  '4–10 outlets',
+  'More than 10 outlets',
+  'Planning to open',
+] as const;
+
+const ENQUIRY_TYPES = [
+  'Book a Live Product Demo',
+  'Request a Pricing Consultation',
+  'Request a POS Hardware Quotation',
+  'Discuss an Integration',
+  'General Business Enquiry',
+  'Existing Customer Support',
+] as const;
+
+const CONTACT_METHODS = ['WhatsApp', 'Phone Call', 'Email'] as const;
+
+const SERVICE_INTERESTS = [
+  'Servora POS System',
+  'Restaurant Management Software',
+  'Hotel F&B Management',
+  'Bar & Lounge Management',
+  'Cloud Kitchen Management',
+  'Kitchen Display System',
+  'Inventory & Recipe Costing',
+  'M-Pesa Integration',
+  'Multi-Branch Management',
+  'POS Hardware & Installation',
+  'Pricing & Subscription Plans',
+  'Custom Integration or Technical Consultation',
+] as const;
+
+interface FormState {
+  fullName: string;
+  businessName: string;
+  email: string;
+  phone: string;
+  preferredContact: (typeof CONTACT_METHODS)[number];
+  businessType: string;
+  city: string;
+  county: string;
+  country: string;
+  outletCount: string;
+  enquiryType: string;
+  interests: string[];
+  preferredDate: string;
+  preferredTime: string;
+  message: string;
+  consent: boolean;
+}
+
+interface FormErrors {
+  fullName?: string;
+  businessName?: string;
+  email?: string;
+  phone?: string;
+  interests?: string;
+  consent?: string;
+}
+
 export default function ContactInquiryForm() {
-  const [fullName, setFullName] = useState('');
-  const [businessName, setBusinessName] = useState('');
-  const [email, setEmail] = useState('');
-  const [phone, setPhone] = useState('');
-  const [inquiryTopic, setInquiryTopic] = useState('Schedule a Live Demo / Walkthrough');
-  const [branchCount, setBranchCount] = useState('1 Outlet / Branch');
-  const [message, setMessage] = useState('');
-  const [honeypot, setHoneypot] = useState('');
+  const searchParams = useSearchParams();
 
-  const [submitted, setSubmitted] = useState(false);
-  const [lastWhatsappUrl, setLastWhatsappUrl] = useState('');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>({
+    fullName: '',
+    businessName: '',
+    email: '',
+    phone: '',
+    preferredContact: 'WhatsApp',
+    businessType: 'Restaurant',
+    city: '',
+    county: '',
+    country: 'Kenya',
+    outletCount: '1 outlet',
+    enquiryType: 'Book a Live Product Demo',
+    interests: ['Servora POS System'],
+    preferredDate: '',
+    preferredTime: '',
+    message: '',
+    consent: false,
+  });
 
-  const buildWhatsAppLink = () => {
-    const formattedText = [
-      `*SERVORA HOSPITALITY INQUIRY*`,
-      `• *Name:* ${fullName.trim()}`,
-      `• *Business:* ${businessName.trim()}`,
-      `• *Phone:* ${phone.trim()}`,
-      `• *Email:* ${email.trim()}`,
-      `• *Scale:* ${branchCount}`,
-      `• *Topic:* ${inquiryTopic}`,
-      ``,
-      `*Details:*`,
-      message.trim(),
-    ].join('\n');
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [whatsappUrl, setWhatsappUrl] = useState<string | null>(null);
 
-    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(formattedText)}`;
+  // Pre-fill context when arriving from /pricing or custom plan builder
+  useEffect(() => {
+    const plan = searchParams.get('plan');
+    const billing = searchParams.get('billing');
+    const outlets = searchParams.get('outlets');
+    const features = searchParams.get('features');
+    const notes = searchParams.get('notes');
+
+    if (!plan && !features && !notes) return;
+
+    const prefillLines: string[] = [];
+    if (plan) {
+      prefillLines.push(
+        `Selected Plan: ${plan.charAt(0).toUpperCase() + plan.slice(1)}${
+          billing ? ` (${billing} billing)` : ''
+        }`
+      );
+    }
+    if (features) {
+      prefillLines.push(`Requested Modules: ${features}`);
+    }
+    if (notes) {
+      prefillLines.push(`Additional Notes: ${notes}`);
+    }
+
+    const mappedOutlets =
+      outlets === '2-3'
+        ? '2–3 outlets'
+        : outlets === '4-10'
+          ? '4–10 outlets'
+          : outlets === '10+'
+            ? 'More than 10 outlets'
+            : '1 outlet';
+
+    setForm((prev) => ({
+      ...prev,
+      outletCount: outlets ? mappedOutlets : prev.outletCount,
+      enquiryType: plan ? 'Request a Pricing Consultation' : prev.enquiryType,
+      interests: Array.from(
+        new Set([
+          ...prev.interests,
+          ...(plan ? ['Pricing & Subscription Plans'] : []),
+        ])
+      ),
+      message: prev.message || prefillLines.join('\n'),
+    }));
+  }, [searchParams]);
+
+  const toggleInterest = (interest: string) => {
+    setErrors((prev) => ({ ...prev, interests: undefined }));
+    setForm((prev) => ({
+      ...prev,
+      interests: prev.interests.includes(interest)
+        ? prev.interests.filter((item) => item !== interest)
+        : [...prev.interests, interest],
+    }));
+  };
+
+  const validate = (): FormErrors => {
+    const nextErrors: FormErrors = {};
+    if (!form.fullName.trim()) {
+      nextErrors.fullName = 'Please enter your full name.';
+    }
+    if (!form.businessName.trim()) {
+      nextErrors.businessName = 'Please enter your business or venue name.';
+    }
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!form.email.trim() || !emailPattern.test(form.email.trim())) {
+      nextErrors.email = 'Please enter a valid work email address.';
+    }
+    const cleanedPhone = form.phone.replace(/[\s\-()]/g, '');
+    if (!cleanedPhone || cleanedPhone.length < 9 || !/^\+?\d{9,15}$/.test(cleanedPhone)) {
+      nextErrors.phone = 'Please enter a valid Kenyan or international phone number.';
+    }
+    if (form.interests.length === 0) {
+      nextErrors.interests = 'Please select at least one area of interest.';
+    }
+    if (!form.consent) {
+      nextErrors.consent = 'Please confirm that Mavora Technologies may contact you.';
+    }
+    return nextErrors;
+  };
+
+  const buildWhatsAppMessage = () => {
+    const locationParts = [form.city.trim(), form.county.trim(), form.country.trim()].filter(
+      Boolean
+    );
+    const locationStr = locationParts.length > 0 ? locationParts.join(', ') : 'Not specified';
+
+    const lines = [
+      'Hello Mavora Technologies,',
+      'I would like to enquire about Servora.',
+      '',
+      'Contact Details:',
+      `Name: ${form.fullName.trim()}`,
+      `Business: ${form.businessName.trim()}`,
+      `Email: ${form.email.trim()}`,
+      `Phone: ${form.phone.trim()}`,
+      `Preferred Contact Method: ${form.preferredContact}`,
+      '',
+      'Business Information:',
+      `Business Type: ${form.businessType}`,
+      `Location: ${locationStr}`,
+      `Number of Outlets: ${form.outletCount}`,
+      '',
+      'Enquiry:',
+      `Request Type: ${form.enquiryType}`,
+      `Interested Services: ${form.interests.join(', ')}`,
+    ];
+
+    if (form.preferredDate) {
+      lines.push(`Preferred Demo Date: ${form.preferredDate}`);
+    }
+    if (form.preferredTime) {
+      lines.push(`Preferred Time: ${form.preferredTime}`);
+    }
+    if (form.message.trim()) {
+      lines.push('', 'Additional Requirements:', form.message.trim());
+    }
+
+    lines.push('', 'I would like to learn more about how Servora can support my business.');
+    return lines.join('\n');
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setErrorMsg(null);
+    if (isSubmitting) return;
 
-    // Silent spam bot trap
-    if (honeypot.trim() !== '') {
+    const validationErrors = validate();
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
 
-    if (!fullName.trim() || !businessName.trim() || !email.trim() || !phone.trim() || !message.trim()) {
-      setErrorMsg('Please fill in all required fields before submitting.');
-      return;
-    }
+    setErrors({});
+    setIsSubmitting(true);
 
-    const waUrl = buildWhatsAppLink();
-    setLastWhatsappUrl(waUrl);
-    setSubmitted(true);
+    const encodedMessage = encodeURIComponent(buildWhatsAppMessage());
+    const url = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodedMessage}`;
+    setWhatsappUrl(url);
 
-    // Redirect / open WhatsApp chat with prefilled enterprise inquiry
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    window.open(url, '_blank', 'noopener,noreferrer');
+
+    setTimeout(() => {
+      setIsSubmitting(false);
+    }, 600);
   };
-
-  const handleReset = () => {
-    setSubmitted(false);
-    setFullName('');
-    setBusinessName('');
-    setEmail('');
-    setPhone('');
-    setMessage('');
-    setLastWhatsappUrl('');
-    setErrorMsg(null);
-  };
-
-  if (submitted) {
-    return (
-      <div className="py-10 text-center flex flex-col items-center justify-center">
-        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mb-4">
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h3 className="text-xl font-bold text-servora-navy mb-2">
-          Redirecting to Mavora Technologies WhatsApp Desk
-        </h3>
-        <p className="text-xs sm:text-sm text-servora-deepTeal max-w-md leading-relaxed">
-          Your inquiry for <strong>{businessName}</strong> has been formatted for our Nairobi sales and engineering desk ({SITE_CONFIG.parentCompany.displayPhone}). If WhatsApp did not open automatically, click below.
-        </p>
-
-        <div className="mt-6 flex flex-col sm:flex-row items-center gap-3">
-          <a
-            href={lastWhatsappUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-11 items-center justify-center rounded-lg bg-emerald-600 px-6 text-sm font-semibold text-white shadow-sm transition-all hover:bg-emerald-700"
-          >
-            Open WhatsApp Chat Now
-          </a>
-          <button
-            type="button"
-            onClick={handleReset}
-            className="inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-6 text-sm font-semibold text-servora-navy transition-all hover:border-servora-core cursor-pointer"
-          >
-            Submit Another Inquiry
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-lg font-bold text-servora-navy mb-1">
-          Book a Live Demo or Consultation via WhatsApp
+    <div>
+      <div className="pb-6 border-b border-gray-100 mb-6">
+        <span className="inline-block rounded-full bg-servora-core/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-servora-core">
+          Demo &amp; Consultation Request
+        </span>
+        <h2 className="mt-2 text-2xl sm:text-3xl font-extrabold text-servora-navy tracking-tight">
+          Request a Servora Demo or Consultation
         </h2>
-        <p className="text-xs text-servora-deepTeal">
-          Complete your details below to launch a direct WhatsApp conversation with our Nairobi hospitality specialists.
+        <p className="mt-1.5 text-xs sm:text-sm text-servora-deepTeal">
+          Tell us a little about your business so we can prepare a relevant demonstration. Submitting opens a pre-filled WhatsApp message directly with our Nairobi sales desk.
         </p>
       </div>
 
-      {errorMsg && (
-        <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700">
-          {errorMsg}
-        </div>
-      )}
+      <form onSubmit={handleSubmit} noValidate className="space-y-7">
+        {/* A. Contact Information */}
+        <fieldset className="space-y-4">
+          <legend className="text-xs font-extrabold uppercase tracking-wider text-servora-navy font-mono">
+            1. Contact Information
+          </legend>
 
-      {/* Anti-spam honeypot */}
-      <input
-        type="text"
-        name="website_url"
-        tabIndex={-1}
-        autoComplete="off"
-        value={honeypot}
-        onChange={(e) => setHoneypot(e.target.value)}
-        className="hidden"
-        aria-hidden="true"
-      />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="fullName" className="block text-xs font-bold text-servora-navy mb-1.5">
+                Full Name <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="fullName"
+                name="fullName"
+                type="text"
+                required
+                autoComplete="name"
+                value={form.fullName}
+                onChange={(e) => {
+                  setForm({ ...form, fullName: e.target.value });
+                  setErrors((prev) => ({ ...prev, fullName: undefined }));
+                }}
+                placeholder="e.g., Jane Wanjiku"
+                aria-invalid={Boolean(errors.fullName)}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+              {errors.fullName && (
+                <p role="alert" className="mt-1 text-[11px] font-semibold text-red-600">
+                  {errors.fullName}
+                </p>
+              )}
+            </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-fullName" className="text-xs font-semibold text-servora-navy">
-            Full Name *
-          </label>
-          <input
-            id="contact-fullName"
-            required
-            type="text"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            placeholder="e.g. Amina Mohammed"
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-servora-core transition-colors"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-businessName" className="text-xs font-semibold text-servora-navy">
-            Hotel / Restaurant / Business Name *
-          </label>
-          <input
-            id="contact-businessName"
-            required
-            type="text"
-            value={businessName}
-            onChange={(e) => setBusinessName(e.target.value)}
-            placeholder="e.g. Savannah Grill & Lounge"
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-servora-core transition-colors"
-          />
-        </div>
-      </div>
+            <div>
+              <label
+                htmlFor="businessName"
+                className="block text-xs font-bold text-servora-navy mb-1.5"
+              >
+                Business / Venue Name <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="businessName"
+                name="businessName"
+                type="text"
+                required
+                autoComplete="organization"
+                value={form.businessName}
+                onChange={(e) => {
+                  setForm({ ...form, businessName: e.target.value });
+                  setErrors((prev) => ({ ...prev, businessName: undefined }));
+                }}
+                placeholder="e.g., Kilimani Bistro & Lounge"
+                aria-invalid={Boolean(errors.businessName)}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+              {errors.businessName && (
+                <p role="alert" className="mt-1 text-[11px] font-semibold text-red-600">
+                  {errors.businessName}
+                </p>
+              )}
+            </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-email" className="text-xs font-semibold text-servora-navy">
-            Work Email Address *
-          </label>
-          <input
-            id="contact-email"
-            required
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="operations@yourhospitality.co.ke"
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-servora-core transition-colors"
-          />
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-phone" className="text-xs font-semibold text-servora-navy">
-            Phone / WhatsApp Number *
-          </label>
-          <input
-            id="contact-phone"
-            required
-            type="tel"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+254 700 000 000"
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-servora-core transition-colors"
-          />
-        </div>
-      </div>
+            <div>
+              <label htmlFor="email" className="block text-xs font-bold text-servora-navy mb-1.5">
+                Work Email <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="email"
+                name="email"
+                type="email"
+                required
+                autoComplete="email"
+                value={form.email}
+                onChange={(e) => {
+                  setForm({ ...form, email: e.target.value });
+                  setErrors((prev) => ({ ...prev, email: undefined }));
+                }}
+                placeholder="name@yourvenue.co.ke"
+                aria-invalid={Boolean(errors.email)}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+              {errors.email && (
+                <p role="alert" className="mt-1 text-[11px] font-semibold text-red-600">
+                  {errors.email}
+                </p>
+              )}
+            </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-topic" className="text-xs font-semibold text-servora-navy">
-            How can we help you? *
+            <div>
+              <label htmlFor="phone" className="block text-xs font-bold text-servora-navy mb-1.5">
+                Phone Number <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="phone"
+                name="phone"
+                type="tel"
+                required
+                autoComplete="tel"
+                value={form.phone}
+                onChange={(e) => {
+                  setForm({ ...form, phone: e.target.value });
+                  setErrors((prev) => ({ ...prev, phone: undefined }));
+                }}
+                placeholder="+254 7XX XXX XXX"
+                aria-invalid={Boolean(errors.phone)}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+              {errors.phone && (
+                <p role="alert" className="mt-1 text-[11px] font-semibold text-red-600">
+                  {errors.phone}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <span className="block text-xs font-bold text-servora-navy mb-2">
+              Preferred Contact Method
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {CONTACT_METHODS.map((method) => {
+                const active = form.preferredContact === method;
+                return (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => setForm({ ...form, preferredContact: method })}
+                    aria-pressed={active}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      active
+                        ? 'bg-servora-navy text-white border-servora-navy'
+                        : 'bg-servora-pale/60 text-servora-navy border-gray-200 hover:border-servora-core'
+                    }`}
+                  >
+                    {method}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </fieldset>
+
+        {/* B. Business Information */}
+        <fieldset className="space-y-4 pt-4 border-t border-gray-100">
+          <legend className="text-xs font-extrabold uppercase tracking-wider text-servora-navy font-mono">
+            2. Business Information
+          </legend>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="businessType"
+                className="block text-xs font-bold text-servora-navy mb-1.5"
+              >
+                Business Type
+              </label>
+              <select
+                id="businessType"
+                value={form.businessType}
+                onChange={(e) => setForm({ ...form, businessType: e.target.value })}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs font-semibold text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+              >
+                {BUSINESS_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label
+                htmlFor="outletCount"
+                className="block text-xs font-bold text-servora-navy mb-1.5"
+              >
+                Number of Outlets
+              </label>
+              <select
+                id="outletCount"
+                value={form.outletCount}
+                onChange={(e) => setForm({ ...form, outletCount: e.target.value })}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs font-semibold text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+              >
+                {OUTLET_COUNTS.map((count) => (
+                  <option key={count} value={count}>
+                    {count}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="city" className="block text-xs font-bold text-servora-navy mb-1.5">
+                Town / City
+              </label>
+              <input
+                id="city"
+                type="text"
+                value={form.city}
+                onChange={(e) => setForm({ ...form, city: e.target.value })}
+                placeholder="e.g., Nairobi"
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="county" className="block text-xs font-bold text-servora-navy mb-1.5">
+                County / Region
+              </label>
+              <input
+                id="county"
+                type="text"
+                value={form.county}
+                onChange={(e) => setForm({ ...form, county: e.target.value })}
+                placeholder="e.g., Nairobi County"
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="country" className="block text-xs font-bold text-servora-navy mb-1.5">
+                Country
+              </label>
+              <input
+                id="country"
+                type="text"
+                value={form.country}
+                onChange={(e) => setForm({ ...form, country: e.target.value })}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+            </div>
+          </div>
+        </fieldset>
+
+        {/* C & D. Enquiry Type & Interests */}
+        <fieldset className="space-y-4 pt-4 border-t border-gray-100">
+          <legend className="text-xs font-extrabold uppercase tracking-wider text-servora-navy font-mono">
+            3. Enquiry &amp; Areas of Interest
+          </legend>
+
+          <div>
+            <label
+              htmlFor="enquiryType"
+              className="block text-xs font-bold text-servora-navy mb-1.5"
+            >
+              Enquiry Type
+            </label>
+            <select
+              id="enquiryType"
+              value={form.enquiryType}
+              onChange={(e) => setForm({ ...form, enquiryType: e.target.value })}
+              className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs font-semibold text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+            >
+              {ENQUIRY_TYPES.map((type) => (
+                <option key={type} value={type}>
+                  {type}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <span className="block text-xs font-bold text-servora-navy mb-2">
+              What Are You Interested In? <span className="text-red-600">*</span>
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {SERVICE_INTERESTS.map((interest) => {
+                const selected = form.interests.includes(interest);
+                return (
+                  <button
+                    key={interest}
+                    type="button"
+                    onClick={() => toggleInterest(interest)}
+                    aria-pressed={selected}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-bold border transition-all cursor-pointer ${
+                      selected
+                        ? 'bg-servora-core text-white border-servora-core shadow-2xs'
+                        : 'bg-servora-pale/60 text-servora-navy border-gray-200 hover:border-servora-core'
+                    }`}
+                  >
+                    {interest}
+                  </button>
+                );
+              })}
+            </div>
+            {errors.interests && (
+              <p role="alert" className="mt-1.5 text-[11px] font-semibold text-red-600">
+                {errors.interests}
+              </p>
+            )}
+          </div>
+        </fieldset>
+
+        {/* E & F. Schedule & Additional Information */}
+        <fieldset className="space-y-4 pt-4 border-t border-gray-100">
+          <legend className="text-xs font-extrabold uppercase tracking-wider text-servora-navy font-mono">
+            4. Preferred Demo Schedule &amp; Requirements
+          </legend>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label
+                htmlFor="preferredDate"
+                className="block text-xs font-bold text-servora-navy mb-1.5"
+              >
+                Preferred Date (Optional)
+              </label>
+              <input
+                id="preferredDate"
+                type="date"
+                value={form.preferredDate}
+                onChange={(e) => setForm({ ...form, preferredDate: e.target.value })}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="preferredTime"
+                className="block text-xs font-bold text-servora-navy mb-1.5"
+              >
+                Preferred Time (Optional)
+              </label>
+              <input
+                id="preferredTime"
+                type="time"
+                value={form.preferredTime}
+                onChange={(e) => setForm({ ...form, preferredTime: e.target.value })}
+                className="w-full h-11 rounded-xl border border-gray-200 bg-servora-pale/40 px-3.5 text-xs text-servora-navy focus:border-servora-core focus:bg-white focus:outline-none"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-servora-deepTeal">
+            Our team will confirm availability for your preferred date and time during business hours (Monday – Friday, 8:30 AM – 5:00 PM EAT).
+          </p>
+
+          <div>
+            <label htmlFor="message" className="block text-xs font-bold text-servora-navy mb-1.5">
+              Tell Us More About Your Requirements
+            </label>
+            <textarea
+              id="message"
+              rows={4}
+              value={form.message}
+              onChange={(e) => setForm({ ...form, message: e.target.value })}
+              placeholder="Describe your current operations, challenges, or the features you would like to explore..."
+              className="w-full rounded-xl border border-gray-200 bg-servora-pale/40 p-3.5 text-xs text-servora-navy placeholder:text-gray-400 focus:border-servora-core focus:bg-white focus:outline-none"
+            />
+          </div>
+        </fieldset>
+
+        {/* G. Consent */}
+        <div className="pt-2">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.consent}
+              onChange={(e) => {
+                setForm({ ...form, consent: e.target.checked });
+                setErrors((prev) => ({ ...prev, consent: undefined }));
+              }}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-servora-core focus:ring-servora-core"
+            />
+            <span className="text-xs text-servora-deepTeal leading-relaxed">
+              I agree to be contacted by Mavora Technologies regarding this enquiry.{' '}
+              <span className="text-red-600">*</span>
+            </span>
           </label>
-          <select
-            id="contact-topic"
-            value={inquiryTopic}
-            onChange={(e) => setInquiryTopic(e.target.value)}
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-servora-core transition-colors"
+          {errors.consent && (
+            <p role="alert" className="mt-1 text-[11px] font-semibold text-red-600">
+              {errors.consent}
+            </p>
+          )}
+        </div>
+
+        {/* H. Submit */}
+        <div className="space-y-3">
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full inline-flex h-12 items-center justify-center rounded-xl bg-servora-core px-7 text-sm font-bold text-white shadow-lg shadow-servora-core/25 transition-all hover:bg-blue-700 disabled:opacity-60 cursor-pointer"
           >
-            <option>Schedule a Live Demo / Walkthrough</option>
-            <option>Hotel F&amp;B &amp; Multi-Outlet Deployment</option>
-            <option>Inquire About Pricing &amp; Plans</option>
-            <option>M-Pesa Daraja &amp; KRA eTIMS Integration</option>
-            <option>POS Hardware &amp; Terminal Bundles</option>
-            <option>Technical RFP &amp; Brief Submission</option>
-          </select>
+            {isSubmitting ? 'Opening WhatsApp...' : 'Submit Enquiry & Request a Demo →'}
+          </button>
+
+          {whatsappUrl && (
+            <div
+              role="status"
+              className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 text-xs text-emerald-900"
+            >
+              <p className="font-bold">Ready to continue on WhatsApp.</p>
+              <p className="mt-1 leading-relaxed">
+                Your structured enquiry has been prepared for our Nairobi team. If WhatsApp did not open automatically,{' '}
+                <a
+                  href={whatsappUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-bold underline text-emerald-800"
+                >
+                  click here to send your message on WhatsApp
+                </a>
+                .
+              </p>
+            </div>
+          )}
         </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="contact-branches" className="text-xs font-semibold text-servora-navy">
-            Number of Outlets / Branches *
-          </label>
-          <select
-            id="contact-branches"
-            value={branchCount}
-            onChange={(e) => setBranchCount(e.target.value)}
-            className="h-10 px-3 rounded-lg border border-gray-200 text-sm bg-white focus:outline-none focus:border-servora-core transition-colors"
-          >
-            <option>1 Outlet / Branch</option>
-            <option>2 – 5 Branches</option>
-            <option>6 – 15 Branches</option>
-            <option>15+ Multi-Property Group</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="contact-message" className="text-xs font-semibold text-servora-navy">
-          Operational Requirements &amp; Message *
-        </label>
-        <textarea
-          id="contact-message"
-          required
-          rows={4}
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Tell us about your restaurant, bar, café, or hotel F&B outlets, service model, and timeline..."
-          className="p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-servora-core transition-colors"
-        />
-      </div>
-
-      <button
-        type="submit"
-        className="inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-6 text-sm font-semibold text-white shadow-md shadow-servora-core/20 transition-all hover:bg-blue-700 cursor-pointer"
-      >
-        Submit Your Inquiry &rarr;
-      </button>
-    </form>
+      </form>
+    </div>
   );
 }
