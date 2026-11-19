@@ -3,23 +3,116 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import Header from '../../components/layout/Header';
 import Footer from '../../components/layout/Footer';
+import FaqAccordionClient from '@/components/marketing/FaqAccordionClient';
 import { buildPageMetadata } from '@/lib/seo';
 import { JsonLd, buildBreadcrumbSchema, buildFaqSchema } from '@/components/seo/JsonLd';
 
 export const metadata: Metadata = buildPageMetadata({
-  title: 'POS Hardware, Touch Terminals & Thermal Printers in Kenya | Servora',
+  title: 'POS Hardware Kenya | Touch Terminals, Printers & Cash Drawers | Servora',
   description:
-    'Turnkey POS hardware procurement and installation in Nairobi, Kenya by Mavora Technologies. Touchscreen POS terminals, 80mm thermal printers, RJ11 cash drawers, and KDS displays built for Servora.',
+    'Source and configure restaurant POS hardware in Kenya with Mavora Technologies. Explore touchscreen POS terminals, thermal receipt printers, cash drawers, and kitchen display systems for Servora.',
   path: '/hardware-pos',
   keywords: [
     'POS Hardware Kenya',
-    'Touch POS Terminals Nairobi',
+    'POS Machines Kenya',
+    'Restaurant POS Hardware Kenya',
+    'Touchscreen POS Terminal Nairobi',
     'Thermal Receipt Printers Kenya',
-    'Cash Drawers for Restaurants Nairobi',
-    'Kitchen Display System Hardware',
-    'Servora POS Hardware Bundles',
+    'POS Cash Drawers Kenya',
+    'Kitchen Display System Hardware Kenya',
+    'Restaurant Touchscreen Computers',
+    '80mm Thermal Receipt Printer',
+    'POS Hardware Procurement Nairobi',
   ],
 });
+
+const PROCUREMENT_STEPS = [
+  {
+    step: '01',
+    title: 'Requirements Assessment',
+    detail: 'We evaluate your venue type, service points, checkout counters, kitchen workflow, and network layout.',
+  },
+  {
+    step: '02',
+    title: 'Hardware Sourcing',
+    detail: 'We select appropriate, commercial-grade POS terminals, printers, cash drawers, and KDS displays.',
+  },
+  {
+    step: '03',
+    title: 'Pre-Configuration',
+    detail: 'Terminals and peripherals are configured and optimized specifically for your Servora cloud environment.',
+  },
+  {
+    step: '04',
+    title: 'Rigorous Testing',
+    detail: 'We test network connectivity, auto-cutters, printer drivers, and cash drawer triggers before delivery.',
+  },
+  {
+    step: '05',
+    title: 'On-Site Installation',
+    detail: 'Our Kilimani team deploys, installs, and connects your complete hardware setup across your venue.',
+  },
+];
+
+const HARDWARE_CATALOG = [
+  {
+    category: 'Touchscreen POS Terminals',
+    desc: 'High-performance 15-inch capacitive touchscreen terminals designed for fast counter and dining room checkout workflows.',
+    specs: ['Splash-proof front bezel', 'Capacitive multi-touch display', 'Integrated customer display options', 'Robust aluminium-alloy stand'],
+    badge: 'Checkout Core',
+  },
+  {
+    category: 'Thermal Receipt Printers',
+    desc: 'High-speed 80mm and 58mm thermal printers for instant customer receipts and kitchen order tickets.',
+    specs: ['Ethernet, USB, & Wi-Fi connectivity', 'Auto-cutter with kitchen audio buzzer', 'ESC/POS command compatibility', 'Drop-in paper loading'],
+    badge: 'Receipts & KDS',
+  },
+  {
+    category: 'Secure Cash Drawers',
+    desc: 'Heavy-duty steel cash drawers with RJ11/12 printer kick interfaces for secure shift reconciliation and cash custody.',
+    specs: ['5 bill slots / 8 coin compartments', '3-position key lock security', 'Heavy-duty steel ball-bearing slides', 'Instant printer-kick trigger'],
+    badge: 'Cash Custody',
+  },
+  {
+    category: 'Kitchen Display System (KDS) Screens',
+    desc: 'Commercial-grade touch display tablets and rugged monitors mounted in the kitchen for digital ticket management.',
+    specs: ['High-brightness anti-glare screen', 'Heat and steam-resistant casing', 'Wall or arm mounting flexibility', 'Seamless Servora KDS integration'],
+    badge: 'Kitchen Prep',
+  },
+  {
+    category: 'Barcode Scanners & Peripherals',
+    desc: 'Fast 1D/2D barcode scanners and accessories to support retail inventory receiving and stock audits.',
+    specs: ['Omnidirectional laser scanning', 'Plug-and-play USB connectivity', 'Durable drop-resistant housing', 'Fast barcode recognition'],
+    badge: 'Stock & Inventory',
+  },
+];
+
+const HARDWARE_BUNDLES = [
+  {
+    name: 'Restaurant POS Setup',
+    bestFor: 'Full-Service & Casual Dining',
+    items: ['15-inch Touchscreen POS Terminal', '80mm Thermal Receipt Printer', 'RJ11 Heavy-Duty Cash Drawer', 'Kitchen Order Printer'],
+    desc: 'Designed for dining rooms, table service, and kitchen communication.',
+  },
+  {
+    name: 'Bar & Lounge POS Setup',
+    bestFor: 'High-Energy Lounges & Pubs',
+    items: ['Counter POS Terminal / Tablet', 'High-Speed 80mm Bar Printer', 'Secure Cash Drawer', 'Optional Bar KDS Screen'],
+    desc: 'Optimized for rapid tab opening, round additions, and fast checkout.',
+  },
+  {
+    name: 'Hotel F&B POS Setup',
+    bestFor: 'Multi-Outlet Hotels & Resorts',
+    items: ['Multiple Outlet POS Terminals', 'Central & Outlet Receipt Printers', 'Departmental Cash Drawers', 'Multi-Station KDS Setup'],
+    desc: 'Coordinated hardware deployment across restaurants, bars, and room service.',
+  },
+  {
+    name: 'Cloud Kitchen Setup',
+    bestFor: 'Dark Kitchens & Delivery Hubs',
+    items: ['Order Management Terminal', 'Multi-Station KDS Screens (Grill/Fry/Prep)', 'Dispatch Label Printers', 'Packaging Station Display'],
+    desc: 'Eliminates paper dockets to maximize speed across virtual food brands.',
+  },
+];
 
 const HARDWARE_FAQS = [
   {
@@ -31,6 +124,21 @@ const HARDWARE_FAQS = [
     question: 'Can Servora run on existing restaurant tablets or Windows terminals?',
     answer:
       'Yes. Servora is a cloud-based web application compatible with Windows POS terminals, Android tablets, iPads, and standard desktop browsers, supporting ESC/POS thermal printers and standard network or USB peripherals.',
+  },
+  {
+    question: 'What hardware does a standard restaurant POS station require?',
+    answer:
+      'A standard checkout station typically requires a touchscreen POS terminal or tablet, an 80mm thermal receipt printer with an auto-cutter, and an RJ11 heavy-duty cash drawer connected directly to the printer.',
+  },
+  {
+    question: 'Can I use my existing thermal receipt printer with Servora?',
+    answer:
+      'In most cases, yes. Servora supports standard ESC/POS network and USB thermal printers. Our technical team can verify printer compatibility during your hardware assessment.',
+  },
+  {
+    question: 'Does the hardware quotation include professional on-site installation?',
+    answer:
+      'Yes. Mavora Technologies provides complete procurement, pre-configuration, testing, and on-site installation across Nairobi and surrounding regions to ensure your POS environment is fully operational.',
   },
 ];
 
@@ -50,253 +158,272 @@ export default function HardwarePosPage() {
 
       <main className="flex-grow w-full">
         {/* --- HERO SECTION --- */}
-        <section className="relative overflow-hidden pt-12 pb-16 sm:pt-16 sm:pb-24 w-full px-4 sm:px-8 lg:px-16 bg-white border-b border-gray-100">
-          <div className="w-full max-w-5xl mx-auto flex flex-col items-center text-center">
-            <nav aria-label="Breadcrumb" className="mb-4 text-xs text-servora-deepTeal">
-              <ol className="inline-flex items-center gap-1.5">
-                <li>
-                  <Link href="/" className="hover:text-servora-core font-semibold">
-                    Home
-                  </Link>
-                </li>
-                <li>/</li>
-                <li className="font-bold text-servora-navy">POS Hardware &amp; Terminals</li>
-              </ol>
-            </nav>
+        <section className="relative overflow-hidden pt-8 pb-12 sm:pt-12 sm:pb-16 lg:pt-14 lg:pb-20 w-full px-4 sm:px-8 lg:px-16 bg-gradient-to-b from-white via-servora-pale/60 to-servora-pale border-b border-gray-200/60">
+          <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+            <div className="lg:col-span-6 flex flex-col items-start text-left">
+              <nav aria-label="Breadcrumb" className="mb-3 text-xs text-servora-deepTeal">
+                <ol className="inline-flex items-center gap-1.5">
+                  <li>
+                    <Link href="/" className="hover:text-servora-core font-semibold">
+                      Home
+                    </Link>
+                  </li>
+                  <li>/</li>
+                  <li className="font-bold text-servora-navy">POS Hardware &amp; Terminals</li>
+                </ol>
+              </nav>
 
-            <span className="text-servora-teal font-bold tracking-wider uppercase text-xs mb-3">
-              Reliable Hospitality Hardware &amp; Procurement
-            </span>
-            <h1 className="w-full text-3xl font-extrabold tracking-tight text-servora-navy sm:text-4xl lg:text-5xl leading-[1.15]">
-              Enterprise-Grade POS Hardware &amp;{' '}
-              <span className="bg-gradient-to-r from-servora-core via-servora-bright to-servora-teal bg-clip-text text-transparent">
-                Peripherals for Kenya
+              <span className="inline-flex items-center gap-2 rounded-full bg-white px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-widest text-servora-teal shadow-2xs ring-1 ring-inset ring-servora-core/15 mb-4">
+                Hardware Procurement &amp; Deployment Partner
               </span>
-            </h1>
-            <p className="mt-6 max-w-3xl text-base sm:text-lg leading-relaxed text-servora-deepTeal">
-              Equip your hotel F&amp;B outlet, restaurant, bar, café, or cloud kitchen with high-speed touch terminals, thermal receipt printers, secure cash drawers, and KDS displays configured by Mavora Technologies.
-            </p>
-            <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4 w-full sm:w-auto">
-              <Link
-                href="/contact"
-                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-7 text-sm font-semibold text-white shadow-md transition-all hover:bg-blue-700"
-              >
-                Request Hardware Quote
-              </Link>
-              <Link
-                href="/pricing"
-                className="w-full sm:w-auto inline-flex h-11 items-center justify-center rounded-lg border border-gray-200 bg-white px-7 text-sm font-semibold text-servora-navy shadow-sm transition-all hover:border-servora-core"
-              >
-                View Software Plans
-              </Link>
+
+              <h1 className="w-full text-[clamp(1.85rem,3.6vw,3.3rem)] font-extrabold tracking-tight text-servora-navy leading-[1.12]">
+                Complete POS Hardware Solutions for{' '}
+                <span className="bg-gradient-to-r from-servora-core via-servora-bright to-servora-teal bg-clip-text text-transparent">
+                  Modern Hospitality Businesses.
+                </span>
+              </h1>
+
+              <p className="mt-4 max-w-xl text-sm sm:text-base leading-relaxed text-servora-deepTeal">
+                From touchscreen POS terminals and high-speed thermal printers to secure cash drawers and kitchen display systems, Mavora Technologies helps you source, configure, and deploy the hardware required to run your hospitality operations with Servora.
+              </p>
+
+              <div className="mt-6 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+                <Link
+                  href="/contact"
+                  className="inline-flex h-12 items-center justify-center rounded-xl bg-servora-core px-7 text-xs sm:text-sm font-bold text-white shadow-lg shadow-servora-core/25 transition-all hover:bg-blue-700"
+                >
+                  Request Hardware Quote &rarr;
+                </Link>
+                <Link
+                  href="/pricing"
+                  className="inline-flex h-12 items-center justify-center rounded-xl border border-gray-200 bg-white px-7 text-xs sm:text-sm font-bold text-servora-navy shadow-2xs transition-all hover:border-servora-core hover:text-servora-core"
+                >
+                  Explore Software Plans
+                </Link>
+              </div>
+            </div>
+
+            {/* Hero Visual */}
+            <div className="lg:col-span-6 w-full">
+              <div className="rounded-3xl bg-servora-navy p-2.5 sm:p-3 shadow-2xl ring-1 ring-white/15 overflow-hidden">
+                <div className="relative aspect-[16/10] w-full overflow-hidden rounded-2xl bg-slate-950">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/images/resources/restaurant-pos-kenya.png"
+                    alt="Professional Servora touchscreen POS terminal, thermal printer, and cash drawer hardware setup"
+                    className="h-full w-full object-cover object-center"
+                  />
+                </div>
+                <div className="mt-2.5 px-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-300">
+                  <span className="font-semibold text-white">
+                    Touch Terminals &bull; 80mm Thermal Printers &bull; RJ11 Cash Drawers &bull; KDS Displays
+                  </span>
+                  <span className="font-mono text-servora-teal">Turnkey Hardware by Mavora</span>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
-        {/* --- WE OUTSOURCE & PROCURE FOR YOU SECTION --- */}
-        <section className="py-12 w-full bg-servora-navy text-white px-4 sm:px-8 lg:px-16 border-b border-white/10">
-          <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8 items-center">
-            <div className="lg:col-span-2">
-              <span className="inline-flex items-center rounded-md bg-servora-teal/20 px-2.5 py-1 text-xs font-semibold text-servora-teal ring-1 ring-inset ring-servora-teal/30 mb-3">
-                Full-Service Procurement &amp; Outsourcing
+        {/* --- SECTION 2: PROCUREMENT PROCESS TIMELINE --- */}
+        <section className="py-16 sm:py-24 w-full bg-servora-navy text-white px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center max-w-3xl mx-auto mb-12">
+              <span className="inline-block rounded-full bg-servora-teal/20 px-3.5 py-1 text-[11px] font-bold text-servora-teal uppercase tracking-widest ring-1 ring-inset ring-servora-teal/30">
+                End-to-End Deployment
               </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-white mb-3">
-                We Source, Configure &amp; Install Custom POS Hardware For You
+              <h2 className="mt-3 text-[clamp(1.6rem,2.8vw,2.5rem)] font-extrabold text-white tracking-tight">
+                We Handle Your POS Hardware Procurement from Sourcing to Installation.
               </h2>
-              <p className="text-xs sm:text-sm text-servora-pale/80 leading-relaxed max-w-2xl">
-                Avoid incompatible drivers and unverified suppliers. Mavora Technologies Ltd sources, imports, stress-tests, and configures all POS terminals, 80mm thermal printers, barcode scanners, and kitchen display tablets specifically tailored to your venue’s layout.
+              <p className="mt-3 text-xs sm:text-sm text-gray-300">
+                Avoid incompatible drivers and unverified suppliers. Mavora Technologies sources, tests, and deploys equipment configured for your venue.
               </p>
             </div>
-            <div className="flex flex-col sm:flex-row lg:flex-col gap-3 justify-end">
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <span className="text-xs font-medium text-white">Custom Vendor Sourcing &amp; Imports</span>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <span className="text-xs font-medium text-white">Pre-Configured &amp; Quality Tested</span>
-              </div>
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10">
-                <div className="w-8 h-8 rounded-lg bg-servora-teal/20 text-servora-teal flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <span className="text-xs font-medium text-white">On-Site Installation Across Kenya</span>
-              </div>
-            </div>
-          </div>
-        </section>
 
-        {/* --- HARDWARE GRID SECTION --- */}
-        <section className="py-16 sm:py-24 w-full px-4 sm:px-8 lg:px-16">
-          <div className="w-full max-w-7xl mx-auto">
-            <div className="text-center max-w-2xl mx-auto mb-16">
-              <span className="text-xs font-bold text-servora-teal uppercase tracking-widest">
-                Optimized for Servora POS
-              </span>
-              <h2 className="mt-2 text-2xl font-bold text-servora-navy sm:text-3xl">
-                Recommended Hospitality Hardware Bundles
-              </h2>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {/* Item 1 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
-                <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Touch POS Terminal</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed mb-6">
-                    High-performance 15-inch capacitive touchscreen terminal designed for fast counter and dining room checkout workflows.
-                  </p>
-                  <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>Splash-proof front bezel</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>Integrated customer display option</span>
-                    </li>
-                  </ul>
-                </div>
-                <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
-                    In Stock / Sourced On Demand
-                  </span>
-                </div>
-              </div>
-
-              {/* Item 2 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
-                <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Thermal Receipt Printers</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed mb-6">
-                    High-speed 80mm and 58mm thermal printers for instant fiscal customer receipts and kitchen order tickets.
-                  </p>
-                  <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>Ethernet, USB, &amp; Wi-Fi connectivity</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>Auto-cutter with kitchen audio buzzer</span>
-                    </li>
-                  </ul>
-                </div>
-                <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
-                    In Stock / Sourced On Demand
-                  </span>
-                </div>
-              </div>
-
-              {/* Item 3 */}
-              <div className="flex flex-col justify-between rounded-2xl bg-white p-8 border border-gray-200 shadow-sm transition-all hover:border-servora-core/50 hover:shadow-lg">
-                <div>
-                  <div className="w-12 h-12 rounded-xl bg-servora-core/10 text-servora-core flex items-center justify-center mb-6">
-                    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-bold text-servora-navy mb-2">Secure Cash Drawers</h3>
-                  <p className="text-xs text-servora-deepTeal leading-relaxed mb-6">
-                    Heavy-duty steel cash drawers with RJ11/12 printer kick interfaces for secure shift reconciliation and cash custody.
-                  </p>
-                  <ul className="flex flex-col gap-2.5 text-xs text-servora-deepTeal border-t border-gray-100 pt-4">
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>5 bill slots / 8 coin compartments</span>
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <svg className="w-4 h-4 text-servora-teal flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                      </svg>
-                      <span>3-position key lock security</span>
-                    </li>
-                  </ul>
-                </div>
-                <div className="mt-8 pt-4 border-t border-gray-100">
-                  <span className="text-xs text-servora-deepTeal font-semibold uppercase tracking-wider">
-                    In Stock / Sourced On Demand
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* --- HARDWARE FAQS --- */}
-        <section className="py-16 w-full bg-white border-t border-gray-100 px-4 sm:px-8 lg:px-16">
-          <div className="max-w-4xl mx-auto">
-            <h2 className="text-2xl font-bold text-servora-navy text-center mb-8">
-              POS Hardware &amp; Compatibility Questions
-            </h2>
-            <div className="space-y-4">
-              {HARDWARE_FAQS.map((faq) => (
-                <article
-                  key={faq.question}
-                  className="rounded-2xl bg-servora-pale border border-gray-200 p-6"
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+              {PROCUREMENT_STEPS.map((p, idx) => (
+                <div
+                  key={p.step}
+                  className="rounded-2xl bg-white/5 border border-white/10 p-4 flex flex-col justify-between"
                 >
-                  <h3 className="text-base font-bold text-servora-navy">{faq.question}</h3>
-                  <p className="mt-2 text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
-                    {faq.answer}
-                  </p>
-                </article>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-[11px] font-mono font-extrabold text-servora-teal bg-servora-teal/15 px-2 py-0.5 rounded">
+                        STEP {p.step}
+                      </span>
+                      {idx < PROCUREMENT_STEPS.length - 1 && (
+                        <span className="hidden lg:inline text-gray-400 font-mono text-xs">&rarr;</span>
+                      )}
+                    </div>
+                    <h3 className="text-sm font-bold text-white mb-1">{p.title}</h3>
+                    <p className="text-[11px] text-gray-300 leading-relaxed">{p.detail}</p>
+                  </div>
+                </div>
               ))}
             </div>
           </div>
         </section>
 
-        {/* --- CALL TO ACTION BANNER --- */}
-        <section className="py-16 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
-          <div className="w-full max-w-7xl mx-auto rounded-2xl bg-white p-8 sm:p-12 border border-gray-200 shadow-sm flex flex-col md:flex-row items-center justify-between gap-8">
-            <div>
-              <span className="inline-block rounded-md bg-servora-core/10 px-3 py-1 text-[11px] font-bold text-servora-core uppercase tracking-wider mb-2">
-                Hardware Solutions
+        {/* --- SECTION 3: HARDWARE CATALOG --- */}
+        <section className="py-16 sm:py-24 w-full bg-white px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center max-w-3xl mx-auto mb-12">
+              <span className="text-[11px] font-bold text-servora-teal uppercase tracking-widest bg-servora-core/10 px-3.5 py-1 rounded-full">
+                Hardware Equipment
               </span>
-              <h2 className="text-2xl sm:text-3xl font-extrabold text-servora-navy mb-2">
-                Need Us to Handle Your Hardware Procurement?
+              <h2 className="mt-3 text-[clamp(1.6rem,2.8vw,2.5rem)] font-extrabold text-servora-navy tracking-tight">
+                Commercial-Grade Peripherals Built for Hospitality Reliability
               </h2>
-              <p className="text-xs sm:text-sm text-servora-deepTeal leading-relaxed max-w-xl">
-                Contact our Kilimani team via WhatsApp to outline your outlet’s technical brief. We will procure, configure, and install everything on-site.
-              </p>
             </div>
 
-            <div className="flex flex-col sm:flex-row items-center gap-4 flex-shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {HARDWARE_CATALOG.map((item) => (
+                <div
+                  key={item.category}
+                  className="rounded-3xl bg-servora-pale border border-gray-200/80 p-7 flex flex-col justify-between shadow-2xs"
+                >
+                  <div>
+                    <span className="inline-block rounded-full bg-servora-core/10 px-3 py-1 text-[10px] font-bold text-servora-core uppercase tracking-wider mb-3">
+                      {item.badge}
+                    </span>
+                    <h3 className="text-lg font-extrabold text-servora-navy mb-2">{item.category}</h3>
+                    <p className="text-xs text-servora-deepTeal leading-relaxed mb-4">{item.desc}</p>
+                    <ul className="space-y-2 text-xs font-semibold text-servora-navy border-t border-gray-200/70 pt-4">
+                      {item.specs.map((spec) => (
+                        <li key={spec} className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-servora-teal flex-shrink-0" />
+                          <span>{spec}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="mt-6 pt-4 border-t border-gray-200/70 flex items-center justify-between text-xs font-bold text-servora-core">
+                    <span>Sourced On Demand</span>
+                    <Link href="/contact" className="hover:underline">Inquire &rarr;</Link>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* --- SECTION 4: HARDWARE CONFIGURATION BUNDLES --- */}
+        <section className="py-16 sm:py-24 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center max-w-3xl mx-auto mb-12">
+              <span className="text-[11px] font-bold text-servora-teal uppercase tracking-widest bg-servora-core/10 px-3.5 py-1 rounded-full">
+                Deployment Setups
+              </span>
+              <h2 className="mt-3 text-[clamp(1.6rem,2.8vw,2.5rem)] font-extrabold text-servora-navy tracking-tight">
+                Recommended POS Hardware Setups for Different Business Types
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+              {HARDWARE_BUNDLES.map((bundle) => (
+                <div
+                  key={bundle.name}
+                  className="rounded-3xl bg-white border border-gray-200/90 p-6 shadow-xs flex flex-col justify-between"
+                >
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-servora-core font-bold">
+                      {bundle.bestFor}
+                    </span>
+                    <h3 className="text-base font-extrabold text-servora-navy mt-1 mb-2">{bundle.name}</h3>
+                    <p className="text-xs text-servora-deepTeal leading-relaxed mb-4">{bundle.desc}</p>
+                    <div className="space-y-1.5 pt-3 border-t border-gray-100">
+                      <p className="text-[10px] font-bold text-servora-navy uppercase">Bundle Includes:</p>
+                      {bundle.items.map((i) => (
+                        <p key={i} className="text-xs text-servora-deepTeal flex items-center gap-1.5">
+                          <span className="w-1 h-1 rounded-full bg-servora-teal" />
+                          <span>{i}</span>
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                  <Link
+                    href="/contact"
+                    className="mt-6 inline-flex w-full h-10 items-center justify-center rounded-xl bg-servora-pale text-xs font-bold text-servora-navy hover:bg-servora-core hover:text-white transition-colors"
+                  >
+                    Get Setup Quote &rarr;
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* --- SECTION 8: HARDWARE WORKFLOW & INTEGRATION --- */}
+        <section className="py-16 sm:py-24 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
+            <div className="lg:col-span-6">
+              <span className="inline-block rounded-full bg-servora-core/10 px-3.5 py-1 text-[11px] font-bold text-servora-core uppercase tracking-widest">
+                Ecosystem Architecture
+              </span>
+              <h2 className="mt-3 text-[clamp(1.6rem,2.8vw,2.5rem)] font-extrabold text-servora-navy tracking-tight">
+                One Connected Hardware Environment. One Smarter Operation.
+              </h2>
+              <p className="mt-4 text-xs sm:text-sm text-servora-deepTeal leading-relaxed">
+                Physical peripherals communicate seamlessly with the Servora cloud application. When a cashier completes an order, the terminal triggers the thermal receipt printer, kicks the cash drawer open, and routes kitchen orders instantly without lag.
+              </p>
+            </div>
+            <div className="lg:col-span-6 rounded-3xl bg-servora-navy text-white p-7 sm:p-9 shadow-lg space-y-4">
+              <span className="text-[10px] font-mono uppercase tracking-widest text-servora-teal">
+                Hardware Synchronization
+              </span>
+              <h3 className="text-lg font-extrabold text-white">
+                Zero-Lag Peripheral Triggering
+              </h3>
+              <p className="text-xs text-gray-300 leading-relaxed">
+                Our technicians configure local network settings, static IP assignments for kitchen printers, and USB port mappings so your checkout counter never skips a beat during peak hours.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* --- SECTION 14: HARDWARE FAQS --- */}
+        <section className="py-16 sm:py-24 w-full bg-servora-pale border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-12">
+              <span className="text-[11px] font-bold text-servora-teal uppercase tracking-widest bg-servora-core/10 px-3.5 py-1 rounded-full">
+                Hardware FAQ
+              </span>
+              <h2 className="mt-3 text-[clamp(1.6rem,2.8vw,2.5rem)] font-extrabold text-servora-navy tracking-tight">
+                POS Hardware &amp; Compatibility Questions
+              </h2>
+            </div>
+
+            <FaqAccordionClient faqs={HARDWARE_FAQS} />
+          </div>
+        </section>
+
+        {/* --- SECTION 13: FINAL CONVERSION SECTION --- */}
+        <section className="py-16 sm:py-24 w-full bg-white border-t border-gray-200/60 px-4 sm:px-8 lg:px-16">
+          <div className="max-w-7xl mx-auto rounded-3xl bg-gradient-to-br from-servora-navy via-[#072a6b] to-servora-core p-8 sm:p-14 lg:p-16 text-white shadow-2xl flex flex-col items-center text-center relative overflow-hidden ring-1 ring-white/15">
+            <div className="absolute -right-20 -bottom-20 w-96 h-96 rounded-full bg-servora-teal/20 blur-3xl pointer-events-none" />
+
+            <span className="inline-block rounded-full bg-servora-teal/20 px-4 py-1.5 text-xs font-bold text-servora-teal uppercase tracking-wider mb-5 ring-1 ring-inset ring-servora-teal/30">
+              Simplify Service. Grow Smarter.
+            </span>
+            <h2 className="text-3xl sm:text-5xl font-extrabold mb-4 tracking-tight leading-tight max-w-4xl text-white">
+              Let&apos;s Configure the Right POS Hardware for Your Business.
+            </h2>
+            <p className="text-sm sm:text-base text-gray-200 max-w-2xl mb-8 leading-relaxed">
+              Tell us about your business, your service points, and your operational requirements. Our team can help you identify the right POS hardware configuration for your Servora environment.
+            </p>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-4 w-full sm:w-auto">
               <Link
                 href="/contact"
-                className="inline-flex h-11 items-center justify-center rounded-lg bg-servora-core px-7 text-sm font-semibold text-white shadow-md transition-all hover:bg-blue-700"
+                className="w-full sm:w-auto inline-flex h-12 items-center justify-center rounded-xl bg-white px-8 text-sm font-bold text-servora-navy shadow-xl transition-all hover:bg-servora-pale"
               >
-                Request Procurement Brief
+                Request Hardware Quote &rarr;
+              </Link>
+              <Link
+                href="/features"
+                className="w-full sm:w-auto inline-flex h-12 items-center justify-center rounded-xl border border-white/30 bg-white/10 px-8 text-sm font-bold text-white transition-all hover:bg-white/20 backdrop-blur-xs"
+              >
+                Explore Servora Features
               </Link>
             </div>
           </div>
