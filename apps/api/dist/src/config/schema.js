@@ -1,11 +1,14 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fiscalInvoices = exports.mpesaC2bCallbacks = exports.drawerSessions = exports.cashDrawers = exports.refunds = exports.mpesaTransactions = exports.bankStatementLines = exports.bankStatements = exports.payments = exports.cashierShifts = exports.deliveryAssignments = exports.transferFleetDispatches = exports.logisticsVehicles = exports.logisticsFleet = exports.stockTransferItems = exports.stockTransfers = exports.stockCountItems = exports.stockCounts = exports.stockMovements = exports.orderItems = exports.orders = exports.waitlistEntries = exports.reservations = exports.restaurantTables = exports.diningAreas = exports.wasteLogs = exports.warehouseLocations = exports.inventoryBatches = exports.unitConversions = exports.inventoryItems = exports.supplierReturnItems = exports.supplierReturns = exports.supplierInvoiceItems = exports.supplierInvoices = exports.goodsReceivedItems = exports.goodsReceivedNotes = exports.purchaseOrderItems = exports.purchaseOrders = exports.purchaseRequestItems = exports.purchaseRequests = exports.suppliers = exports.menuModifiers = exports.menuItems = exports.menuCategories = exports.userBranchMemberships = exports.roles = exports.users = exports.branches = exports.tenants = exports.userRoleEnum = void 0;
-exports.supportTicketMessages = exports.supportTickets = exports.userSessions = exports.securitySettings = exports.billingInvoices = exports.tenantSubscriptions = exports.billingPaymentMethods = exports.subscriptionPlans = exports.deviceEnrollmentTokens = exports.posDevices = exports.offlineSyncBatches = exports.offlineSettings = exports.auditLogs = exports.orderIntegrationLogs = exports.orderIntegrations = exports.messagingLogs = exports.messagingTemplates = exports.messagingIntegrations = exports.paymentWebhookLogs = exports.paymentIntegrations = exports.kitchenGlobalSettings = exports.kitchenStations = exports.networkPrinters = exports.receiptTemplates = exports.serviceModels = exports.taxCodes = exports.tenantFinancialSettings = exports.staffPerformanceReviews = exports.cashierAssignments = exports.shiftHandovers = exports.attendanceRecords = exports.workSchedules = exports.shiftTemplates = exports.warehouseBins = exports.warehouseZones = exports.notifications = exports.recipeIngredients = exports.recipes = exports.menuItemAvailability = exports.itemPricingRules = exports.comboBundleItems = exports.comboBundles = exports.modifierOptions = exports.modifierGroups = exports.orderItemsRelations = exports.ordersRelations = exports.menuItemsRelations = exports.menuCategoriesRelations = exports.branchesRelations = exports.tenantsRelations = void 0;
-exports.financialAdjustments = exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = void 0;
+exports.mpesaC2bCallbacks = exports.drawerSessions = exports.cashDrawers = exports.refunds = exports.mpesaTransactions = exports.bankStatementLines = exports.bankStatements = exports.payments = exports.cashierShifts = exports.deliveryAssignments = exports.transferFleetDispatches = exports.logisticsVehicles = exports.logisticsFleet = exports.stockTransferItems = exports.stockTransfers = exports.stockCountItems = exports.stockCounts = exports.stockMovements = exports.orderItems = exports.orders = exports.waitlistEntries = exports.reservations = exports.restaurantTables = exports.diningAreas = exports.wasteLogs = exports.warehouseLocations = exports.inventoryBatches = exports.unitConversions = exports.inventoryBranchStock = exports.inventoryItems = exports.supplierReturnItems = exports.supplierReturns = exports.supplierInvoiceItems = exports.supplierInvoices = exports.goodsReceivedItems = exports.goodsReceivedNotes = exports.purchaseOrderItems = exports.purchaseOrders = exports.purchaseRequestItems = exports.purchaseRequests = exports.suppliers = exports.menuModifiers = exports.menuItems = exports.menuCategories = exports.userBranchMemberships = exports.roles = exports.users = exports.branches = exports.tenants = exports.userRoleEnum = void 0;
+exports.supportTickets = exports.userSessions = exports.securitySettings = exports.billingInvoices = exports.tenantSubscriptions = exports.billingPaymentMethods = exports.subscriptionPlans = exports.deviceEnrollmentTokens = exports.posDevices = exports.offlineSyncBatches = exports.offlineSettings = exports.auditLogs = exports.orderIntegrationLogs = exports.orderIntegrations = exports.messagingLogs = exports.messagingTemplates = exports.messagingIntegrations = exports.paymentWebhookLogs = exports.paymentIntegrations = exports.kitchenGlobalSettings = exports.kitchenStations = exports.networkPrinters = exports.receiptTemplates = exports.serviceModels = exports.taxCodes = exports.tenantFinancialSettings = exports.staffPerformanceReviews = exports.cashierAssignments = exports.shiftHandovers = exports.attendanceRecords = exports.workSchedules = exports.shiftTemplates = exports.warehouseBins = exports.warehouseZones = exports.notifications = exports.recipeIngredients = exports.recipes = exports.menuItemAvailability = exports.itemPricingRules = exports.comboBundleItems = exports.comboBundles = exports.modifierOptions = exports.modifierGroups = exports.orderItemsRelations = exports.ordersRelations = exports.menuItemsRelations = exports.menuCategoriesRelations = exports.branchesRelations = exports.tenantsRelations = exports.fiscalInvoices = void 0;
+exports.financialAdjustments = exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = exports.supportTicketMessages = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const drizzle_orm_1 = require("drizzle-orm");
-// 1. Define explicit role enum
+/**
+ * @deprecated Retained for backwards compatibility with existing imports.
+ * `users.role` uses `varchar` to support dynamic tenant roles via the `roles` table.
+ */
 exports.userRoleEnum = (0, pg_core_1.pgEnum)('user_role', [
     'SUPER_ADMIN',
     'ADMIN',
@@ -35,7 +38,10 @@ exports.tenants = (0, pg_core_1.pgTable)('tenants', {
     logoUrl: (0, pg_core_1.text)('logo_url'),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('tenants_slug_idx').on(t.slug),
     (0, pg_core_1.index)('tenants_active_idx').on(t.isActive),
@@ -57,7 +63,10 @@ exports.branches = (0, pg_core_1.pgTable)('branches', {
     isMainBranch: (0, pg_core_1.boolean)('is_main_branch').default(false).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('branches_tenant_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('branches_tenant_idx').on(t.tenantId),
@@ -103,9 +112,17 @@ exports.roles = (0, pg_core_1.pgTable)('roles', {
     permissions: (0, pg_core_1.jsonb)('permissions').$type().default([]).notNull(), // e.g. ["pos.checkout", "pos.void", "inventory.adjust"]
     isSystemRole: (0, pg_core_1.boolean)('is_system_role').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
-    (0, pg_core_1.uniqueIndex)('roles_tenant_slug_idx').on(t.tenantId, t.slug),
+    (0, pg_core_1.uniqueIndex)('roles_tenant_slug_idx')
+        .on(t.tenantId, t.slug)
+        .where((0, drizzle_orm_1.sql) `${t.tenantId} IS NOT NULL`),
+    (0, pg_core_1.uniqueIndex)('roles_system_slug_idx')
+        .on(t.slug)
+        .where((0, drizzle_orm_1.sql) `${t.tenantId} IS NULL`),
 ]);
 exports.userBranchMemberships = (0, pg_core_1.pgTable)('user_branch_memberships', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -139,7 +156,10 @@ exports.menuCategories = (0, pg_core_1.pgTable)('menu_categories', {
     sortOrder: (0, pg_core_1.integer)('sort_order').default(0).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('menu_categories_tenant_idx').on(t.tenantId),
 ]);
@@ -172,7 +192,10 @@ exports.menuItems = (0, pg_core_1.pgTable)('menu_items', {
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
     imageUrl: (0, pg_core_1.text)('image_url'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('menu_items_tenant_sku_idx').on(t.tenantId, t.sku),
     (0, pg_core_1.index)('menu_items_tenant_category_idx').on(t.tenantId, t.categoryId),
@@ -220,7 +243,10 @@ exports.suppliers = (0, pg_core_1.pgTable)('suppliers', {
     notes: (0, pg_core_1.text)('notes'),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('suppliers_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('suppliers_active_idx').on(t.tenantId, t.isActive),
@@ -242,8 +268,12 @@ exports.purchaseRequests = (0, pg_core_1.pgTable)('purchase_requests', {
     rejectionReason: (0, pg_core_1.text)('rejection_reason'),
     reviewedAt: (0, pg_core_1.timestamp)('reviewed_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('pr_tenant_number_idx').on(t.tenantId, t.requestNumber),
     (0, pg_core_1.index)('pr_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('pr_status_idx').on(t.status),
     (0, pg_core_1.index)('pr_priority_idx').on(t.priority),
@@ -284,8 +314,12 @@ exports.purchaseOrders = (0, pg_core_1.pgTable)('purchase_orders', {
     createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('po_tenant_number_idx').on(t.tenantId, t.poNumber),
     (0, pg_core_1.index)('po_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('po_status_idx').on(t.status),
     (0, pg_core_1.index)('po_supplier_idx').on(t.supplierId),
@@ -327,6 +361,7 @@ exports.goodsReceivedNotes = (0, pg_core_1.pgTable)('goods_received_notes', {
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('grn_tenant_number_idx').on(t.tenantId, t.grnNumber),
     (0, pg_core_1.index)('grn_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('grn_po_idx').on(t.purchaseOrderId),
     (0, pg_core_1.index)('grn_supplier_idx').on(t.supplierId),
@@ -373,8 +408,13 @@ exports.supplierInvoices = (0, pg_core_1.pgTable)('supplier_invoices', {
     createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('supplier_inv_tenant_ref_idx').on(t.tenantId, t.internalRef),
+    (0, pg_core_1.uniqueIndex)('supplier_inv_tenant_supplier_num_idx').on(t.tenantId, t.supplierId, t.invoiceNumber),
     (0, pg_core_1.index)('supplier_inv_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('supplier_inv_status_idx').on(t.status),
     (0, pg_core_1.index)('supplier_inv_due_idx').on(t.dueDate),
@@ -420,8 +460,12 @@ exports.supplierReturns = (0, pg_core_1.pgTable)('supplier_returns', {
     dispatchedAt: (0, pg_core_1.timestamp)('dispatched_at', { withTimezone: true }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('supplier_returns_tenant_number_idx').on(t.tenantId, t.returnNumber),
     (0, pg_core_1.index)('supplier_returns_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('supplier_returns_status_idx').on(t.status),
     (0, pg_core_1.index)('supplier_returns_supplier_idx').on(t.supplierId),
@@ -472,12 +516,41 @@ exports.inventoryItems = (0, pg_core_1.pgTable)('inventory_items', {
     allowNegativeStock: (0, pg_core_1.boolean)('allow_negative_stock').default(false).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('inv_items_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('inv_items_sku_idx').on(t.sku),
     (0, pg_core_1.index)('inv_items_cat_idx').on(t.category),
     (0, pg_core_1.index)('inv_items_mat_type_idx').on(t.materialType),
+]);
+// Per-branch stock ledger for multi-branch inventory isolation without duplicating master items
+exports.inventoryBranchStock = (0, pg_core_1.pgTable)('inventory_branch_stock', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .notNull()
+        .references(() => exports.tenants.id, { onDelete: 'cascade' }),
+    branchId: (0, pg_core_1.integer)('branch_id')
+        .notNull()
+        .references(() => exports.branches.id, { onDelete: 'cascade' }),
+    inventoryItemId: (0, pg_core_1.integer)('inventory_item_id')
+        .notNull()
+        .references(() => exports.inventoryItems.id, { onDelete: 'cascade' }),
+    currentStock: (0, pg_core_1.decimal)('current_stock', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    reservedStock: (0, pg_core_1.decimal)('reserved_stock', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    minThreshold: (0, pg_core_1.decimal)('min_threshold', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    reorderQuantity: (0, pg_core_1.decimal)('reorder_quantity', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    averageUnitCost: (0, pg_core_1.decimal)('average_unit_cost', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
+}, (t) => [
+    (0, pg_core_1.uniqueIndex)('inv_branch_stock_unique_idx').on(t.tenantId, t.branchId, t.inventoryItemId),
+    (0, pg_core_1.index)('inv_branch_stock_branch_idx').on(t.tenantId, t.branchId),
+    (0, pg_core_1.index)('inv_branch_stock_item_idx').on(t.inventoryItemId),
 ]);
 exports.unitConversions = (0, pg_core_1.pgTable)('unit_conversions', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -492,7 +565,10 @@ exports.unitConversions = (0, pg_core_1.pgTable)('unit_conversions', {
     description: (0, pg_core_1.text)('description'),
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('unit_conv_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('unit_conv_item_idx').on(t.inventoryItemId),
@@ -522,8 +598,17 @@ exports.inventoryBatches = (0, pg_core_1.pgTable)('inventory_batches', {
     // 'ACTIVE', 'QUARANTINE', 'QUALITY_HOLD', 'EXPIRED', 'DISCARDED', 'DEPLETED'
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('inv_batch_tenant_branch_num_idx')
+        .on(t.tenantId, t.branchId, t.batchNumber)
+        .where((0, drizzle_orm_1.sql) `${t.branchId} IS NOT NULL`),
+    (0, pg_core_1.uniqueIndex)('inv_batch_tenant_num_idx')
+        .on(t.tenantId, t.batchNumber)
+        .where((0, drizzle_orm_1.sql) `${t.branchId} IS NULL`),
     (0, pg_core_1.index)('inv_batch_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('inv_batch_item_idx').on(t.inventoryItemId),
     (0, pg_core_1.index)('inv_batch_status_idx').on(t.status),
@@ -546,7 +631,10 @@ exports.warehouseLocations = (0, pg_core_1.pgTable)('warehouse_locations', {
     isRefrigerated: (0, pg_core_1.boolean)('is_refrigerated').default(false).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('wh_loc_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('wh_loc_branch_idx').on(t.branchId),
@@ -616,7 +704,10 @@ exports.restaurantTables = (0, pg_core_1.pgTable)('restaurant_tables', {
         onDelete: 'set null',
     }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('tables_tenant_area_label_idx').on(t.tenantId, t.areaId, t.tableLabel),
     (0, pg_core_1.index)('tables_tenant_status_idx').on(t.tenantId, t.status),
@@ -637,7 +728,10 @@ exports.reservations = (0, pg_core_1.pgTable)('reservations', {
     status: (0, pg_core_1.varchar)('status', { length: 50 }).default('Pending').notNull(), // Pending, Confirmed, Checked-In, Completed, Cancelled, No-Show
     specialRequests: (0, pg_core_1.text)('special_requests'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('reservations_tenant_date_idx').on(t.tenantId, t.reservationDate),
     (0, pg_core_1.index)('reservations_tenant_table_idx').on(t.tenantId, t.tableId),
@@ -655,7 +749,10 @@ exports.waitlistEntries = (0, pg_core_1.pgTable)('waitlist_entries', {
     status: (0, pg_core_1.varchar)('status', { length: 50 }).default('Waiting').notNull(), // Waiting, Notified, Seated, Cancelled
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('waitlist_tenant_status_idx').on(t.tenantId, t.status),
 ]);
@@ -669,6 +766,9 @@ exports.orders = (0, pg_core_1.pgTable)('orders', {
         .notNull(),
     branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'restrict' }),
     tableId: (0, pg_core_1.integer)('table_id').references(() => exports.restaurantTables.id, { onDelete: 'set null' }),
+    customerId: (0, pg_core_1.integer)('customer_id').references(() => exports.customers.id, {
+        onDelete: 'set null',
+    }),
     // Enterprise Table & Station Snapshot (Resolves SQLSTATE 42703)
     tableName: (0, pg_core_1.varchar)('table_name', { length: 100 }), // e.g. "Table 4 (Veranda)", "VIP Lounge", "Takeaway"
     waiterId: (0, pg_core_1.integer)('waiter_id').references(() => exports.users.id, { onDelete: 'set null' }),
@@ -693,18 +793,23 @@ exports.orders = (0, pg_core_1.pgTable)('orders', {
     idempotencyKey: (0, pg_core_1.varchar)('idempotency_key', { length: 100 }), // Offline sync & retry protection
     inventoryDeducted: (0, pg_core_1.boolean)('inventory_deducted').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('orders_tenant_number_idx').on(t.tenantId, t.orderNumber),
     (0, pg_core_1.uniqueIndex)('orders_idempotency_idx').on(t.tenantId, t.idempotencyKey),
     (0, pg_core_1.index)('orders_tenant_status_idx').on(t.tenantId, t.status, t.paymentStatus),
     (0, pg_core_1.index)('orders_tenant_created_idx').on(t.tenantId, t.createdAt),
     (0, pg_core_1.index)('orders_table_idx').on(t.tableId),
+    (0, pg_core_1.index)('orders_customer_idx').on(t.tenantId, t.customerId),
 ]);
 exports.orderItems = (0, pg_core_1.pgTable)('order_items', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
     tenantId: (0, pg_core_1.integer)('tenant_id')
-        .references(() => exports.tenants.id, { onDelete: 'cascade' }),
+        .references(() => exports.tenants.id, { onDelete: 'cascade' })
+        .notNull(),
     orderId: (0, pg_core_1.integer)('order_id')
         .references(() => exports.orders.id, { onDelete: 'cascade' })
         .notNull(),
@@ -723,6 +828,7 @@ exports.orderItems = (0, pg_core_1.pgTable)('order_items', {
 }, (t) => [
     (0, pg_core_1.index)('order_items_order_idx').on(t.orderId),
     (0, pg_core_1.index)('order_items_menu_item_idx').on(t.menuItemId),
+    (0, pg_core_1.check)('order_items_qty_positive_chk', (0, drizzle_orm_1.sql) `${t.quantity} > 0`),
 ]);
 exports.stockMovements = (0, pg_core_1.pgTable)('stock_movements', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -775,8 +881,12 @@ exports.stockCounts = (0, pg_core_1.pgTable)('stock_counts', {
     reconciledAt: (0, pg_core_1.timestamp)('reconciled_at', { withTimezone: true }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('stock_cnt_tenant_number_idx').on(t.tenantId, t.countNumber),
     (0, pg_core_1.index)('stock_cnt_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('stock_cnt_status_idx').on(t.status),
 ]);
@@ -827,12 +937,17 @@ exports.stockTransfers = (0, pg_core_1.pgTable)('stock_transfers', {
     receivedAt: (0, pg_core_1.timestamp)('received_at', { withTimezone: true }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('sto_tenant_number_idx').on(t.tenantId, t.transferNumber),
     (0, pg_core_1.index)('sto_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('sto_status_idx').on(t.status),
     (0, pg_core_1.index)('sto_source_idx').on(t.sourceBranchId),
     (0, pg_core_1.index)('sto_dest_idx').on(t.destinationBranchId),
+    (0, pg_core_1.check)('sto_distinct_branches_chk', (0, drizzle_orm_1.sql) `${t.sourceBranchId} <> ${t.destinationBranchId}`),
 ]);
 exports.stockTransferItems = (0, pg_core_1.pgTable)('stock_transfer_items', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -853,7 +968,6 @@ exports.stockTransferItems = (0, pg_core_1.pgTable)('stock_transfer_items', {
     (0, pg_core_1.index)('sto_items_transfer_idx').on(t.transferId),
     (0, pg_core_1.index)('sto_items_inv_idx').on(t.inventoryItemId),
 ]);
-// 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 // 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 exports.logisticsFleet = (0, pg_core_1.pgTable)('logistics_fleet', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -880,10 +994,13 @@ exports.logisticsFleet = (0, pg_core_1.pgTable)('logistics_fleet', {
     currentLocationLng: (0, pg_core_1.numeric)('current_location_lng', { precision: 10, scale: 7 }),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('fleet_tenant_idx').on(t.tenantId),
-    (0, pg_core_1.index)('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
+    (0, pg_core_1.uniqueIndex)('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
     (0, pg_core_1.index)('fleet_status_idx').on(t.tenantId, t.currentStatus),
 ]);
 // Declared AFTER logisticsFleet to satisfy TypeScript block scoping
@@ -998,8 +1115,12 @@ exports.payments = (0, pg_core_1.pgTable)('payments', {
     reconciledAt: (0, pg_core_1.timestamp)('reconciled_at', { withTimezone: true }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('pmt_tenant_number_idx').on(t.tenantId, t.paymentNumber),
     (0, pg_core_1.index)('pmt_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('pmt_flow_idx').on(t.paymentFlow),
     (0, pg_core_1.index)('pmt_status_idx').on(t.status),
@@ -1021,6 +1142,7 @@ exports.bankStatements = (0, pg_core_1.pgTable)('bank_statements', {
     createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('bank_stmt_tenant_number_idx').on(t.tenantId, t.statementNumber),
     (0, pg_core_1.index)('bank_stmt_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('bank_stmt_acc_idx').on(t.clearingAccount),
 ]);
@@ -1074,7 +1196,10 @@ exports.mpesaTransactions = (0, pg_core_1.pgTable)('mpesa_transactions', {
     initiatedById: (0, pg_core_1.integer)('initiated_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('mpesa_tx_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('mpesa_tx_receipt_idx').on(t.mpesaReceiptNumber),
@@ -1106,8 +1231,12 @@ exports.refunds = (0, pg_core_1.pgTable)('refunds', {
     reasonCode: (0, pg_core_1.varchar)('reason_code', { length: 100 }).notNull(), // 'DEFECTIVE_GOODS', 'CUSTOMER_CANCELLATION', 'PRICING_DISPUTE'
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('ref_tenant_number_idx').on(t.tenantId, t.refundNumber),
     (0, pg_core_1.index)('ref_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('ref_flow_idx').on(t.refundFlow),
     (0, pg_core_1.index)('ref_order_idx').on(t.orderId),
@@ -1123,10 +1252,18 @@ exports.cashDrawers = (0, pg_core_1.pgTable)('cash_drawers', {
     status: (0, pg_core_1.varchar)('status', { length: 30 }).default('CLOSED').notNull(), // 'OPEN', 'CLOSED'
     currentBalance: (0, pg_core_1.decimal)('current_balance', { precision: 12, scale: 2 }).default('0.00').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('drawer_tenant_idx').on(t.tenantId),
-    (0, pg_core_1.uniqueIndex)('drawers_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.drawerCode),
+    (0, pg_core_1.uniqueIndex)('drawers_tenant_branch_code_idx')
+        .on(t.tenantId, t.branchId, t.drawerCode)
+        .where((0, drizzle_orm_1.sql) `${t.branchId} IS NOT NULL`),
+    (0, pg_core_1.uniqueIndex)('drawers_tenant_code_idx')
+        .on(t.tenantId, t.drawerCode)
+        .where((0, drizzle_orm_1.sql) `${t.branchId} IS NULL`),
 ]);
 exports.drawerSessions = (0, pg_core_1.pgTable)('drawer_sessions', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1231,6 +1368,7 @@ exports.branchesRelations = (0, drizzle_orm_1.relations)(exports.branches, ({ on
     tenant: one(exports.tenants, { fields: [exports.branches.tenantId], references: [exports.tenants.id] }),
     diningAreas: many(exports.diningAreas),
     orders: many(exports.orders),
+    branchStock: many(exports.inventoryBranchStock),
 }));
 exports.menuCategoriesRelations = (0, drizzle_orm_1.relations)(exports.menuCategories, ({ one, many }) => ({
     tenant: one(exports.tenants, { fields: [exports.menuCategories.tenantId], references: [exports.tenants.id] }),
@@ -1249,6 +1387,7 @@ exports.ordersRelations = (0, drizzle_orm_1.relations)(exports.orders, ({ one, m
     tenant: one(exports.tenants, { fields: [exports.orders.tenantId], references: [exports.tenants.id] }),
     branch: one(exports.branches, { fields: [exports.orders.branchId], references: [exports.branches.id] }),
     table: one(exports.restaurantTables, { fields: [exports.orders.tableId], references: [exports.restaurantTables.id] }),
+    customer: one(exports.customers, { fields: [exports.orders.customerId], references: [exports.customers.id] }),
     items: many(exports.orderItems),
     payments: many(exports.payments),
     deliveryAssignments: many(exports.deliveryAssignments),
@@ -1268,7 +1407,10 @@ exports.modifierGroups = (0, pg_core_1.pgTable)('modifier_groups', {
     isRequired: (0, pg_core_1.boolean)('is_required').default(false).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [(0, pg_core_1.index)('modifier_groups_tenant_idx').on(t.tenantId)]);
 exports.modifierOptions = (0, pg_core_1.pgTable)('modifier_options', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1289,7 +1431,10 @@ exports.comboBundles = (0, pg_core_1.pgTable)('combo_bundles', {
     basePrice: (0, pg_core_1.decimal)('base_price', { precision: 10, scale: 2 }).notNull(),
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [(0, pg_core_1.index)('combo_bundles_tenant_idx').on(t.tenantId)]);
 exports.comboBundleItems = (0, pg_core_1.pgTable)('combo_bundle_items', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1311,7 +1456,10 @@ exports.itemPricingRules = (0, pg_core_1.pgTable)('item_pricing_rules', {
     daysOfWeek: (0, pg_core_1.varchar)('days_of_week', { length: 50 }), // e.g. "MON,TUE,WED,THU,FRI"
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('pricing_rules_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('pricing_rules_item_idx').on(t.menuItemId),
@@ -1325,7 +1473,10 @@ exports.menuItemAvailability = (0, pg_core_1.pgTable)('menu_item_availability', 
     reason: (0, pg_core_1.varchar)('reason', { length: 150 }), // e.g. "Ran out of Brioche Buns", "86ed by Kitchen Chef"
     remainingCount: (0, pg_core_1.integer)('remaining_count'), // Nullable: if set, shows countdown (e.g. "Only 4 left")
     autoResetAt: (0, pg_core_1.timestamp)('auto_reset_at', { withTimezone: true }), // Scheduled restock time
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('item_avail_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('item_avail_menu_item_idx').on(t.menuItemId),
@@ -1348,7 +1499,10 @@ exports.recipes = (0, pg_core_1.pgTable)('recipes', {
     notes: (0, pg_core_1.text)('notes'),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('recipes_tenant_menu_item_idx').on(t.tenantId, t.menuItemId, t.isActive),
 ]);
@@ -1420,11 +1574,14 @@ exports.warehouseZones = (0, pg_core_1.pgTable)('warehouse_zones', {
     temperatureMaxC: (0, pg_core_1.numeric)('temperature_max_c', { precision: 5, scale: 2 }),
     isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('warehouse_zones_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('warehouse_zones_branch_idx').on(t.tenantId, t.branchId),
-    (0, pg_core_1.index)('warehouse_zones_code_idx').on(t.tenantId, t.zoneCode),
+    (0, pg_core_1.uniqueIndex)('warehouse_zones_branch_code_idx').on(t.tenantId, t.branchId, t.zoneCode),
 ]);
 // 2. GRANULAR STORAGE BINS / SLOTS (SAP Bin Master Data / NetSuite Bins)
 exports.warehouseBins = (0, pg_core_1.pgTable)('warehouse_bins', {
@@ -1445,11 +1602,14 @@ exports.warehouseBins = (0, pg_core_1.pgTable)('warehouse_bins', {
     isOccupied: (0, pg_core_1.boolean)('is_occupied').notNull().default(false),
     isActive: (0, pg_core_1.boolean)('is_active').notNull().default(true),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('warehouse_bins_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('warehouse_bins_zone_idx').on(t.zoneId),
-    (0, pg_core_1.index)('warehouse_bins_code_idx').on(t.tenantId, t.binCode),
+    (0, pg_core_1.uniqueIndex)('warehouse_bins_zone_code_idx').on(t.tenantId, t.zoneId, t.binCode),
 ]);
 // ============================================================================
 // WORKFORCE ROSTERING & SHIFT SCHEDULING (HCM / WFM)
@@ -1466,7 +1626,10 @@ exports.shiftTemplates = (0, pg_core_1.pgTable)('shift_templates', {
     breakMinutes: (0, pg_core_1.integer)('break_minutes').default(30).notNull(),
     colorHex: (0, pg_core_1.varchar)('color_hex', { length: 20 }).default('#0554F4').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('shift_templates_tenant_idx').on(t.tenantId),
 ]);
@@ -1491,7 +1654,10 @@ exports.workSchedules = (0, pg_core_1.pgTable)('work_schedules', {
     status: (0, pg_core_1.varchar)('status', { length: 50 }).default('DRAFT').notNull(), // DRAFT | PUBLISHED | CONFIRMED | CANCELLED
     notes: (0, pg_core_1.text)('notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('work_schedules_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('work_schedules_tenant_date_idx').on(t.tenantId, t.shiftDate),
@@ -1531,7 +1697,10 @@ exports.attendanceRecords = (0, pg_core_1.pgTable)('attendance_records', {
         .references(() => exports.users.id, { onDelete: 'set null' }),
     approvedAt: (0, pg_core_1.timestamp)('approved_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('attendance_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('attendance_tenant_user_idx').on(t.tenantId, t.userId),
@@ -1573,7 +1742,10 @@ exports.shiftHandovers = (0, pg_core_1.pgTable)('shift_handovers', {
     outgoingSignedAt: (0, pg_core_1.timestamp)('outgoing_signed_at', { withTimezone: true }).defaultNow().notNull(),
     incomingSignedAt: (0, pg_core_1.timestamp)('incoming_signed_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('shift_handovers_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('shift_handovers_tenant_date_idx').on(t.tenantId, t.handoverDate),
@@ -1597,9 +1769,9 @@ exports.cashierAssignments = (0, pg_core_1.pgTable)('cashier_assignments', {
     userId: (0, pg_core_1.integer)('user_id')
         .references(() => exports.users.id, { onDelete: 'cascade' })
         .notNull(),
+    // Nullable to match onDelete: 'set null'
     assignedByUserId: (0, pg_core_1.integer)('assigned_by_user_id')
-        .references(() => exports.users.id, { onDelete: 'set null' })
-        .notNull(),
+        .references(() => exports.users.id, { onDelete: 'set null' }),
     assignmentDate: (0, pg_core_1.date)('assignment_date').notNull(), // YYYY-MM-DD
     shiftType: (0, pg_core_1.varchar)('shift_type', { length: 50 }).default('MORNING').notNull(), // MORNING | MIDDAY | EVENING | NIGHT_CLOSING
     status: (0, pg_core_1.varchar)('status', { length: 50 }).default('ASSIGNED').notNull(), // ASSIGNED | ACTIVE | RELEASED | REVOKED
@@ -1613,7 +1785,10 @@ exports.cashierAssignments = (0, pg_core_1.pgTable)('cashier_assignments', {
     closedAt: (0, pg_core_1.timestamp)('closed_at', { withTimezone: true }),
     handoverNotes: (0, pg_core_1.text)('handover_notes'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('cashier_assignments_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('cashier_assignments_tenant_date_idx').on(t.tenantId, t.assignmentDate),
@@ -1632,9 +1807,9 @@ exports.staffPerformanceReviews = (0, pg_core_1.pgTable)('staff_performance_revi
     userId: (0, pg_core_1.integer)('user_id')
         .references(() => exports.users.id, { onDelete: 'cascade' })
         .notNull(),
+    // Nullable to match onDelete: 'set null'
     reviewerId: (0, pg_core_1.integer)('reviewer_id')
-        .references(() => exports.users.id, { onDelete: 'set null' })
-        .notNull(),
+        .references(() => exports.users.id, { onDelete: 'set null' }),
     reviewCycle: (0, pg_core_1.varchar)('review_cycle', { length: 50 }).default('MONTHLY').notNull(), // MONTHLY | QUARTERLY | BIANNUAL | ANNUAL
     periodStart: (0, pg_core_1.date)('period_start').notNull(),
     periodEnd: (0, pg_core_1.date)('period_end').notNull(),
@@ -1662,7 +1837,10 @@ exports.staffPerformanceReviews = (0, pg_core_1.pgTable)('staff_performance_revi
     status: (0, pg_core_1.varchar)('status', { length: 50 }).default('DRAFT').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | FINALIZED
     acknowledgedAt: (0, pg_core_1.timestamp)('acknowledged_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('perf_reviews_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('perf_reviews_user_idx').on(t.userId),
@@ -1703,7 +1881,10 @@ exports.tenantFinancialSettings = (0, pg_core_1.pgTable)('tenant_financial_setti
     maxDrawerCashThreshold: (0, pg_core_1.numeric)('max_drawer_cash_threshold', { precision: 12, scale: 2 }).default('50000.00').notNull(),
     enableSafeDropAlerts: (0, pg_core_1.boolean)('enable_safe_drop_alerts').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('fin_settings_tenant_idx').on(t.tenantId),
 ]);
@@ -1719,6 +1900,7 @@ exports.taxCodes = (0, pg_core_1.pgTable)('tax_codes', {
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('tax_codes_tenant_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('tax_codes_tenant_idx').on(t.tenantId),
 ]);
 // ============================================================================
@@ -1752,7 +1934,10 @@ exports.serviceModels = (0, pg_core_1.pgTable)('service_models', {
     maxTabCreditLimit: (0, pg_core_1.numeric)('max_tab_credit_limit', { precision: 12, scale: 2 }).default('0.00').notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('service_models_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('service_models_type_idx').on(t.tenantId, t.type),
@@ -1801,7 +1986,10 @@ exports.receiptTemplates = (0, pg_core_1.pgTable)('receipt_templates', {
     returnPolicy: (0, pg_core_1.text)('return_policy'),
     wifiDetails: (0, pg_core_1.varchar)('wifi_details', { length: 255 }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('receipt_templates_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('receipt_templates_branch_idx').on(t.branchId),
@@ -1838,7 +2026,10 @@ exports.networkPrinters = (0, pg_core_1.pgTable)('network_printers', {
     lastPingAt: (0, pg_core_1.timestamp)('last_ping_at', { withTimezone: true }),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('network_printers_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('network_printers_branch_idx').on(t.branchId),
@@ -1872,8 +2063,12 @@ exports.kitchenStations = (0, pg_core_1.pgTable)('kitchen_stations', {
     backupStationId: (0, pg_core_1.integer)('backup_station_id').references(() => exports.kitchenStations.id, { onDelete: 'set null' }), // Automatic failover redirect if station terminal drops
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('kitchen_stations_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.code),
     (0, pg_core_1.index)('kitchen_stations_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('kitchen_stations_branch_idx').on(t.branchId),
     (0, pg_core_1.index)('kitchen_stations_type_idx').on(t.tenantId, t.stationType),
@@ -1893,7 +2088,10 @@ exports.kitchenGlobalSettings = (0, pg_core_1.pgTable)('kitchen_global_settings'
     soundVolume: (0, pg_core_1.integer)('sound_volume').default(80).notNull(), // 0 - 100%
     autoArchiveCompletedMinutes: (0, pg_core_1.integer)('auto_archive_completed_minutes').default(120).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('kitchen_global_tenant_idx').on(t.tenantId),
 ]);
@@ -1909,7 +2107,7 @@ exports.paymentIntegrations = (0, pg_core_1.pgTable)('payment_integrations', {
     provider: (0, pg_core_1.varchar)('provider', { length: 50 }).notNull(), // MPESA_DARAJA | STRIPE | PESAPAL | DPO_PAY | FLUTTERWAVE | ADYEN | MANUAL_PDQ
     title: (0, pg_core_1.varchar)('title', { length: 100 }).notNull(), // e.g. "Main M-Pesa Buy Goods Till", "Stripe Card Terminal Gateway"
     environment: (0, pg_core_1.varchar)('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Cryptographic Secrets
+    // Gateway Credentials & Cryptographic Secrets (encrypt at application layer before storage)
     merchantIdentifier: (0, pg_core_1.varchar)('merchant_identifier', { length: 100 }).notNull(), // Paybill/Till number, Stripe Account ID, Merchant ID
     apiKey: (0, pg_core_1.text)('api_key').notNull(), // Consumer Key / Public Key
     apiSecret: (0, pg_core_1.text)('api_secret').notNull(), // Consumer Secret / Restricted Secret Key
@@ -1930,7 +2128,10 @@ exports.paymentIntegrations = (0, pg_core_1.pgTable)('payment_integrations', {
     lastHandshakeStatus: (0, pg_core_1.varchar)('last_handshake_status', { length: 50 }),
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('payment_integrations_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('payment_integrations_branch_idx').on(t.branchId),
@@ -1969,7 +2170,7 @@ exports.messagingIntegrations = (0, pg_core_1.pgTable)('messaging_integrations',
     provider: (0, pg_core_1.varchar)('provider', { length: 50 }).notNull(), // AFRICAS_TALKING | TWILIO | ADVANTA_SMS | SAFARICOM_BULK_SMS | INFOBIP | SENDGRID | RESEND | AWS_SES | CUSTOM_WEBHOOK
     title: (0, pg_core_1.varchar)('title', { length: 100 }).notNull(),
     environment: (0, pg_core_1.varchar)('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Originator Attributes
+    // Gateway Credentials & Originator Attributes (encrypt secrets at application layer)
     senderId: (0, pg_core_1.varchar)('sender_id', { length: 50 }), // Alphanumeric Sender ID or WhatsApp verified number
     accountIdentifier: (0, pg_core_1.varchar)('account_identifier', { length: 150 }).notNull(), // Username / Account SID / App ID
     apiKey: (0, pg_core_1.text)('api_key').notNull(), // Primary API token / Auth token
@@ -1983,7 +2184,10 @@ exports.messagingIntegrations = (0, pg_core_1.pgTable)('messaging_integrations',
     lastHandshakeStatus: (0, pg_core_1.varchar)('last_handshake_status', { length: 50 }),
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('messaging_integrations_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('messaging_integrations_channel_idx').on(t.tenantId, t.channel),
@@ -2002,7 +2206,10 @@ exports.messagingTemplates = (0, pg_core_1.pgTable)('messaging_templates', {
     bodyTemplate: (0, pg_core_1.text)('body_template').notNull(), // Contains merge tags: {{employee_name}}, {{shift_date}}, {{start_time}}, etc.
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('messaging_templates_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('messaging_templates_event_idx').on(t.tenantId, t.triggerEvent),
@@ -2039,7 +2246,7 @@ exports.orderIntegrations = (0, pg_core_1.pgTable)('order_integrations', {
     channel: (0, pg_core_1.varchar)('channel', { length: 50 }).notNull(), // GLOVO | UBER_EATS | BOLT_FOOD | DOORDASH | SHOPIFY | WOOCOMMERCE | CUSTOM_WEBHOOK
     title: (0, pg_core_1.varchar)('title', { length: 100 }).notNull(),
     environment: (0, pg_core_1.varchar)('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Store Identification
+    // Gateway Credentials & Store Identification (encrypt secrets at application layer)
     storeIdentifier: (0, pg_core_1.varchar)('store_identifier', { length: 150 }).notNull(), // External Store UUID / Aggregator Location ID
     apiKey: (0, pg_core_1.text)('api_key').notNull(),
     apiSecret: (0, pg_core_1.text)('api_secret'),
@@ -2056,7 +2263,10 @@ exports.orderIntegrations = (0, pg_core_1.pgTable)('order_integrations', {
     lastSyncStatus: (0, pg_core_1.varchar)('last_sync_status', { length: 50 }),
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('order_integrations_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('order_integrations_branch_idx').on(t.branchId),
@@ -2135,7 +2345,10 @@ exports.offlineSettings = (0, pg_core_1.pgTable)('offline_settings', {
     allowOfflineGiftCards: (0, pg_core_1.boolean)('allow_offline_gift_cards').default(false).notNull(),
     allowOfflineCreditTabs: (0, pg_core_1.boolean)('allow_offline_credit_tabs').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('offline_settings_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('offline_settings_branch_idx').on(t.branchId),
@@ -2155,6 +2368,7 @@ exports.offlineSyncBatches = (0, pg_core_1.pgTable)('offline_sync_batches', {
     syncDurationMs: (0, pg_core_1.integer)('sync_duration_ms').default(0).notNull(),
     completedAt: (0, pg_core_1.timestamp)('completed_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('offline_sync_tenant_ref_idx').on(t.tenantId, t.batchReference),
     (0, pg_core_1.index)('offline_sync_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('offline_sync_terminal_idx').on(t.terminalIdentifier),
     (0, pg_core_1.index)('offline_sync_status_idx').on(t.tenantId, t.status),
@@ -2191,11 +2405,14 @@ exports.posDevices = (0, pg_core_1.pgTable)('pos_devices', {
     registeredByUserId: (0, pg_core_1.integer)('registered_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }),
     decommissionedAt: (0, pg_core_1.timestamp)('decommissioned_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('pos_devices_code_idx').on(t.tenantId, t.deviceCode),
     (0, pg_core_1.index)('pos_devices_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('pos_devices_branch_idx').on(t.branchId),
-    (0, pg_core_1.index)('pos_devices_code_idx').on(t.tenantId, t.deviceCode),
     (0, pg_core_1.index)('pos_devices_status_idx').on(t.tenantId, t.status),
 ]);
 exports.deviceEnrollmentTokens = (0, pg_core_1.pgTable)('device_enrollment_tokens', {
@@ -2207,14 +2424,15 @@ exports.deviceEnrollmentTokens = (0, pg_core_1.pgTable)('device_enrollment_token
         .references(() => exports.branches.id, { onDelete: 'cascade' })
         .notNull(),
     pairingCode: (0, pg_core_1.varchar)('pairing_code', { length: 12 }).notNull(), // 6-digit or formatted pairing pin e.g. "749-218"
-    token: (0, pg_core_1.text)('token').notNull(), // Cryptographic one-time enrollment token
+    token: (0, pg_core_1.text)('token').notNull(), // Store hashed one-time enrollment token
     deviceType: (0, pg_core_1.varchar)('device_type', { length: 50 }).default('POS_TERMINAL').notNull(),
     assignedDrawerId: (0, pg_core_1.integer)('assigned_drawer_id').references(() => exports.cashDrawers.id, { onDelete: 'set null' }),
     assignedKitchenStationId: (0, pg_core_1.integer)('assigned_kitchen_station_id').references(() => exports.kitchenStations.id, { onDelete: 'set null' }),
     expiresAt: (0, pg_core_1.timestamp)('expires_at', { withTimezone: true }).notNull(),
     isClaimed: (0, pg_core_1.boolean)('is_claimed').default(false).notNull(),
     claimedDeviceId: (0, pg_core_1.integer)('claimed_device_id').references(() => exports.posDevices.id, { onDelete: 'set null' }),
-    createdByUserId: (0, pg_core_1.integer)('created_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }).notNull(),
+    // Nullable to match onDelete: 'set null'
+    createdByUserId: (0, pg_core_1.integer)('created_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
 }, (t) => [
     (0, pg_core_1.index)('device_enrollment_tenant_idx').on(t.tenantId),
@@ -2225,10 +2443,10 @@ exports.deviceEnrollmentTokens = (0, pg_core_1.pgTable)('device_enrollment_token
 // ============================================================================
 exports.subscriptionPlans = (0, pg_core_1.pgTable)('subscription_plans', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
-    code: (0, pg_core_1.varchar)('code', { length: 50 }).unique().notNull(), // e.g. "STARTER", "PROFESSIONAL", "ENTERPRISE"
+    code: (0, pg_core_1.varchar)('code', { length: 50 }).unique().notNull(), // e.g. "STARTER", "BUSINESS", "PROFESSIONAL", "ENTERPRISE"
     name: (0, pg_core_1.varchar)('name', { length: 100 }).notNull(),
     description: (0, pg_core_1.text)('description'),
-    billingCycle: (0, pg_core_1.varchar)('billing_cycle', { length: 20 }).default('MONTHLY').notNull(), // MONTHLY | ANNUALLY
+    billingCycle: (0, pg_core_1.varchar)('billing_cycle', { length: 20 }).default('MONTHLY').notNull(), // MONTHLY | BIANNUAL | ANNUALLY
     basePrice: (0, pg_core_1.numeric)('base_price', { precision: 12, scale: 2 }).notNull(),
     currency: (0, pg_core_1.varchar)('currency', { length: 10 }).default('KES').notNull(),
     includedUsers: (0, pg_core_1.integer)('included_users').default(5).notNull(),
@@ -2238,7 +2456,10 @@ exports.subscriptionPlans = (0, pg_core_1.pgTable)('subscription_plans', {
     features: (0, pg_core_1.jsonb)('features').$type().default([]).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('subscription_plans_code_idx').on(t.code),
     (0, pg_core_1.index)('subscription_plans_active_idx').on(t.isActive),
@@ -2257,7 +2478,10 @@ exports.billingPaymentMethods = (0, pg_core_1.pgTable)('billing_payment_methods'
     token: (0, pg_core_1.text)('token').notNull(), // Tokenized payment mandate / token reference
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('billing_payment_methods_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('billing_payment_methods_default_idx').on(t.tenantId, t.isDefault),
@@ -2282,7 +2506,10 @@ exports.tenantSubscriptions = (0, pg_core_1.pgTable)('tenant_subscriptions', {
     cancelAtPeriodEnd: (0, pg_core_1.boolean)('cancel_at_period_end').default(false).notNull(),
     canceledAt: (0, pg_core_1.timestamp)('canceled_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('tenant_subscriptions_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('tenant_subscriptions_status_idx').on(t.status),
@@ -2313,7 +2540,10 @@ exports.billingInvoices = (0, pg_core_1.pgTable)('billing_invoices', {
         .default([])
         .notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('billing_invoices_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('billing_invoices_number_idx').on(t.invoiceNumber),
@@ -2360,7 +2590,10 @@ exports.securitySettings = (0, pg_core_1.pgTable)('security_settings', {
     ssoEnabled: (0, pg_core_1.boolean)('sso_enabled').default(false).notNull(),
     ssoProvider: (0, pg_core_1.varchar)('sso_provider', { length: 50 }), // GOOGLE_WORKSPACE | MICROSOFT_AZURE | OKTA_SAML
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('security_settings_tenant_idx').on(t.tenantId),
 ]);
@@ -2409,7 +2642,10 @@ exports.supportTickets = (0, pg_core_1.pgTable)('support_tickets', {
     assignedAgent: (0, pg_core_1.varchar)('assigned_agent', { length: 100 }),
     resolvedAt: (0, pg_core_1.timestamp)('resolved_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('support_tickets_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('support_tickets_status_idx').on(t.tenantId, t.status),
@@ -2445,7 +2681,10 @@ exports.knowledgeBaseArticles = (0, pg_core_1.pgTable)('knowledge_base_articles'
     isPublished: (0, pg_core_1.boolean)('is_published').default(true).notNull(),
     viewCount: (0, pg_core_1.integer)('view_count').default(0).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('kb_articles_category_idx').on(t.category),
     (0, pg_core_1.index)('kb_articles_published_idx').on(t.isPublished),
@@ -2472,7 +2711,10 @@ exports.reportDefinitions = (0, pg_core_1.pgTable)('report_definitions', {
     isSystem: (0, pg_core_1.boolean)('is_system').default(true).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('report_definitions_category_idx').on(t.category),
     (0, pg_core_1.index)('report_definitions_active_idx').on(t.isActive),
@@ -2513,7 +2755,8 @@ exports.reportSchedules = (0, pg_core_1.pgTable)('report_schedules', {
         .references(() => exports.reportDefinitions.id, { onDelete: 'cascade' })
         .notNull(),
     branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'set null' }),
-    createdByUserId: (0, pg_core_1.integer)('created_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }).notNull(),
+    // Nullable to match onDelete: 'set null'
+    createdByUserId: (0, pg_core_1.integer)('created_by_user_id').references(() => exports.users.id, { onDelete: 'set null' }),
     title: (0, pg_core_1.varchar)('title', { length: 150 }).notNull(),
     frequency: (0, pg_core_1.varchar)('frequency', { length: 30 }).default('WEEKLY').notNull(), // DAILY | WEEKLY | MONTHLY | END_OF_SHIFT
     deliveryChannel: (0, pg_core_1.varchar)('delivery_channel', { length: 30 }).default('EMAIL').notNull(), // EMAIL | WEBHOOK | STORAGE
@@ -2526,7 +2769,10 @@ exports.reportSchedules = (0, pg_core_1.pgTable)('report_schedules', {
     lastRunAt: (0, pg_core_1.timestamp)('last_run_at', { withTimezone: true }),
     nextRunAt: (0, pg_core_1.timestamp)('next_run_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('report_schedules_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('report_schedules_active_idx').on(t.isActive),
@@ -2553,7 +2799,10 @@ exports.customers = (0, pg_core_1.pgTable)('customers', {
     notes: (0, pg_core_1.text)('notes'),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('customers_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('customers_phone_idx').on(t.tenantId, t.phone),
@@ -2591,7 +2840,10 @@ exports.loyaltyTiers = (0, pg_core_1.pgTable)('loyalty_tiers', {
     perks: (0, pg_core_1.jsonb)('perks').$type().default([]).notNull(), // e.g. ["Free Priority Seating", "Complimentary Dessert", "10% Discount"]
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('loyalty_tiers_tenant_idx').on(t.tenantId),
 ]);
@@ -2610,7 +2862,10 @@ exports.customerLoyaltyProfiles = (0, pg_core_1.pgTable)('customer_loyalty_profi
     lifetimePointsEarned: (0, pg_core_1.integer)('lifetime_points_earned').default(0).notNull(),
     lifetimePointsRedeemed: (0, pg_core_1.integer)('lifetime_points_redeemed').default(0).notNull(),
     enrolledAt: (0, pg_core_1.timestamp)('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('cust_loyalty_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('cust_loyalty_customer_idx').on(t.customerId),
@@ -2634,7 +2889,10 @@ exports.loyaltyRewardsCatalog = (0, pg_core_1.pgTable)('loyalty_rewards_catalog'
     endDate: (0, pg_core_1.timestamp)('end_date', { withTimezone: true }),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('loyalty_rewards_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('loyalty_rewards_active_idx').on(t.tenantId, t.isActive),
@@ -2702,13 +2960,18 @@ exports.customerFeedback = (0, pg_core_1.pgTable)('customer_feedback', {
     assignedToUserId: (0, pg_core_1.integer)('assigned_to_user_id').references(() => exports.users.id, { onDelete: 'set null' }),
     resolvedAt: (0, pg_core_1.timestamp)('resolved_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('feedback_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('feedback_customer_idx').on(t.customerId),
     (0, pg_core_1.index)('feedback_branch_idx').on(t.branchId),
     (0, pg_core_1.index)('feedback_status_idx').on(t.tenantId, t.status),
     (0, pg_core_1.index)('feedback_rating_idx').on(t.tenantId, t.rating),
+    (0, pg_core_1.check)('feedback_rating_range_chk', (0, drizzle_orm_1.sql) `${t.rating} BETWEEN 1 AND 5`),
+    (0, pg_core_1.check)('feedback_nps_range_chk', (0, drizzle_orm_1.sql) `${t.npsScore} IS NULL OR (${t.npsScore} BETWEEN 0 AND 10)`),
 ]);
 // ============================================================================
 // MARKETING CAMPAIGNS & AUDIENCE ENGAGEMENT
@@ -2741,8 +3004,12 @@ exports.marketingCampaigns = (0, pg_core_1.pgTable)('marketing_campaigns', {
     endDate: (0, pg_core_1.timestamp)('end_date', { withTimezone: true }),
     createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('campaigns_tenant_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('campaigns_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('campaigns_status_idx').on(t.tenantId, t.status),
     (0, pg_core_1.index)('campaigns_channel_idx').on(t.tenantId, t.channel),
@@ -2781,7 +3048,10 @@ exports.marketingTemplates = (0, pg_core_1.pgTable)('marketing_templates', {
     defaultDiscountPercentage: (0, pg_core_1.integer)('default_discount_percentage'),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('mkt_templates_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('mkt_templates_channel_idx').on(t.tenantId, t.channel),
@@ -2806,10 +3076,13 @@ exports.promotionalDiscounts = (0, pg_core_1.pgTable)('promotional_discounts', {
     expiresAt: (0, pg_core_1.timestamp)('expires_at', { withTimezone: true }),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
+    (0, pg_core_1.uniqueIndex)('promo_discounts_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('promo_discounts_tenant_idx').on(t.tenantId),
-    (0, pg_core_1.index)('promo_discounts_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('promo_discounts_active_idx').on(t.tenantId, t.isActive),
 ]);
 // ============================================================================
@@ -2826,7 +3099,10 @@ exports.aiAssistantSessions = (0, pg_core_1.pgTable)('ai_assistant_sessions', {
     title: (0, pg_core_1.varchar)('title', { length: 255 }).default('New Strategic Inquiry').notNull(),
     scopeDomain: (0, pg_core_1.varchar)('scope_domain', { length: 50 }).default('GENERAL_OPS').notNull(), // 'GENERAL_OPS', 'WORKFORCE_HCM', 'INVENTORY_SUPPLY', 'FINANCE_TREASURY', 'GUEST_CRM'
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('ai_sessions_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('ai_sessions_user_idx').on(t.tenantId, t.userId),
@@ -2880,7 +3156,10 @@ exports.demandForecastSnapshots = (0, pg_core_1.pgTable)('demand_forecast_snapsh
     localEventModifier: (0, pg_core_1.varchar)('local_event_modifier', { length: 150 }), // e.g., 'Payday Weekend', 'Public Holiday', 'Soccer Derby'
     varianceTolerancePct: (0, pg_core_1.numeric)('variance_tolerance_pct', { precision: 5, scale: 2 }).default('5.00').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('demand_forecast_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('demand_forecast_branch_idx').on(t.branchId),
@@ -2903,6 +3182,7 @@ exports.hourlyForecastIntervals = (0, pg_core_1.pgTable)('hourly_forecast_interv
 }, (t) => [
     (0, pg_core_1.index)('hourly_forecast_snapshot_idx').on(t.snapshotId),
     (0, pg_core_1.index)('hourly_forecast_hour_idx').on(t.snapshotId, t.hourOfDay),
+    (0, pg_core_1.check)('hourly_forecast_hour_chk', (0, drizzle_orm_1.sql) `${t.hourOfDay} BETWEEN 0 AND 23`),
 ]);
 // ============================================================================
 // PREDICTIVE PURCHASING & REPLENISHMENT INTELLIGENCE (SCM / AI AGENT)
@@ -2934,7 +3214,10 @@ exports.predictiveInventoryReplenishments = (0, pg_core_1.pgTable)('predictive_i
     approvalStatus: (0, pg_core_1.varchar)('approval_status', { length: 30 }).default('PENDING_REVIEW').notNull(), // 'PENDING_REVIEW', 'APPROVED_PO_CREATED', 'REJECTED_DISMISSED', 'AUTO_DISPATCHED'
     aiReasoningNote: (0, pg_core_1.text)('ai_reasoning_note').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('pred_replenish_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('pred_replenish_item_idx').on(t.inventoryItemId),
@@ -2968,7 +3251,10 @@ exports.menuEngineeringSnapshots = (0, pg_core_1.pgTable)('menu_engineering_snap
     aiRecommendationType: (0, pg_core_1.varchar)('ai_recommendation_type', { length: 50 }).notNull(), // 'MAINTAIN_PRIME_SPOTLIGHT', 'REPRICE_UPWARD', 'PORTION_RE_ENGINEER', 'PROMOTIONAL_UPSELL', 'RETIRE_ITEM'
     strategicActionNote: (0, pg_core_1.text)('strategic_action_note').notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('menu_eng_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('menu_eng_item_idx').on(t.menuItemId),
@@ -2998,7 +3284,10 @@ exports.workflowRules = (0, pg_core_1.pgTable)('workflow_rules', {
     lastTriggeredAt: (0, pg_core_1.timestamp)('last_triggered_at', { withTimezone: true }),
     createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.index)('wf_rules_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('wf_rules_domain_idx').on(t.tenantId, t.domain),
@@ -3037,7 +3326,10 @@ exports.expenseCategories = (0, pg_core_1.pgTable)('expense_categories', {
     taxDeductible: (0, pg_core_1.boolean)('tax_deductible').default(true).notNull(),
     isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('exp_cat_tenant_code_idx').on(t.tenantId, t.code),
     (0, pg_core_1.index)('exp_cat_tenant_idx').on(t.tenantId),
@@ -3079,7 +3371,10 @@ exports.expenses = (0, pg_core_1.pgTable)('expenses', {
     paidAt: (0, pg_core_1.timestamp)('paid_at', { withTimezone: true }),
     paymentReference: (0, pg_core_1.varchar)('payment_reference', { length: 100 }), // M-Pesa B2C Transaction Code or Bank Cheque / Wire Ref
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('expenses_tenant_voucher_idx').on(t.tenantId, t.voucherNumber),
     (0, pg_core_1.index)('expenses_tenant_status_idx').on(t.tenantId, t.status),
@@ -3123,7 +3418,10 @@ exports.financialAdjustments = (0, pg_core_1.pgTable)('financial_adjustments', {
     justificationNotes: (0, pg_core_1.text)('justification_notes').notNull(),
     supportingDocumentUrl: (0, pg_core_1.text)('supporting_document_url'),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
 }, (t) => [
     (0, pg_core_1.uniqueIndex)('fin_adj_tenant_number_idx').on(t.tenantId, t.adjustmentNumber),
     (0, pg_core_1.index)('fin_adj_tenant_status_idx').on(t.tenantId, t.status),

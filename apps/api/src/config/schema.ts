@@ -12,12 +12,16 @@ import {
   date,
   uniqueIndex,
   index,
+  check,
   pgEnum,
   AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
-// 1. Define explicit role enum
+/**
+ * @deprecated Retained for backwards compatibility with existing imports.
+ * `users.role` uses `varchar` to support dynamic tenant roles via the `roles` table.
+ */
 export const userRoleEnum = pgEnum('user_role', [
   'SUPER_ADMIN',
   'ADMIN',
@@ -51,7 +55,10 @@ export const tenants = pgTable(
     logoUrl: text('logo_url'),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('tenants_slug_idx').on(t.slug),
@@ -78,7 +85,10 @@ export const branches = pgTable(
     isMainBranch: boolean('is_main_branch').default(false).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('branches_tenant_code_idx').on(t.tenantId, t.code),
@@ -135,10 +145,18 @@ export const roles = pgTable(
     permissions: jsonb('permissions').$type<string[]>().default([]).notNull(), // e.g. ["pos.checkout", "pos.void", "inventory.adjust"]
     isSystemRole: boolean('is_system_role').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
-    uniqueIndex('roles_tenant_slug_idx').on(t.tenantId, t.slug),
+    uniqueIndex('roles_tenant_slug_idx')
+      .on(t.tenantId, t.slug)
+      .where(sql`${t.tenantId} IS NOT NULL`),
+    uniqueIndex('roles_system_slug_idx')
+      .on(t.slug)
+      .where(sql`${t.tenantId} IS NULL`),
   ]
 );
 
@@ -182,7 +200,10 @@ export const menuCategories = pgTable(
     sortOrder: integer('sort_order').default(0).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('menu_categories_tenant_idx').on(t.tenantId),
@@ -223,7 +244,10 @@ export const menuItems = pgTable(
     isAvailable: boolean('is_available').default(true).notNull(),
     imageUrl: text('image_url'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('menu_items_tenant_sku_idx').on(t.tenantId, t.sku),
@@ -285,7 +309,10 @@ export const suppliers = pgTable(
     notes: text('notes'),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('suppliers_tenant_idx').on(t.tenantId),
@@ -312,9 +339,13 @@ export const purchaseRequests = pgTable(
     rejectionReason: text('rejection_reason'),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('pr_tenant_number_idx').on(t.tenantId, t.requestNumber),
     index('pr_tenant_idx').on(t.tenantId),
     index('pr_status_idx').on(t.status),
     index('pr_priority_idx').on(t.priority),
@@ -364,9 +395,13 @@ export const purchaseOrders = pgTable(
     createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('po_tenant_number_idx').on(t.tenantId, t.poNumber),
     index('po_tenant_idx').on(t.tenantId),
     index('po_status_idx').on(t.status),
     index('po_supplier_idx').on(t.supplierId),
@@ -418,6 +453,7 @@ export const goodsReceivedNotes = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex('grn_tenant_number_idx').on(t.tenantId, t.grnNumber),
     index('grn_tenant_idx').on(t.tenantId),
     index('grn_po_idx').on(t.purchaseOrderId),
     index('grn_supplier_idx').on(t.supplierId),
@@ -473,9 +509,14 @@ export const supplierInvoices = pgTable(
     createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('supplier_inv_tenant_ref_idx').on(t.tenantId, t.internalRef),
+    uniqueIndex('supplier_inv_tenant_supplier_num_idx').on(t.tenantId, t.supplierId, t.invoiceNumber),
     index('supplier_inv_tenant_idx').on(t.tenantId),
     index('supplier_inv_status_idx').on(t.status),
     index('supplier_inv_due_idx').on(t.dueDate),
@@ -530,9 +571,13 @@ export const supplierReturns = pgTable(
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('supplier_returns_tenant_number_idx').on(t.tenantId, t.returnNumber),
     index('supplier_returns_tenant_idx').on(t.tenantId),
     index('supplier_returns_status_idx').on(t.status),
     index('supplier_returns_supplier_idx').on(t.supplierId),
@@ -592,13 +637,47 @@ export const inventoryItems = pgTable(
     allowNegativeStock: boolean('allow_negative_stock').default(false).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('inv_items_tenant_idx').on(t.tenantId),
     index('inv_items_sku_idx').on(t.sku),
     index('inv_items_cat_idx').on(t.category),
     index('inv_items_mat_type_idx').on(t.materialType),
+  ]
+);
+
+// Per-branch stock ledger for multi-branch inventory isolation without duplicating master items
+export const inventoryBranchStock = pgTable(
+  'inventory_branch_stock',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    branchId: integer('branch_id')
+      .notNull()
+      .references(() => branches.id, { onDelete: 'cascade' }),
+    inventoryItemId: integer('inventory_item_id')
+      .notNull()
+      .references(() => inventoryItems.id, { onDelete: 'cascade' }),
+    currentStock: decimal('current_stock', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    reservedStock: decimal('reserved_stock', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    minThreshold: decimal('min_threshold', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    reorderQuantity: decimal('reorder_quantity', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    averageUnitCost: decimal('average_unit_cost', { precision: 12, scale: 4 }).default('0.0000').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex('inv_branch_stock_unique_idx').on(t.tenantId, t.branchId, t.inventoryItemId),
+    index('inv_branch_stock_branch_idx').on(t.tenantId, t.branchId),
+    index('inv_branch_stock_item_idx').on(t.inventoryItemId),
   ]
 );
 
@@ -617,7 +696,10 @@ export const unitConversions = pgTable(
     description: text('description'),
     isDefault: boolean('is_default').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('unit_conv_tenant_idx').on(t.tenantId),
@@ -658,9 +740,18 @@ export const inventoryBatches = pgTable(
 
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('inv_batch_tenant_branch_num_idx')
+      .on(t.tenantId, t.branchId, t.batchNumber)
+      .where(sql`${t.branchId} IS NOT NULL`),
+    uniqueIndex('inv_batch_tenant_num_idx')
+      .on(t.tenantId, t.batchNumber)
+      .where(sql`${t.branchId} IS NULL`),
     index('inv_batch_tenant_idx').on(t.tenantId),
     index('inv_batch_item_idx').on(t.inventoryItemId),
     index('inv_batch_status_idx').on(t.status),
@@ -687,7 +778,10 @@ export const warehouseLocations = pgTable(
     isRefrigerated: boolean('is_refrigerated').default(false).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('wh_loc_tenant_idx').on(t.tenantId),
@@ -780,7 +874,10 @@ export const restaurantTables = pgTable(
       onDelete: 'set null',
     }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('tables_tenant_area_label_idx').on(t.tenantId, t.areaId, t.tableLabel),
@@ -806,7 +903,10 @@ export const reservations = pgTable(
     status: varchar('status', { length: 50 }).default('Pending').notNull(), // Pending, Confirmed, Checked-In, Completed, Cancelled, No-Show
     specialRequests: text('special_requests'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('reservations_tenant_date_idx').on(t.tenantId, t.reservationDate),
@@ -829,7 +929,10 @@ export const waitlistEntries = pgTable(
     status: varchar('status', { length: 50 }).default('Waiting').notNull(), // Waiting, Notified, Seated, Cancelled
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('waitlist_tenant_status_idx').on(t.tenantId, t.status),
@@ -849,6 +952,9 @@ export const orders = pgTable(
       .notNull(),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'restrict' }),
     tableId: integer('table_id').references(() => restaurantTables.id, { onDelete: 'set null' }),
+    customerId: integer('customer_id').references((): AnyPgColumn => customers.id, {
+      onDelete: 'set null',
+    }),
 
     // Enterprise Table & Station Snapshot (Resolves SQLSTATE 42703)
     tableName: varchar('table_name', { length: 100 }), // e.g. "Table 4 (Veranda)", "VIP Lounge", "Takeaway"
@@ -875,7 +981,10 @@ export const orders = pgTable(
     idempotencyKey: varchar('idempotency_key', { length: 100 }), // Offline sync & retry protection
     inventoryDeducted: boolean('inventory_deducted').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('orders_tenant_number_idx').on(t.tenantId, t.orderNumber),
@@ -883,6 +992,7 @@ export const orders = pgTable(
     index('orders_tenant_status_idx').on(t.tenantId, t.status, t.paymentStatus),
     index('orders_tenant_created_idx').on(t.tenantId, t.createdAt),
     index('orders_table_idx').on(t.tableId),
+    index('orders_customer_idx').on(t.tenantId, t.customerId),
   ]
 );
 
@@ -891,7 +1001,8 @@ export const orderItems = pgTable(
   {
     id: serial('id').primaryKey(),
     tenantId: integer('tenant_id')
-      .references(() => tenants.id, { onDelete: 'cascade' }),
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
     orderId: integer('order_id')
       .references(() => orders.id, { onDelete: 'cascade' })
       .notNull(),
@@ -913,6 +1024,7 @@ export const orderItems = pgTable(
   (t) => [
     index('order_items_order_idx').on(t.orderId),
     index('order_items_menu_item_idx').on(t.menuItemId),
+    check('order_items_qty_positive_chk', sql`${t.quantity} > 0`),
   ]
 );
 
@@ -982,9 +1094,13 @@ export const stockCounts = pgTable(
     reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('stock_cnt_tenant_number_idx').on(t.tenantId, t.countNumber),
     index('stock_cnt_tenant_idx').on(t.tenantId),
     index('stock_cnt_status_idx').on(t.status),
   ]
@@ -1049,13 +1165,18 @@ export const stockTransfers = pgTable(
     receivedAt: timestamp('received_at', { withTimezone: true }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('sto_tenant_number_idx').on(t.tenantId, t.transferNumber),
     index('sto_tenant_idx').on(t.tenantId),
     index('sto_status_idx').on(t.status),
     index('sto_source_idx').on(t.sourceBranchId),
     index('sto_dest_idx').on(t.destinationBranchId),
+    check('sto_distinct_branches_chk', sql`${t.sourceBranchId} <> ${t.destinationBranchId}`),
   ]
 );
 
@@ -1083,7 +1204,6 @@ export const stockTransferItems = pgTable(
   ]
 );
 
-// 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 // 1. MASTER FLEET ASSET DIRECTORY (Unified from logistics_fleet)
 export const logisticsFleet = pgTable(
   'logistics_fleet',
@@ -1118,11 +1238,14 @@ export const logisticsFleet = pgTable(
 
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('fleet_tenant_idx').on(t.tenantId),
-    index('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
+    uniqueIndex('fleet_plate_idx').on(t.tenantId, t.vehiclePlate),
     index('fleet_status_idx').on(t.tenantId, t.currentStatus),
   ]
 );
@@ -1268,9 +1391,13 @@ export const payments = pgTable(
     reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('pmt_tenant_number_idx').on(t.tenantId, t.paymentNumber),
     index('pmt_tenant_idx').on(t.tenantId),
     index('pmt_flow_idx').on(t.paymentFlow),
     index('pmt_status_idx').on(t.status),
@@ -1297,6 +1424,7 @@ export const bankStatements = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex('bank_stmt_tenant_number_idx').on(t.tenantId, t.statementNumber),
     index('bank_stmt_tenant_idx').on(t.tenantId),
     index('bank_stmt_acc_idx').on(t.clearingAccount),
   ]
@@ -1365,7 +1493,10 @@ export const mpesaTransactions = pgTable(
     initiatedById: integer('initiated_by_id').references(() => users.id, { onDelete: 'set null' }),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('mpesa_tx_tenant_idx').on(t.tenantId),
@@ -1407,9 +1538,13 @@ export const refunds = pgTable(
     reasonCode: varchar('reason_code', { length: 100 }).notNull(), // 'DEFECTIVE_GOODS', 'CUSTOMER_CANCELLATION', 'PRICING_DISPUTE'
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('ref_tenant_number_idx').on(t.tenantId, t.refundNumber),
     index('ref_tenant_idx').on(t.tenantId),
     index('ref_flow_idx').on(t.refundFlow),
     index('ref_order_idx').on(t.orderId),
@@ -1429,11 +1564,19 @@ export const cashDrawers = pgTable(
     status: varchar('status', { length: 30 }).default('CLOSED').notNull(), // 'OPEN', 'CLOSED'
     currentBalance: decimal('current_balance', { precision: 12, scale: 2 }).default('0.00').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('drawer_tenant_idx').on(t.tenantId),
-    uniqueIndex('drawers_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.drawerCode),
+    uniqueIndex('drawers_tenant_branch_code_idx')
+      .on(t.tenantId, t.branchId, t.drawerCode)
+      .where(sql`${t.branchId} IS NOT NULL`),
+    uniqueIndex('drawers_tenant_code_idx')
+      .on(t.tenantId, t.drawerCode)
+      .where(sql`${t.branchId} IS NULL`),
   ]
 );
 
@@ -1561,6 +1704,7 @@ export const branchesRelations = relations(branches, ({ one, many }) => ({
   tenant: one(tenants, { fields: [branches.tenantId], references: [tenants.id] }),
   diningAreas: many(diningAreas),
   orders: many(orders),
+  branchStock: many(inventoryBranchStock),
 }));
 
 export const menuCategoriesRelations = relations(menuCategories, ({ one, many }) => ({
@@ -1582,6 +1726,7 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   tenant: one(tenants, { fields: [orders.tenantId], references: [tenants.id] }),
   branch: one(branches, { fields: [orders.branchId], references: [branches.id] }),
   table: one(restaurantTables, { fields: [orders.tableId], references: [restaurantTables.id] }),
+  customer: one(customers, { fields: [orders.customerId], references: [customers.id] }),
   items: many(orderItems),
   payments: many(payments),
   deliveryAssignments: many(deliveryAssignments),
@@ -1605,7 +1750,10 @@ export const modifierGroups = pgTable(
     isRequired: boolean('is_required').default(false).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index('modifier_groups_tenant_idx').on(t.tenantId)]
 );
@@ -1636,7 +1784,10 @@ export const comboBundles = pgTable(
     basePrice: decimal('base_price', { precision: 10, scale: 2 }).notNull(),
     isAvailable: boolean('is_available').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [index('combo_bundles_tenant_idx').on(t.tenantId)]
 );
@@ -1668,7 +1819,10 @@ export const itemPricingRules = pgTable(
     daysOfWeek: varchar('days_of_week', { length: 50 }), // e.g. "MON,TUE,WED,THU,FRI"
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('pricing_rules_tenant_idx').on(t.tenantId),
@@ -1687,7 +1841,10 @@ export const menuItemAvailability = pgTable(
     reason: varchar('reason', { length: 150 }), // e.g. "Ran out of Brioche Buns", "86ed by Kitchen Chef"
     remainingCount: integer('remaining_count'), // Nullable: if set, shows countdown (e.g. "Only 4 left")
     autoResetAt: timestamp('auto_reset_at', { withTimezone: true }), // Scheduled restock time
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('item_avail_tenant_idx').on(t.tenantId),
@@ -1715,7 +1872,10 @@ export const recipes = pgTable(
     notes: text('notes'),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('recipes_tenant_menu_item_idx').on(t.tenantId, t.menuItemId, t.isActive),
@@ -1812,12 +1972,15 @@ export const warehouseZones = pgTable(
     temperatureMaxC: numeric('temperature_max_c', { precision: 5, scale: 2 }),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('warehouse_zones_tenant_idx').on(t.tenantId),
     index('warehouse_zones_branch_idx').on(t.tenantId, t.branchId),
-    index('warehouse_zones_code_idx').on(t.tenantId, t.zoneCode),
+    uniqueIndex('warehouse_zones_branch_code_idx').on(t.tenantId, t.branchId, t.zoneCode),
   ]
 );
 
@@ -1842,12 +2005,15 @@ export const warehouseBins = pgTable(
     isOccupied: boolean('is_occupied').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('warehouse_bins_tenant_idx').on(t.tenantId),
     index('warehouse_bins_zone_idx').on(t.zoneId),
-    index('warehouse_bins_code_idx').on(t.tenantId, t.binCode),
+    uniqueIndex('warehouse_bins_zone_code_idx').on(t.tenantId, t.zoneId, t.binCode),
   ]
 );
 
@@ -1869,7 +2035,10 @@ export const shiftTemplates = pgTable(
     breakMinutes: integer('break_minutes').default(30).notNull(),
     colorHex: varchar('color_hex', { length: 20 }).default('#0554F4').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('shift_templates_tenant_idx').on(t.tenantId),
@@ -1899,7 +2068,10 @@ export const workSchedules = pgTable(
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(), // DRAFT | PUBLISHED | CONFIRMED | CANCELLED
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('work_schedules_tenant_idx').on(t.tenantId),
@@ -1945,7 +2117,10 @@ export const attendanceRecords = pgTable(
       .references(() => users.id, { onDelete: 'set null' }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('attendance_tenant_idx').on(t.tenantId),
@@ -1993,7 +2168,10 @@ export const shiftHandovers = pgTable(
     outgoingSignedAt: timestamp('outgoing_signed_at', { withTimezone: true }).defaultNow().notNull(),
     incomingSignedAt: timestamp('incoming_signed_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('shift_handovers_tenant_idx').on(t.tenantId),
@@ -2023,9 +2201,9 @@ export const cashierAssignments = pgTable(
     userId: integer('user_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
+    // Nullable to match onDelete: 'set null'
     assignedByUserId: integer('assigned_by_user_id')
-      .references(() => users.id, { onDelete: 'set null' })
-      .notNull(),
+      .references(() => users.id, { onDelete: 'set null' }),
     assignmentDate: date('assignment_date').notNull(), // YYYY-MM-DD
     shiftType: varchar('shift_type', { length: 50 }).default('MORNING').notNull(), // MORNING | MIDDAY | EVENING | NIGHT_CLOSING
     status: varchar('status', { length: 50 }).default('ASSIGNED').notNull(), // ASSIGNED | ACTIVE | RELEASED | REVOKED
@@ -2039,7 +2217,10 @@ export const cashierAssignments = pgTable(
     closedAt: timestamp('closed_at', { withTimezone: true }),
     handoverNotes: text('handover_notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('cashier_assignments_tenant_idx').on(t.tenantId),
@@ -2064,9 +2245,9 @@ export const staffPerformanceReviews = pgTable(
     userId: integer('user_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
+    // Nullable to match onDelete: 'set null'
     reviewerId: integer('reviewer_id')
-      .references(() => users.id, { onDelete: 'set null' })
-      .notNull(),
+      .references(() => users.id, { onDelete: 'set null' }),
     reviewCycle: varchar('review_cycle', { length: 50 }).default('MONTHLY').notNull(), // MONTHLY | QUARTERLY | BIANNUAL | ANNUAL
     periodStart: date('period_start').notNull(),
     periodEnd: date('period_end').notNull(),
@@ -2094,7 +2275,10 @@ export const staffPerformanceReviews = pgTable(
     status: varchar('status', { length: 50 }).default('DRAFT').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | FINALIZED
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('perf_reviews_tenant_idx').on(t.tenantId),
@@ -2141,7 +2325,10 @@ export const tenantFinancialSettings = pgTable(
     maxDrawerCashThreshold: numeric('max_drawer_cash_threshold', { precision: 12, scale: 2 }).default('50000.00').notNull(),
     enableSafeDropAlerts: boolean('enable_safe_drop_alerts').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('fin_settings_tenant_idx').on(t.tenantId),
@@ -2163,6 +2350,7 @@ export const taxCodes = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex('tax_codes_tenant_code_idx').on(t.tenantId, t.code),
     index('tax_codes_tenant_idx').on(t.tenantId),
   ]
 );
@@ -2201,7 +2389,10 @@ export const serviceModels = pgTable(
     maxTabCreditLimit: numeric('max_tab_credit_limit', { precision: 12, scale: 2 }).default('0.00').notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('service_models_tenant_idx').on(t.tenantId),
@@ -2256,7 +2447,10 @@ export const receiptTemplates = pgTable(
     returnPolicy: text('return_policy'),
     wifiDetails: varchar('wifi_details', { length: 255 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('receipt_templates_tenant_idx').on(t.tenantId),
@@ -2302,7 +2496,10 @@ export const networkPrinters = pgTable(
     lastPingAt: timestamp('last_ping_at', { withTimezone: true }),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('network_printers_tenant_idx').on(t.tenantId),
@@ -2345,9 +2542,13 @@ export const kitchenStations = pgTable(
     ), // Automatic failover redirect if station terminal drops
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('kitchen_stations_tenant_branch_code_idx').on(t.tenantId, t.branchId, t.code),
     index('kitchen_stations_tenant_idx').on(t.tenantId),
     index('kitchen_stations_branch_idx').on(t.branchId),
     index('kitchen_stations_type_idx').on(t.tenantId, t.stationType),
@@ -2371,7 +2572,10 @@ export const kitchenGlobalSettings = pgTable(
     soundVolume: integer('sound_volume').default(80).notNull(), // 0 - 100%
     autoArchiveCompletedMinutes: integer('auto_archive_completed_minutes').default(120).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('kitchen_global_tenant_idx').on(t.tenantId),
@@ -2393,7 +2597,7 @@ export const paymentIntegrations = pgTable(
     provider: varchar('provider', { length: 50 }).notNull(), // MPESA_DARAJA | STRIPE | PESAPAL | DPO_PAY | FLUTTERWAVE | ADYEN | MANUAL_PDQ
     title: varchar('title', { length: 100 }).notNull(), // e.g. "Main M-Pesa Buy Goods Till", "Stripe Card Terminal Gateway"
     environment: varchar('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Cryptographic Secrets
+    // Gateway Credentials & Cryptographic Secrets (encrypt at application layer before storage)
     merchantIdentifier: varchar('merchant_identifier', { length: 100 }).notNull(), // Paybill/Till number, Stripe Account ID, Merchant ID
     apiKey: text('api_key').notNull(), // Consumer Key / Public Key
     apiSecret: text('api_secret').notNull(), // Consumer Secret / Restricted Secret Key
@@ -2414,7 +2618,10 @@ export const paymentIntegrations = pgTable(
     lastHandshakeStatus: varchar('last_handshake_status', { length: 50 }),
     isDefault: boolean('is_default').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('payment_integrations_tenant_idx').on(t.tenantId),
@@ -2464,7 +2671,7 @@ export const messagingIntegrations = pgTable(
     provider: varchar('provider', { length: 50 }).notNull(), // AFRICAS_TALKING | TWILIO | ADVANTA_SMS | SAFARICOM_BULK_SMS | INFOBIP | SENDGRID | RESEND | AWS_SES | CUSTOM_WEBHOOK
     title: varchar('title', { length: 100 }).notNull(),
     environment: varchar('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Originator Attributes
+    // Gateway Credentials & Originator Attributes (encrypt secrets at application layer)
     senderId: varchar('sender_id', { length: 50 }), // Alphanumeric Sender ID or WhatsApp verified number
     accountIdentifier: varchar('account_identifier', { length: 150 }).notNull(), // Username / Account SID / App ID
     apiKey: text('api_key').notNull(), // Primary API token / Auth token
@@ -2478,7 +2685,10 @@ export const messagingIntegrations = pgTable(
     lastHandshakeStatus: varchar('last_handshake_status', { length: 50 }),
     isDefault: boolean('is_default').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('messaging_integrations_tenant_idx').on(t.tenantId),
@@ -2502,7 +2712,10 @@ export const messagingTemplates = pgTable(
     bodyTemplate: text('body_template').notNull(), // Contains merge tags: {{employee_name}}, {{shift_date}}, {{start_time}}, etc.
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('messaging_templates_tenant_idx').on(t.tenantId),
@@ -2550,7 +2763,7 @@ export const orderIntegrations = pgTable(
     channel: varchar('channel', { length: 50 }).notNull(), // GLOVO | UBER_EATS | BOLT_FOOD | DOORDASH | SHOPIFY | WOOCOMMERCE | CUSTOM_WEBHOOK
     title: varchar('title', { length: 100 }).notNull(),
     environment: varchar('environment', { length: 20 }).default('SANDBOX').notNull(), // SANDBOX | PRODUCTION
-    // Gateway Credentials & Store Identification
+    // Gateway Credentials & Store Identification (encrypt secrets at application layer)
     storeIdentifier: varchar('store_identifier', { length: 150 }).notNull(), // External Store UUID / Aggregator Location ID
     apiKey: text('api_key').notNull(),
     apiSecret: text('api_secret'),
@@ -2567,7 +2780,10 @@ export const orderIntegrations = pgTable(
     lastSyncStatus: varchar('last_sync_status', { length: 50 }),
     isDefault: boolean('is_default').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('order_integrations_tenant_idx').on(t.tenantId),
@@ -2604,7 +2820,6 @@ export const orderIntegrationLogs = pgTable(
 // ============================================================================
 // ENTERPRISE AUDIT TRAIL, SECURITY & COMPLIANCE LOGS (HCM / GOVERNANCE)
 // ============================================================================
-
 
 export const auditLogs = pgTable(
   'audit_logs',
@@ -2664,7 +2879,10 @@ export const offlineSettings = pgTable(
     allowOfflineGiftCards: boolean('allow_offline_gift_cards').default(false).notNull(),
     allowOfflineCreditTabs: boolean('allow_offline_credit_tabs').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('offline_settings_tenant_idx').on(t.tenantId),
@@ -2690,6 +2908,7 @@ export const offlineSyncBatches = pgTable(
     completedAt: timestamp('completed_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex('offline_sync_tenant_ref_idx').on(t.tenantId, t.batchReference),
     index('offline_sync_tenant_idx').on(t.tenantId),
     index('offline_sync_terminal_idx').on(t.terminalIdentifier),
     index('offline_sync_status_idx').on(t.tenantId, t.status),
@@ -2731,12 +2950,15 @@ export const posDevices = pgTable(
     registeredByUserId: integer('registered_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     decommissionedAt: timestamp('decommissioned_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('pos_devices_code_idx').on(t.tenantId, t.deviceCode),
     index('pos_devices_tenant_idx').on(t.tenantId),
     index('pos_devices_branch_idx').on(t.branchId),
-    index('pos_devices_code_idx').on(t.tenantId, t.deviceCode),
     index('pos_devices_status_idx').on(t.tenantId, t.status),
   ]
 );
@@ -2752,14 +2974,15 @@ export const deviceEnrollmentTokens = pgTable(
       .references(() => branches.id, { onDelete: 'cascade' })
       .notNull(),
     pairingCode: varchar('pairing_code', { length: 12 }).notNull(), // 6-digit or formatted pairing pin e.g. "749-218"
-    token: text('token').notNull(), // Cryptographic one-time enrollment token
+    token: text('token').notNull(), // Store hashed one-time enrollment token
     deviceType: varchar('device_type', { length: 50 }).default('POS_TERMINAL').notNull(),
     assignedDrawerId: integer('assigned_drawer_id').references(() => cashDrawers.id, { onDelete: 'set null' }),
     assignedKitchenStationId: integer('assigned_kitchen_station_id').references(() => kitchenStations.id, { onDelete: 'set null' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     isClaimed: boolean('is_claimed').default(false).notNull(),
     claimedDeviceId: integer('claimed_device_id').references(() => posDevices.id, { onDelete: 'set null' }),
-    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }).notNull(),
+    // Nullable to match onDelete: 'set null'
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
@@ -2776,10 +2999,10 @@ export const subscriptionPlans = pgTable(
   'subscription_plans',
   {
     id: serial('id').primaryKey(),
-    code: varchar('code', { length: 50 }).unique().notNull(), // e.g. "STARTER", "PROFESSIONAL", "ENTERPRISE"
+    code: varchar('code', { length: 50 }).unique().notNull(), // e.g. "STARTER", "BUSINESS", "PROFESSIONAL", "ENTERPRISE"
     name: varchar('name', { length: 100 }).notNull(),
     description: text('description'),
-    billingCycle: varchar('billing_cycle', { length: 20 }).default('MONTHLY').notNull(), // MONTHLY | ANNUALLY
+    billingCycle: varchar('billing_cycle', { length: 20 }).default('MONTHLY').notNull(), // MONTHLY | BIANNUAL | ANNUALLY
     basePrice: numeric('base_price', { precision: 12, scale: 2 }).notNull(),
     currency: varchar('currency', { length: 10 }).default('KES').notNull(),
     includedUsers: integer('included_users').default(5).notNull(),
@@ -2789,7 +3012,10 @@ export const subscriptionPlans = pgTable(
     features: jsonb('features').$type<string[]>().default([]).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('subscription_plans_code_idx').on(t.code),
@@ -2813,7 +3039,10 @@ export const billingPaymentMethods = pgTable(
     token: text('token').notNull(), // Tokenized payment mandate / token reference
     isDefault: boolean('is_default').default(false).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('billing_payment_methods_tenant_idx').on(t.tenantId),
@@ -2843,7 +3072,10 @@ export const tenantSubscriptions = pgTable(
     cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
     canceledAt: timestamp('canceled_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('tenant_subscriptions_tenant_idx').on(t.tenantId),
@@ -2886,7 +3118,10 @@ export const billingInvoices = pgTable(
       .default([])
       .notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('billing_invoices_tenant_idx').on(t.tenantId),
@@ -2939,7 +3174,10 @@ export const securitySettings = pgTable(
     ssoEnabled: boolean('sso_enabled').default(false).notNull(),
     ssoProvider: varchar('sso_provider', { length: 50 }), // GOOGLE_WORKSPACE | MICROSOFT_AZURE | OKTA_SAML
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('security_settings_tenant_idx').on(t.tenantId),
@@ -3007,7 +3245,10 @@ export const supportTickets = pgTable(
     assignedAgent: varchar('assigned_agent', { length: 100 }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('support_tickets_tenant_idx').on(t.tenantId),
@@ -3053,7 +3294,10 @@ export const knowledgeBaseArticles = pgTable(
     isPublished: boolean('is_published').default(true).notNull(),
     viewCount: integer('view_count').default(0).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('kb_articles_category_idx').on(t.category),
@@ -3090,7 +3334,10 @@ export const reportDefinitions = pgTable(
     isSystem: boolean('is_system').default(true).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('report_definitions_category_idx').on(t.category),
@@ -3114,7 +3361,7 @@ export const reportExecutions = pgTable(
     status: varchar('status', { length: 30 }).default('QUEUED').notNull(), // QUEUED | PROCESSING | COMPLETED | FAILED
     format: varchar('format', { length: 20 }).default('CSV').notNull(), // CSV | JSON | PDF | XLSX
     parametersApplied: jsonb('parameters_applied')
-      .$type<Record<string, any>>()
+      .$type<Record<string, unknown>>()
       .default({})
       .notNull(),
     rowCount: integer('row_count').default(0).notNull(),
@@ -3141,7 +3388,8 @@ export const reportSchedules = pgTable(
       .references(() => reportDefinitions.id, { onDelete: 'cascade' })
       .notNull(),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
-    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }).notNull(),
+    // Nullable to match onDelete: 'set null'
+    createdByUserId: integer('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
     title: varchar('title', { length: 150 }).notNull(),
     frequency: varchar('frequency', { length: 30 }).default('WEEKLY').notNull(), // DAILY | WEEKLY | MONTHLY | END_OF_SHIFT
     deliveryChannel: varchar('delivery_channel', { length: 30 }).default('EMAIL').notNull(), // EMAIL | WEBHOOK | STORAGE
@@ -3154,7 +3402,10 @@ export const reportSchedules = pgTable(
     lastRunAt: timestamp('last_run_at', { withTimezone: true }),
     nextRunAt: timestamp('next_run_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('report_schedules_tenant_idx').on(t.tenantId),
@@ -3187,7 +3438,10 @@ export const customers = pgTable(
     notes: text('notes'),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('customers_tenant_idx').on(t.tenantId),
@@ -3236,7 +3490,10 @@ export const loyaltyTiers = pgTable(
     perks: jsonb('perks').$type<string[]>().default([]).notNull(), // e.g. ["Free Priority Seating", "Complimentary Dessert", "10% Discount"]
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('loyalty_tiers_tenant_idx').on(t.tenantId),
@@ -3260,7 +3517,10 @@ export const customerLoyaltyProfiles = pgTable(
     lifetimePointsEarned: integer('lifetime_points_earned').default(0).notNull(),
     lifetimePointsRedeemed: integer('lifetime_points_redeemed').default(0).notNull(),
     enrolledAt: timestamp('enrolled_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('cust_loyalty_tenant_idx').on(t.tenantId),
@@ -3289,7 +3549,10 @@ export const loyaltyRewardsCatalog = pgTable(
     endDate: timestamp('end_date', { withTimezone: true }),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('loyalty_rewards_tenant_idx').on(t.tenantId),
@@ -3375,7 +3638,10 @@ export const customerFeedback = pgTable(
     assignedToUserId: integer('assigned_to_user_id').references(() => users.id, { onDelete: 'set null' }),
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('feedback_tenant_idx').on(t.tenantId),
@@ -3383,6 +3649,8 @@ export const customerFeedback = pgTable(
     index('feedback_branch_idx').on(t.branchId),
     index('feedback_status_idx').on(t.tenantId, t.status),
     index('feedback_rating_idx').on(t.tenantId, t.rating),
+    check('feedback_rating_range_chk', sql`${t.rating} BETWEEN 1 AND 5`),
+    check('feedback_nps_range_chk', sql`${t.npsScore} IS NULL OR (${t.npsScore} BETWEEN 0 AND 10)`),
   ]
 );
 
@@ -3423,9 +3691,13 @@ export const marketingCampaigns = pgTable(
     endDate: timestamp('end_date', { withTimezone: true }),
     createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('campaigns_tenant_code_idx').on(t.tenantId, t.code),
     index('campaigns_tenant_idx').on(t.tenantId),
     index('campaigns_status_idx').on(t.tenantId, t.status),
     index('campaigns_channel_idx').on(t.tenantId, t.channel),
@@ -3474,7 +3746,10 @@ export const marketingTemplates = pgTable(
     defaultDiscountPercentage: integer('default_discount_percentage'),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('mkt_templates_tenant_idx').on(t.tenantId),
@@ -3505,11 +3780,14 @@ export const promotionalDiscounts = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
+    uniqueIndex('promo_discounts_code_idx').on(t.tenantId, t.code),
     index('promo_discounts_tenant_idx').on(t.tenantId),
-    index('promo_discounts_code_idx').on(t.tenantId, t.code),
     index('promo_discounts_active_idx').on(t.tenantId, t.isActive),
   ]
 );
@@ -3531,7 +3809,10 @@ export const aiAssistantSessions = pgTable(
     title: varchar('title', { length: 255 }).default('New Strategic Inquiry').notNull(),
     scopeDomain: varchar('scope_domain', { length: 50 }).default('GENERAL_OPS').notNull(), // 'GENERAL_OPS', 'WORKFORCE_HCM', 'INVENTORY_SUPPLY', 'FINANCE_TREASURY', 'GUEST_CRM'
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('ai_sessions_tenant_idx').on(t.tenantId),
@@ -3554,8 +3835,8 @@ export const aiAssistantMessages = pgTable(
 
     // Governed Agentic Payload
     toolCallIntent: varchar('tool_call_intent', { length: 80 }), // e.g. 'ANALYZE_LABOR_EFFICIENCY', 'PREDICT_STOCK_RUNOUT', 'GENERATE_RETENTION_CAMPAIGN'
-    structuredData: jsonb('structured_data').$type<Record<string, any>>(),
-    suggestedActions: jsonb('suggested_actions').$type<Array<{ label: string; actionCode: string; payload?: any }>>(),
+    structuredData: jsonb('structured_data').$type<Record<string, unknown>>(),
+    suggestedActions: jsonb('suggested_actions').$type<Array<{ label: string; actionCode: string; payload?: unknown }>>(),
     confidenceScore: decimal('confidence_score', { precision: 4, scale: 2 }), // e.g. 0.96
     tokensUsed: integer('tokens_used').default(0),
     latencyMs: integer('latency_ms').default(0),
@@ -3602,7 +3883,10 @@ export const demandForecastSnapshots = pgTable(
     varianceTolerancePct: numeric('variance_tolerance_pct', { precision: 5, scale: 2 }).default('5.00').notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('demand_forecast_tenant_idx').on(t.tenantId),
@@ -3631,6 +3915,7 @@ export const hourlyForecastIntervals = pgTable(
   (t) => [
     index('hourly_forecast_snapshot_idx').on(t.snapshotId),
     index('hourly_forecast_hour_idx').on(t.snapshotId, t.hourOfDay),
+    check('hourly_forecast_hour_chk', sql`${t.hourOfDay} BETWEEN 0 AND 23`),
   ]
 );
 
@@ -3671,7 +3956,10 @@ export const predictiveInventoryReplenishments = pgTable(
     aiReasoningNote: text('ai_reasoning_note').notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('pred_replenish_tenant_idx').on(t.tenantId),
@@ -3715,7 +4003,10 @@ export const menuEngineeringSnapshots = pgTable(
     strategicActionNote: text('strategic_action_note').notNull(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('menu_eng_tenant_idx').on(t.tenantId),
@@ -3745,13 +4036,13 @@ export const workflowRules = pgTable(
     conditionLogic: jsonb('condition_logic').$type<{
       field: string;
       operator: 'GREATER_THAN' | 'LESS_THAN' | 'EQUALS' | 'CONTAINS';
-      value: any;
+      value: unknown;
       unit?: string;
     }>().notNull(),
 
     // Action Actuators
     actionType: varchar('action_type', { length: 80 }).notNull(),
-    actionPayload: jsonb('action_payload').$type<Record<string, any>>().notNull(),
+    actionPayload: jsonb('action_payload').$type<Record<string, unknown>>().notNull(),
 
     // State & Execution Telemetry
     isActive: boolean('is_active').default(true).notNull(),
@@ -3759,7 +4050,10 @@ export const workflowRules = pgTable(
     lastTriggeredAt: timestamp('last_triggered_at', { withTimezone: true }),
     createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     index('wf_rules_tenant_idx').on(t.tenantId),
@@ -3779,7 +4073,7 @@ export const workflowExecutionLogs = pgTable(
       .references(() => workflowRules.id, { onDelete: 'cascade' })
       .notNull(),
     executionStatus: varchar('execution_status', { length: 30 }).default('SUCCESS').notNull(), // 'SUCCESS', 'FAILED', 'SKIPPED'
-    triggerPayloadSnapshot: jsonb('trigger_payload_snapshot').$type<Record<string, any>>(),
+    triggerPayloadSnapshot: jsonb('trigger_payload_snapshot').$type<Record<string, unknown>>(),
     executionOutput: text('execution_output').notNull(),
     executionDurationMs: integer('execution_duration_ms').default(0).notNull(),
     executedAt: timestamp('executed_at', { withTimezone: true }).defaultNow().notNull(),
@@ -3809,7 +4103,10 @@ export const expenseCategories = pgTable(
     taxDeductible: boolean('tax_deductible').default(true).notNull(),
     isActive: boolean('is_active').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('exp_cat_tenant_code_idx').on(t.tenantId, t.code),
@@ -3862,7 +4159,10 @@ export const expenses = pgTable(
     paymentReference: varchar('payment_reference', { length: 100 }), // M-Pesa B2C Transaction Code or Bank Cheque / Wire Ref
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('expenses_tenant_voucher_idx').on(t.tenantId, t.voucherNumber),
@@ -3918,7 +4218,10 @@ export const financialAdjustments = pgTable(
     supportingDocumentUrl: text('supporting_document_url'),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
   },
   (t) => [
     uniqueIndex('fin_adj_tenant_number_idx').on(t.tenantId, t.adjustmentNumber),
