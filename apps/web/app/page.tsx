@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import Header from '../components/layout/Header';
 import Footer from '../components/layout/Footer';
+import HeroBackgroundVideo from '@/components/landing/HeroBackgroundVideo';
 import HeroVideoPlayer from '@/components/landing/HeroVideoPlayer';
 import ProductShowcaseClient from '@/components/landing/ProductShowcaseClient';
 import FaqAccordionClient from '@/components/marketing/FaqAccordionClient';
@@ -266,25 +267,15 @@ export default function Home() {
       <Header />
 
       <main className="flex-grow w-full">
-        {/* --- SECTION 2: PREMIUM SPLIT-LAYOUT HERO WITH PROMOTIONAL VIDEO --- */}
-        <section className="relative overflow-hidden pt-6 pb-10 sm:pt-10 sm:pb-14 lg:pt-12 lg:pb-16 w-full px-4 sm:px-8 lg:px-16 bg-gradient-to-b from-white via-servora-pale/60 to-servora-pale">
-          <div
-            aria-hidden="true"
-            className="absolute top-0 left-1/2 -z-10 -translate-x-1/2 transform-gpu blur-3xl w-full max-w-7xl overflow-hidden pointer-events-none"
-          >
-            <div
-              className="aspect-[1155/678] w-full bg-gradient-to-tr from-servora-core to-servora-bright opacity-10 rounded-full"
-              style={{
-                clipPath:
-                  'polygon(74.1% 44.1%, 100% 61.6%, 97.5% 26.9%, 85.5% 0.1%, 80.7% 2%, 72.5% 32.5%, 60.2% 62.4%, 52.4% 68.1%, 47.5% 58.3%, 45.2% 34.5%, 27.5% 76.7%, 0.1% 64.9%, 17.9% 100%, 27.6% 76.8%, 76.1% 97.7%, 74.1% 44.1%)',
-              }}
-            />
-          </div>
+        {/* --- SECTION 2: PREMIUM SPLIT-LAYOUT HERO WITH AMBIENT BG VIDEO & OVERVIEW DEMO --- */}
+        <section className="relative isolate overflow-hidden pt-6 pb-10 sm:pt-10 sm:pb-14 lg:pt-12 lg:pb-16 w-full px-4 sm:px-8 lg:px-16">
+          {/* Muted Looping Ambient Background Video (Z8p3672toPU) */}
+          <HeroBackgroundVideo />
 
-          <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
+          <div className="relative z-10 w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-center">
             {/* Left Column: Marketing Content & Conversion CTAs */}
             <div className="lg:col-span-6 flex flex-col items-start text-left">
-              <div className="inline-flex items-center gap-x-2 rounded-full bg-white px-3.5 py-1.5 text-[11px] font-bold text-servora-navy shadow-2xs ring-1 ring-inset ring-servora-core/15 mb-4">
+              <div className="inline-flex items-center gap-x-2 rounded-full bg-white/95 backdrop-blur-xs px-3.5 py-1.5 text-[11px] font-bold text-servora-navy shadow-2xs ring-1 ring-inset ring-servora-core/15 mb-4">
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-servora-teal opacity-75" />
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-servora-teal" />
@@ -305,7 +296,7 @@ export default function Home() {
                 </span>
               </h1>
 
-              <p className="mt-4 max-w-xl text-sm sm:text-base leading-relaxed text-servora-deepTeal font-normal">
+              <p className="mt-4 max-w-xl text-sm sm:text-base leading-relaxed text-servora-deepTeal font-medium">
                 Run your hospitality business smarter with Servora. Connect POS sales, restaurant operations, kitchen workflows, inventory, procurement, payments, and business intelligence through one integrated management platform.
               </p>
 
@@ -319,14 +310,14 @@ export default function Home() {
                 </Link>
                 <Link
                   href="/features"
-                  className="inline-flex h-12 items-center justify-center rounded-xl border border-gray-200 bg-white px-7 text-xs sm:text-sm font-bold text-servora-navy shadow-2xs transition-all hover:border-servora-core hover:text-servora-core"
+                  className="inline-flex h-12 items-center justify-center rounded-xl border border-gray-200 bg-white/95 backdrop-blur-xs px-7 text-xs sm:text-sm font-bold text-servora-navy shadow-2xs transition-all hover:border-servora-core hover:text-servora-core"
                 >
                   Explore the Platform
                 </Link>
               </div>
 
               {/* Compact Capability Indicators */}
-              <div className="mt-7 pt-5 border-t border-gray-200/70 grid grid-cols-2 gap-x-4 gap-y-2.5 w-full max-w-lg text-xs font-semibold text-servora-navy">
+              <div className="mt-7 pt-5 border-t border-gray-200/80 grid grid-cols-2 gap-x-4 gap-y-2.5 w-full max-w-lg text-xs font-semibold text-servora-navy">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-servora-teal flex-shrink-0" />
                   <span>Safaricom M-Pesa Daraja</span>
@@ -346,7 +337,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Right Column: Official Promotional Video Centerpiece */}
+            {/* Right Column: Servora POS Overview Demo Video (w3cbAFig5oA) */}
             <div className="lg:col-span-6 w-full">
               <HeroVideoPlayer />
             </div>

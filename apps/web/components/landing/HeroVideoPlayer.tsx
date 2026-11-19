@@ -3,34 +3,37 @@
 
 import { useState } from 'react';
 
-const VIDEO_ID = 'Z8p3672toPU';
+const DEMO_VIDEO_ID = 'w3cbAFig5oA';
 
 export default function HeroVideoPlayer() {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [thumbSrc, setThumbSrc] = useState(
+    `https://i.ytimg.com/vi/${DEMO_VIDEO_ID}/maxresdefault.jpg`
+  );
 
   return (
     <div className="relative w-full mx-auto">
       {/* Ambient background glow */}
       <div
         aria-hidden="true"
-        className="absolute -inset-2 rounded-3xl bg-gradient-to-tr from-servora-core via-servora-bright to-servora-teal opacity-20 blur-2xl pointer-events-none"
+        className="absolute -inset-2 rounded-3xl bg-gradient-to-tr from-servora-core via-servora-bright to-servora-teal opacity-25 blur-2xl pointer-events-none"
       />
 
       {/* Main 16:9 Enterprise Video Frame */}
       <div className="relative rounded-2xl sm:rounded-3xl bg-servora-navy p-2 sm:p-3 shadow-2xl ring-1 ring-white/15 overflow-hidden">
-        {/* Top Browser / Terminal Chrome Bar */}
+        {/* Top Terminal Chrome Bar */}
         <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 mb-2">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 flex-shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 flex-shrink-0" />
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 flex-shrink-0" />
             <span className="ml-2 text-[11px] font-mono text-gray-300 truncate">
-              servora.mavoratechnologies.com &bull; Platform Overview (0:46)
+              servora.mavoratechnologies.com &bull; Dashboard Demo (1:48)
             </span>
           </div>
-          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-servora-teal/20 px-2.5 py-0.5 text-[10px] font-bold text-servora-teal ring-1 ring-inset ring-servora-teal/30">
+          <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-servora-teal/20 px-2.5 py-0.5 text-[10px] font-bold text-servora-teal ring-1 ring-inset ring-servora-teal/30 flex-shrink-0">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            HD Walkthrough
+            Overview Demo
           </span>
         </div>
 
@@ -40,14 +43,17 @@ export default function HeroVideoPlayer() {
             <button
               type="button"
               onClick={() => setIsPlaying(true)}
-              aria-label="Play Servora Promotional Video: Premium Hotel & Restaurant Management System"
+              aria-label="Play Servora POS Overview Demo Video: One Dashboard Complete Restaurant Visibility"
               className="group relative w-full h-full flex items-center justify-center text-left focus:outline-none cursor-pointer"
             >
-              {/* Official YouTube High-Res Thumbnail with Fallback */}
+              {/* Official YouTube Thumbnail with HQ Fallback */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`https://i.ytimg.com/vi/${VIDEO_ID}/maxresdefault.jpg`}
-                alt="Servora Hotel and Restaurant Management System Promotional Video Preview"
+                src={thumbSrc}
+                onError={() =>
+                  setThumbSrc(`https://i.ytimg.com/vi/${DEMO_VIDEO_ID}/hqdefault.jpg`)
+                }
+                alt="Servora POS Dashboard Overview Demo Video Preview"
                 className="absolute inset-0 w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-105 opacity-90"
                 loading="eager"
               />
@@ -68,7 +74,7 @@ export default function HeroVideoPlayer() {
                   </svg>
                 </div>
                 <span className="inline-flex items-center gap-2 rounded-full bg-servora-navy/85 backdrop-blur-md px-4 py-1.5 text-xs font-bold text-white ring-1 ring-white/20 shadow-lg">
-                  Watch Servora in Action (0:46)
+                  Watch Overview Demo (1:48)
                 </span>
               </div>
 
@@ -77,7 +83,7 @@ export default function HeroVideoPlayer() {
                 <div className="flex items-center gap-2 rounded-lg bg-servora-navy/85 backdrop-blur-md px-3 py-1.5 border border-white/15">
                   <span className="w-2 h-2 rounded-full bg-servora-teal" />
                   <span className="text-[11px] font-semibold text-white">
-                    Front-of-House POS &bull; Live KDS &bull; Recipe BOM &bull; BI Analytics
+                    Turnover &amp; Tax &bull; Stock Valuation &bull; Multi-Branch &bull; Top Products
                   </span>
                 </div>
               </div>
@@ -85,8 +91,8 @@ export default function HeroVideoPlayer() {
           ) : (
             <iframe
               className="absolute inset-0 w-full h-full border-0"
-              src={`https://www.youtube-nocookie.com/embed/${VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
-              title="SERVORA – PREMIUM HOTEL & RESTAURANT MANAGEMENT SYSTEM"
+              src={`https://www.youtube-nocookie.com/embed/${DEMO_VIDEO_ID}?autoplay=1&rel=0&modestbranding=1`}
+              title="Run Your Restaurant & Hotel Smarter with Servora POS: One Dashboard Complete Restaurant Visibility"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
               referrerPolicy="strict-origin-when-cross-origin"
               allowFullScreen
@@ -94,16 +100,16 @@ export default function HeroVideoPlayer() {
           )}
         </div>
 
-        {/* Noscript / Fallback Link */}
+        {/* Footer Caption & Fallback Link */}
         <div className="mt-2 px-2 flex items-center justify-between text-[11px] text-gray-300">
-          <span>Official Platform Walkthrough by Mavora Technologies</span>
+          <span>Servora POS Dashboard Overview Demo</span>
           <a
-            href={`https://youtu.be/${VIDEO_ID}`}
+            href={`https://youtu.be/${DEMO_VIDEO_ID}`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-servora-teal hover:underline font-semibold"
           >
-            Open on YouTube &nearr;
+            Open on YouTube ↗
           </a>
         </div>
       </div>
