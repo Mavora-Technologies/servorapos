@@ -10,6 +10,7 @@ import {
   Minus,
   Trash2,
   ShoppingBag,
+  ShoppingBasket,
   CreditCard,
   Clock,
   Utensils,
@@ -166,6 +167,14 @@ interface ItemStationMapping {
   originalStationName: string;
 }
 
+interface ComboComponentItem {
+  menuItemId: number;
+  quantity: number;
+  additionalPrice: number;
+  itemName: string;
+  itemPrice: number;
+}
+
 interface MenuItem {
   id: string;
   name: string;
@@ -174,6 +183,9 @@ interface MenuItem {
   isAvailable: boolean;
   sku?: string;
   image?: string;
+  isCombo?: boolean;
+  comboId?: number;
+  comboItems?: ComboComponentItem[];
 }
 
 interface CartItem extends MenuItem {
@@ -255,6 +267,8 @@ interface ReceiptTemplate {
 
 type PaymentMethod = 'Cash' | 'M-Pesa' | 'Card' | 'Split';
 type MobileTab = 'menu' | 'cart';
+
+const COMBOS_CATEGORY_LABEL = 'Combos & Bundles';
 
 const SERVICE_MODEL_ICONS: Record<string, typeof Utensils> = {
   DINE_IN: Utensils,
@@ -370,6 +384,7 @@ export default function POSPage() {
           authRes,
           posContextRes,
           menuRes,
+          combosRes,
           tablesRes,
           serviceModelsRes,
           finRes,
@@ -380,6 +395,7 @@ export default function POSPage() {
           fetchApi(`/api/v1/menu/active${branchParam}`).catch(() => ({
             data: { items: [], categories: [] },
           })),
+          fetchApi('/api/v1/menu/combos').catch(() => ({ data: [] })),
           fetchApi(`/api/v1/restaurant/tables${branchParam}`).catch(() => ({ data: [] })),
           fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
           fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
@@ -422,14 +438,18 @@ export default function POSPage() {
           setActiveBranch(authRes.data.branch);
         }
 
+        // 1. Base Menu Items
+        let baseItems: MenuItem[] = [];
+        let baseCategories: string[] = [];
+
         if (menuRes?.data?.items?.length > 0) {
-          setMenuItems(menuRes.data.items);
-          setCategories(['All', ...(menuRes.data.categories || [])]);
+          baseItems = menuRes.data.items;
+          baseCategories = menuRes.data.categories || [];
         } else {
           const fallbackRes = await fetchApi(`/api/v1/menu/catalog${branchParam}`).catch(() => null);
           const rawItems = fallbackRes?.data?.items || [];
           if (Array.isArray(rawItems) && rawItems.length > 0) {
-            const normalized: MenuItem[] = rawItems.map(
+            baseItems = rawItems.map(
               (i: {
                 id: number | string;
                 name: string;
@@ -448,11 +468,60 @@ export default function POSPage() {
                 image: i.imageUrl,
               })
             );
-            const uniqueCats = Array.from(new Set(normalized.map((i) => i.category)));
-            setMenuItems(normalized);
-            setCategories(['All', ...uniqueCats]);
+            baseCategories = Array.from(new Set(baseItems.map((i) => i.category)));
           }
         }
+
+        // 2. Active Combos & Meal Bundles
+        const rawCombos = Array.isArray(combosRes?.data) ? combosRes.data : [];
+        const comboMenuItems: MenuItem[] = rawCombos
+          .filter(
+            (c: { isAvailable?: boolean; items?: unknown[] }) =>
+              c.isAvailable !== false && Array.isArray(c.items) && c.items.length > 0
+          )
+          .map(
+            (c: {
+              id: number;
+              name: string;
+              sku?: string | null;
+              basePrice: string | number;
+              isAvailable: boolean;
+              items: Array<{
+                menuItemId: number;
+                quantity: number;
+                additionalPrice?: string | number;
+                itemName?: string | null;
+                itemPrice?: string | number | null;
+              }>;
+            }) => ({
+              id: `combo-${c.id}`,
+              comboId: c.id,
+              isCombo: true,
+              name: c.name,
+              category: COMBOS_CATEGORY_LABEL,
+              price: Number(c.basePrice || 0),
+              isAvailable: c.isAvailable !== false,
+              sku: c.sku || undefined,
+              comboItems: c.items.map((line) => ({
+                menuItemId: Number(line.menuItemId),
+                quantity: Number(line.quantity) || 1,
+                additionalPrice: Number(line.additionalPrice || 0),
+                itemName: line.itemName || `Item #${line.menuItemId}`,
+                itemPrice: Number(line.itemPrice || 0),
+              })),
+            })
+          );
+
+        const mergedCategories = Array.from(
+          new Set([
+            'All',
+            ...(comboMenuItems.length > 0 ? [COMBOS_CATEGORY_LABEL] : []),
+            ...baseCategories,
+          ])
+        );
+
+        setMenuItems([...comboMenuItems, ...baseItems]);
+        setCategories(mergedCategories);
 
         if (tablesRes?.data) {
           setTables(tablesRes.data);
@@ -510,35 +579,51 @@ export default function POSPage() {
     return () => clearTimeout(timer);
   }, [customerSearchQuery]);
 
-  // Compute total raw-material consumption already reserved by current cart items
+  // Aggregate total units of each menuItemId currently in cart (both standalone & inside combos)
+  const cartMenuItemQuantities = useMemo(() => {
+    const qtyMap: Record<number, number> = {};
+    for (const cartLine of cart) {
+      if (cartLine.isCombo && cartLine.comboItems?.length) {
+        for (const comp of cartLine.comboItems) {
+          qtyMap[comp.menuItemId] =
+            (qtyMap[comp.menuItemId] ?? 0) + comp.quantity * cartLine.quantity;
+        }
+      } else {
+        const idNum = Number(cartLine.id);
+        if (!Number.isNaN(idNum)) {
+          qtyMap[idNum] = (qtyMap[idNum] ?? 0) + cartLine.quantity;
+        }
+      }
+    }
+    return qtyMap;
+  }, [cart]);
+
+  // Compute total raw-material consumption already reserved by current cart items (standalone + combos)
   const cartIngredientConsumption = useMemo(() => {
     const usedByInvId: Record<number, number> = {};
-    for (const cartLine of cart) {
-      const flag = availabilityMap[Number(cartLine.id)];
+    for (const [menuIdStr, totalQty] of Object.entries(cartMenuItemQuantities)) {
+      const flag = availabilityMap[Number(menuIdStr)];
       if (!flag?.requirements?.length) continue;
       for (const req of flag.requirements) {
         usedByInvId[req.inventoryItemId] =
-          (usedByInvId[req.inventoryItemId] ?? 0) + req.requiredPerPortion * cartLine.quantity;
+          (usedByInvId[req.inventoryItemId] ?? 0) + req.requiredPerPortion * totalQty;
       }
     }
     return usedByInvId;
-  }, [cart, availabilityMap]);
+  }, [cartMenuItemQuantities, availabilityMap]);
 
-  // Compute remaining sellable units for a menu item given current cart reservations
-  const getRemainingSellable = useCallback(
+  // Compute remaining sellable units for a single menu item given current cart reservations
+  const getSingleItemRemainingSellable = useCallback(
     (menuItemId: number): { remaining: number | null; limitingName: string | null } => {
       const flag = availabilityMap[menuItemId];
       if (!flag) return { remaining: null, limitingName: null };
       if (flag.is86ed) return { remaining: 0, limitingName: flag.limitingIngredientName ?? null };
 
-      const qtyInCart = cart
-        .filter((c) => Number(c.id) === menuItemId)
-        .reduce((sum, c) => sum + c.quantity, 0);
+      const qtyInCart = cartMenuItemQuantities[menuItemId] ?? 0;
 
       let remaining: number | null = null;
       let limitingName: string | null = flag.limitingIngredientName ?? null;
 
-      // 1. Check live inventory requirements (accounts for shared raw materials across cart)
       if (flag.requirements && flag.requirements.length > 0) {
         for (const req of flag.requirements) {
           if (req.allowNegativeStock || req.requiredPerPortion <= 0) continue;
@@ -553,7 +638,6 @@ export default function POSPage() {
         }
       }
 
-      // 2. Apply manual remainingCount / maxAvailable cap
       const cap = flag.maxAvailable ?? flag.remainingCount;
       if (cap !== null && cap !== undefined) {
         const capRemaining = Math.max(0, cap - qtyInCart);
@@ -564,7 +648,80 @@ export default function POSPage() {
 
       return { remaining, limitingName };
     },
-    [availabilityMap, cart, cartIngredientConsumption]
+    [availabilityMap, cartMenuItemQuantities, cartIngredientConsumption]
+  );
+
+  // Unified remaining sellable calculation for both standalone items and combo bundles
+  const getItemRemainingSellable = useCallback(
+    (item: MenuItem): { remaining: number | null; limitingName: string | null } => {
+      if (!item.isCombo || !item.comboItems?.length) {
+        return getSingleItemRemainingSellable(Number(item.id));
+      }
+
+      let comboLimit: number | null = null;
+      let limitingName: string | null = null;
+
+      // Aggregate ingredient demand per 1 bundle across all combo components
+      const bundleInvDemand: Record<
+        number,
+        { neededPerBundle: number; currentStock: number; name: string }
+      > = {};
+
+      for (const comp of item.comboItems) {
+        const flag = availabilityMap[comp.menuItemId];
+        if (!flag) continue;
+
+        if (flag.is86ed) {
+          return { remaining: 0, limitingName: comp.itemName };
+        }
+
+        const cap = flag.maxAvailable ?? flag.remainingCount;
+        if (cap !== null && cap !== undefined) {
+          const alreadyInCart = cartMenuItemQuantities[comp.menuItemId] ?? 0;
+          const compRemaining = Math.max(0, cap - alreadyInCart);
+          const bundlesFromCap = Math.floor(compRemaining / comp.quantity);
+          if (comboLimit === null || bundlesFromCap < comboLimit) {
+            comboLimit = bundlesFromCap;
+            limitingName = comp.itemName;
+          }
+        }
+
+        if (flag.requirements?.length) {
+          for (const req of flag.requirements) {
+            if (req.allowNegativeStock || req.requiredPerPortion <= 0) continue;
+            if (!bundleInvDemand[req.inventoryItemId]) {
+              bundleInvDemand[req.inventoryItemId] = {
+                neededPerBundle: 0,
+                currentStock: req.currentStock,
+                name: req.inventoryItemName,
+              };
+            }
+            bundleInvDemand[req.inventoryItemId].neededPerBundle +=
+              req.requiredPerPortion * comp.quantity;
+          }
+        }
+      }
+
+      for (const [invIdStr, demand] of Object.entries(bundleInvDemand)) {
+        const alreadyUsed = cartIngredientConsumption[Number(invIdStr)] ?? 0;
+        const remainingStock = Math.max(0, demand.currentStock - alreadyUsed);
+        const bundlesPossible = Math.floor(
+          (remainingStock + 0.00001) / demand.neededPerBundle
+        );
+        if (comboLimit === null || bundlesPossible < comboLimit) {
+          comboLimit = bundlesPossible;
+          limitingName = demand.name;
+        }
+      }
+
+      return { remaining: comboLimit, limitingName };
+    },
+    [
+      availabilityMap,
+      cartIngredientConsumption,
+      cartMenuItemQuantities,
+      getSingleItemRemainingSellable,
+    ]
   );
 
   const handleBranchSwitch = (newBranchId: string) => {
@@ -634,7 +791,7 @@ export default function POSPage() {
   }, [kitchenStations, itemStationMap]);
 
   const getEffectiveItemStation = useCallback(
-    (item: { id: string; targetStation?: string }) => {
+    (item: { id: string; targetStation?: string; isCombo?: boolean; comboItems?: ComboComponentItem[] }) => {
       if (orderTargetStation !== 'AUTO') {
         return {
           stationName: orderTargetStation,
@@ -646,6 +803,20 @@ export default function POSPage() {
         return {
           stationName: item.targetStation,
           isRedirected: true,
+          isFailover: false,
+        };
+      }
+      if (item.isCombo && item.comboItems?.length) {
+        const stationNames = Array.from(
+          new Set(
+            item.comboItems.map(
+              (c) => itemStationMap[c.menuItemId]?.stationName || 'Main Kitchen'
+            )
+          )
+        );
+        return {
+          stationName: stationNames.length === 1 ? stationNames[0] : 'Multi-Station Bundle',
+          isRedirected: false,
           isFailover: false,
         };
       }
@@ -662,18 +833,35 @@ export default function POSPage() {
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
-      const itemStation = itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
-      const matchesStation =
-        selectedStationFilter === 'ALL' || itemStation === selectedStationFilter;
+
+      let matchesStation = true;
+      if (selectedStationFilter !== 'ALL') {
+        if (item.isCombo && item.comboItems?.length) {
+          matchesStation = item.comboItems.some(
+            (c) =>
+              (itemStationMap[c.menuItemId]?.stationName || 'Main Kitchen') ===
+              selectedStationFilter
+          );
+        } else {
+          const itemStation = itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
+          matchesStation = itemStation === selectedStationFilter;
+        }
+      }
+
+      const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (item.sku && item.sku.toLowerCase().includes(searchQuery.toLowerCase()));
+        !q ||
+        item.name.toLowerCase().includes(q) ||
+        (item.sku && item.sku.toLowerCase().includes(q)) ||
+        (item.isCombo &&
+          item.comboItems?.some((c) => c.itemName.toLowerCase().includes(q)));
+
       return matchesCategory && matchesStation && matchesSearch && item.isAvailable;
     });
   }, [menuItems, selectedCategory, selectedStationFilter, itemStationMap, searchQuery]);
 
   const addToCart = (item: MenuItem) => {
-    const { remaining, limitingName } = getRemainingSellable(Number(item.id));
+    const { remaining, limitingName } = getItemRemainingSellable(item);
     if (remaining !== null && remaining <= 0) {
       setStockAlert(
         limitingName
@@ -707,7 +895,7 @@ export default function POSPage() {
     if (!targetLine) return;
 
     if (delta > 0) {
-      const { remaining, limitingName } = getRemainingSellable(Number(targetLine.id));
+      const { remaining, limitingName } = getItemRemainingSellable(targetLine);
       if (remaining !== null && delta > remaining) {
         setStockAlert(
           limitingName
@@ -746,14 +934,87 @@ export default function POSPage() {
     }
   };
 
+  // Expand combos into their constituent menu items with cent-balanced prorated pricing for API & stock validation
+  const expandCartForOrderApi = useCallback(
+    (cartLines: CartItem[]) => {
+      const expanded: Array<{
+        menuItemId: number;
+        name: string;
+        quantity: number;
+        unitPrice: number;
+        totalPrice: number;
+        sku?: string;
+        targetStation?: string;
+        notes?: string;
+      }> = [];
+
+      for (const line of cartLines) {
+        if (line.isCombo && line.comboItems && line.comboItems.length > 0) {
+          const bundleTotal = Number((line.price * line.quantity).toFixed(2));
+          const componentWeights = line.comboItems.map((comp) =>
+            Math.max(0, (comp.itemPrice + comp.additionalPrice) * comp.quantity)
+          );
+          const totalWeight = componentWeights.reduce((s, w) => s + w, 0);
+
+          let allocatedSoFar = 0;
+
+          line.comboItems.forEach((comp, idx) => {
+            const totalCompQty = comp.quantity * line.quantity;
+            const isLast = idx === line.comboItems!.length - 1;
+            const compLineTotal = isLast
+              ? Number((bundleTotal - allocatedSoFar).toFixed(2))
+              : totalWeight > 0
+                ? Number(((bundleTotal * componentWeights[idx]) / totalWeight).toFixed(2))
+                : Number((bundleTotal / line.comboItems!.length).toFixed(2));
+
+            allocatedSoFar = Number((allocatedSoFar + compLineTotal).toFixed(2));
+
+            const notePrefix = `[Combo: ${line.name}]`;
+            const combinedNote = line.notes ? `${notePrefix} ${line.notes}` : notePrefix;
+
+            expanded.push({
+              menuItemId: comp.menuItemId,
+              name: comp.itemName,
+              quantity: totalCompQty,
+              unitPrice: totalCompQty > 0 ? Number((compLineTotal / totalCompQty).toFixed(2)) : 0,
+              totalPrice: compLineTotal,
+              sku: line.sku,
+              targetStation:
+                orderTargetStation !== 'AUTO' ? orderTargetStation : line.targetStation,
+              notes: combinedNote,
+            });
+          });
+        } else {
+          expanded.push({
+            menuItemId: parseInt(line.id, 10),
+            name: line.name,
+            quantity: line.quantity,
+            unitPrice: line.price,
+            totalPrice: Number((line.price * line.quantity).toFixed(2)),
+            sku: line.sku,
+            targetStation:
+              orderTargetStation !== 'AUTO' ? orderTargetStation : line.targetStation,
+            notes: line.notes,
+          });
+        }
+      }
+
+      return expanded;
+    },
+    [orderTargetStation]
+  );
+
+  // Group active cart items (including expanded combo components) by resolved KDS station
   const stationRoutingPreview = useMemo(() => {
     const grouped: Record<
       string,
       { stationName: string; unitsCount: number; isRedirected: boolean; isFailover: boolean }
     > = {};
 
-    for (const item of cart) {
-      const resolved = getEffectiveItemStation(item);
+    const addStationUnits = (
+      resolved: { stationName: string; isRedirected: boolean; isFailover: boolean },
+      units: number
+    ) => {
       if (!grouped[resolved.stationName]) {
         grouped[resolved.stationName] = {
           stationName: resolved.stationName,
@@ -762,9 +1023,24 @@ export default function POSPage() {
           isFailover: resolved.isFailover,
         };
       }
-      grouped[resolved.stationName].unitsCount += item.quantity;
+      grouped[resolved.stationName].unitsCount += units;
       if (resolved.isRedirected) grouped[resolved.stationName].isRedirected = true;
       if (resolved.isFailover) grouped[resolved.stationName].isFailover = true;
+    };
+
+    for (const item of cart) {
+      if (item.isCombo && item.comboItems?.length) {
+        for (const comp of item.comboItems) {
+          const resolved = getEffectiveItemStation({
+            id: String(comp.menuItemId),
+            targetStation: item.targetStation,
+          });
+          addStationUnits(resolved, comp.quantity * item.quantity);
+        }
+      } else {
+        const resolved = getEffectiveItemStation(item);
+        addStationUnits(resolved, item.quantity);
+      }
     }
 
     return Object.values(grouped);
@@ -915,14 +1191,15 @@ export default function POSPage() {
 
     try {
       const tableObj = tables.find((t) => String(t.id) === selectedTableId);
+      const expandedItems = expandCartForOrderApi(cart);
 
       // 0. Authoritative live database stock verification before taking payment
       await fetchApi('/api/v1/pos/validate-stock', {
         method: 'POST',
         body: JSON.stringify({
           branchId: activeBranch?.id,
-          items: cart.map((i) => ({
-            menuItemId: parseInt(i.id, 10),
+          items: expandedItems.map((i) => ({
+            menuItemId: i.menuItemId,
             quantity: i.quantity,
           })),
         }),
@@ -973,17 +1250,7 @@ export default function POSPage() {
                 ? parseFloat(splitCashAmount)
                 : calculations.grandTotal,
           changeReturned: cashChangeDue,
-          items: cart.map((i) => ({
-            menuItemId: parseInt(i.id, 10),
-            name: i.name,
-            quantity: i.quantity,
-            unitPrice: i.price,
-            totalPrice: i.price * i.quantity,
-            sku: i.sku,
-            targetStation:
-              orderTargetStation !== 'AUTO' ? orderTargetStation : i.targetStation,
-            notes: i.notes,
-          })),
+          items: expandedItems,
         }),
       });
 
@@ -1080,7 +1347,6 @@ export default function POSPage() {
       setCheckoutError(
         getErrorMessage(error, 'POS Checkout transaction encountered an error.')
       );
-      // Refresh live stock levels in case another terminal depleted stock concurrently
       loadInitialData(activeBranch?.id);
     } finally {
       setIsCheckingOut(false);
@@ -1350,7 +1616,7 @@ export default function POSPage() {
                 />
                 <input
                   type="text"
-                  placeholder="Scan SKU or search dishes, beverages..."
+                  placeholder="Scan SKU or search dishes, drinks, combos..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
@@ -1410,19 +1676,22 @@ export default function POSPage() {
                   key={cat}
                   type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${
                     selectedCategory === cat
                       ? 'bg-servora-navy text-white shadow-xs'
-                      : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
+                      : cat === COMBOS_CATEGORY_LABEL
+                        ? 'bg-blue-50 text-servora-core border border-blue-200 hover:bg-blue-100'
+                        : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
+                  {cat === COMBOS_CATEGORY_LABEL && <ShoppingBasket size={12} />}
                   {cat}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Product Cards Grid with Live Stock Enforcement */}
+          {/* Product & Combo Cards Grid with Live Stock Enforcement */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
@@ -1439,9 +1708,9 @@ export default function POSPage() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
                 {filteredItems.map((item) => {
-                  const { remaining } = getRemainingSellable(Number(item.id));
+                  const { remaining } = getItemRemainingSellable(item);
                   const isOutOfStock = remaining !== null && remaining <= 0;
-                  const mappedStation = itemStationMap[Number(item.id)];
+                  const resolvedStation = getEffectiveItemStation(item);
 
                   return (
                     <button
@@ -1452,13 +1721,27 @@ export default function POSPage() {
                       className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
                         isOutOfStock
                           ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
-                          : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
+                          : item.isCombo
+                            ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-97 cursor-pointer'
+                            : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
                       }`}
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-servora-deepTeal bg-slate-100 px-1.5 py-0.5 rounded-md truncate">
-                            {item.category}
+                          <span
+                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${
+                              item.isCombo
+                                ? 'bg-servora-core text-white'
+                                : 'text-servora-deepTeal bg-slate-100'
+                            }`}
+                          >
+                            {item.isCombo ? (
+                              <>
+                                <ShoppingBasket size={9} /> Combo
+                              </>
+                            ) : (
+                              item.category
+                            )}
                           </span>
                           {isOutOfStock ? (
                             <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md shrink-0">
@@ -1481,10 +1764,18 @@ export default function POSPage() {
 
                       <div className="space-y-1 pt-1 border-t border-gray-50">
                         <div className="flex items-center gap-1 text-[9.5px] font-mono text-gray-500 truncate">
-                          <ChefHat size={10} className="text-servora-core shrink-0" />
-                          <span className="truncate">
-                            {mappedStation?.stationName || 'Main Kitchen'}
-                          </span>
+                          {item.isCombo && item.comboItems ? (
+                            <span className="truncate text-servora-deepTeal font-sans">
+                              {item.comboItems
+                                .map((c) => `${c.quantity}x ${c.itemName}`)
+                                .join(' + ')}
+                            </span>
+                          ) : (
+                            <>
+                              <ChefHat size={10} className="text-servora-core shrink-0" />
+                              <span className="truncate">{resolvedStation.stationName}</span>
+                            </>
+                          )}
                         </div>
                         <div className="flex justify-between items-center">
                           <span className="text-xs font-mono font-bold text-servora-core">
@@ -1783,14 +2074,12 @@ export default function POSPage() {
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <ShoppingBag size={36} className="mb-2 opacity-25" />
                 <p className="text-xs font-bold text-servora-navy">Ticket is empty</p>
-                <p className="text-[11px] text-gray-400">Select dishes or beverages from catalog</p>
+                <p className="text-[11px] text-gray-400">Select dishes, drinks, or combos from catalog</p>
               </div>
             ) : (
               cart.map((item) => {
-                const defaultSt =
-                  itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
                 const resolvedSt = getEffectiveItemStation(item);
-                const { remaining } = getRemainingSellable(Number(item.id));
+                const { remaining } = getItemRemainingSellable(item);
                 const atStockLimit = remaining !== null && remaining <= 0;
 
                 return (
@@ -1801,6 +2090,11 @@ export default function POSPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex-1 pr-2">
                         <div className="flex items-center gap-1.5">
+                          {item.isCombo && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-servora-core text-white shrink-0">
+                              Combo
+                            </span>
+                          )}
                           <h4 className="text-xs font-bold text-servora-navy line-clamp-1">
                             {item.name}
                           </h4>
@@ -1810,6 +2104,13 @@ export default function POSPage() {
                             </span>
                           )}
                         </div>
+                        {item.isCombo && item.comboItems && (
+                          <p className="text-[10px] text-gray-500 line-clamp-1 mt-0.5">
+                            {item.comboItems
+                              .map((c) => `${c.quantity * item.quantity}x ${c.itemName}`)
+                              .join(', ')}
+                          </p>
+                        )}
                         <p className="text-[11px] font-mono font-bold text-servora-core">
                           {currencySymbol} {(item.price * item.quantity).toLocaleString()}
                         </p>
@@ -1863,7 +2164,7 @@ export default function POSPage() {
                             : 'bg-white border-gray-200 text-servora-navy'
                         }`}
                       >
-                        <option value="">Default ({defaultSt})</option>
+                        <option value="">Default ({resolvedSt.stationName})</option>
                         {kitchenStations
                           .filter((s) => s.isActive)
                           .map((st) => (
@@ -2289,6 +2590,14 @@ export default function POSPage() {
                         {(i.price * i.quantity).toLocaleString()}
                       </span>
                     </div>
+                    {i.isCombo && i.comboItems && (
+                      <p className="text-[9px] pl-2 text-gray-700">
+                        Includes:{' '}
+                        {i.comboItems
+                          .map((c) => `${c.quantity * i.quantity}x ${c.itemName}`)
+                          .join(', ')}
+                      </p>
+                    )}
                     {receiptTemplate?.showKitchenNotes && i.notes && (
                       <p className="text-[9.5px] italic pl-2">* {i.notes}</p>
                     )}
