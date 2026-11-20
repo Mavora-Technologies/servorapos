@@ -1,3 +1,4 @@
+// apps/web/app/(dashboard)/pos/page.tsx
 'use client';
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
@@ -126,10 +127,23 @@ interface LoyaltyRewardOption {
   minTierId: number | null;
 }
 
+interface StockRequirementLine {
+  inventoryItemId: number;
+  inventoryItemName: string;
+  requiredPerPortion: number;
+  unit: string;
+  currentStock: number;
+  allowNegativeStock: boolean;
+}
+
 interface ItemAvailabilityFlag {
   menuItemId: number;
   is86ed: boolean;
   remainingCount: number | null;
+  maxAvailable?: number | null;
+  stockTrackingType?: string;
+  limitingIngredientName?: string | null;
+  requirements?: StockRequirementLine[];
 }
 
 interface KitchenStationOption {
@@ -242,7 +256,7 @@ interface ReceiptTemplate {
 type PaymentMethod = 'Cash' | 'M-Pesa' | 'Card' | 'Split';
 type MobileTab = 'menu' | 'cart';
 
-const SERVICE_MODEL_ICONS: Record<string, any> = {
+const SERVICE_MODEL_ICONS: Record<string, typeof Utensils> = {
   DINE_IN: Utensils,
   QUICK_SERVICE: ShoppingBag,
   BAR_TAB: Wine,
@@ -250,6 +264,13 @@ const SERVICE_MODEL_ICONS: Record<string, any> = {
   DELIVERY: Truck,
   DRIVE_THRU: Car,
 };
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
 
 export default function POSPage() {
   const searchParams = useSearchParams();
@@ -279,11 +300,14 @@ export default function POSPage() {
   const [itemStationMap, setItemStationMap] = useState<Record<number, ItemStationMapping>>({});
   const [orderTargetStation, setOrderTargetStation] = useState<string>('AUTO');
 
+  // Inline Stock & Checkout Alert Banners
+  const [stockAlert, setStockAlert] = useState<string | null>(null);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
   // CRM Customer & Loyalty Engine States
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerMatches, setCustomerMatches] = useState<LoyaltyCustomerMatch[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<LoyaltyCustomerMatch | null>(null);
-  const [isSearchingCustomers, setIsSearchingCustomers] = useState(false);
   const [loyaltyRewards, setLoyaltyRewards] = useState<LoyaltyRewardOption[]>([]);
   const [selectedReward, setSelectedReward] = useState<LoyaltyRewardOption | null>(null);
 
@@ -327,6 +351,7 @@ export default function POSPage() {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
 
   // Completed Receipt State
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
   const loadInitialData = useCallback(
@@ -381,7 +406,6 @@ export default function POSPage() {
           setKitchenStations(ctx.kitchenStations || []);
           setItemStationMap(ctx.itemStationMap || {});
 
-          // Auto-select assigned drawer or first open drawer
           if (ctx.custodianGuardrails?.cashDrawerId) {
             setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
           } else if (ctx.drawers?.length > 0 && !selectedDrawerId) {
@@ -389,7 +413,6 @@ export default function POSPage() {
             setSelectedDrawerId(String((openDrawer || ctx.drawers[0]).id));
           }
 
-          // Build 86'd / low-stock lookup map
           const availLookup: Record<number, ItemAvailabilityFlag> = {};
           for (const flag of ctx.itemAvailability || []) {
             availLookup[flag.menuItemId] = flag;
@@ -403,20 +426,29 @@ export default function POSPage() {
           setMenuItems(menuRes.data.items);
           setCategories(['All', ...(menuRes.data.categories || [])]);
         } else {
-          // Fallback to /api/v1/menu/items if /active route wasn't matched
-          const fallbackRes = await fetchApi(`/api/v1/menu/items${branchParam}`).catch(() => null);
-          const rawItems = fallbackRes?.data?.items || fallbackRes?.data || [];
+          const fallbackRes = await fetchApi(`/api/v1/menu/catalog${branchParam}`).catch(() => null);
+          const rawItems = fallbackRes?.data?.items || [];
           if (Array.isArray(rawItems) && rawItems.length > 0) {
-            const normalized = rawItems.map((i: any) => ({
-              id: String(i.id),
-              name: i.name,
-              category: i.categoryName || i.category?.name || i.category || 'Menu',
-              price: Number(i.price || 0),
-              isAvailable: i.isAvailable !== false,
-              sku: i.sku,
-              image: i.imageUrl || i.image,
-            }));
-            const uniqueCats = Array.from(new Set(normalized.map((i: any) => i.category))) as string[];
+            const normalized: MenuItem[] = rawItems.map(
+              (i: {
+                id: number | string;
+                name: string;
+                category?: string;
+                price?: number | string;
+                isAvailable?: boolean;
+                sku?: string;
+                imageUrl?: string;
+              }) => ({
+                id: String(i.id),
+                name: i.name,
+                category: i.category || 'Menu',
+                price: Number(i.price || 0),
+                isAvailable: i.isAvailable !== false,
+                sku: i.sku,
+                image: i.imageUrl,
+              })
+            );
+            const uniqueCats = Array.from(new Set(normalized.map((i) => i.category)));
             setMenuItems(normalized);
             setCategories(['All', ...uniqueCats]);
           }
@@ -440,7 +472,8 @@ export default function POSPage() {
 
         if (receiptRes?.data && Array.isArray(receiptRes.data)) {
           const defaultTpl =
-            receiptRes.data.find((t: ReceiptTemplate) => (t as any).isDefault) || receiptRes.data[0];
+            receiptRes.data.find((t: ReceiptTemplate & { isDefault?: boolean }) => t.isDefault) ||
+            receiptRes.data[0];
           if (defaultTpl) setReceiptTemplate(defaultTpl);
         }
       } catch (error) {
@@ -465,20 +498,74 @@ export default function POSPage() {
 
     const timer = setTimeout(async () => {
       try {
-        setIsSearchingCustomers(true);
         const res = await fetchApi(
           `/api/v1/pos/customers?search=${encodeURIComponent(customerSearchQuery.trim())}`
         );
         setCustomerMatches(res?.data || []);
       } catch {
         setCustomerMatches([]);
-      } finally {
-        setIsSearchingCustomers(false);
       }
     }, 300);
 
     return () => clearTimeout(timer);
   }, [customerSearchQuery]);
+
+  // Compute total raw-material consumption already reserved by current cart items
+  const cartIngredientConsumption = useMemo(() => {
+    const usedByInvId: Record<number, number> = {};
+    for (const cartLine of cart) {
+      const flag = availabilityMap[Number(cartLine.id)];
+      if (!flag?.requirements?.length) continue;
+      for (const req of flag.requirements) {
+        usedByInvId[req.inventoryItemId] =
+          (usedByInvId[req.inventoryItemId] ?? 0) + req.requiredPerPortion * cartLine.quantity;
+      }
+    }
+    return usedByInvId;
+  }, [cart, availabilityMap]);
+
+  // Compute remaining sellable units for a menu item given current cart reservations
+  const getRemainingSellable = useCallback(
+    (menuItemId: number): { remaining: number | null; limitingName: string | null } => {
+      const flag = availabilityMap[menuItemId];
+      if (!flag) return { remaining: null, limitingName: null };
+      if (flag.is86ed) return { remaining: 0, limitingName: flag.limitingIngredientName ?? null };
+
+      const qtyInCart = cart
+        .filter((c) => Number(c.id) === menuItemId)
+        .reduce((sum, c) => sum + c.quantity, 0);
+
+      let remaining: number | null = null;
+      let limitingName: string | null = flag.limitingIngredientName ?? null;
+
+      // 1. Check live inventory requirements (accounts for shared raw materials across cart)
+      if (flag.requirements && flag.requirements.length > 0) {
+        for (const req of flag.requirements) {
+          if (req.allowNegativeStock || req.requiredPerPortion <= 0) continue;
+          const alreadyUsed = cartIngredientConsumption[req.inventoryItemId] ?? 0;
+          const remainingStock = Math.max(0, req.currentStock - alreadyUsed);
+          const canAdd = Math.floor((remainingStock + 0.00001) / req.requiredPerPortion);
+
+          if (remaining === null || canAdd < remaining) {
+            remaining = canAdd;
+            limitingName = req.inventoryItemName;
+          }
+        }
+      }
+
+      // 2. Apply manual remainingCount / maxAvailable cap
+      const cap = flag.maxAvailable ?? flag.remainingCount;
+      if (cap !== null && cap !== undefined) {
+        const capRemaining = Math.max(0, cap - qtyInCart);
+        if (remaining === null || capRemaining < remaining) {
+          remaining = capRemaining;
+        }
+      }
+
+      return { remaining, limitingName };
+    },
+    [availabilityMap, cart, cartIngredientConsumption]
+  );
 
   const handleBranchSwitch = (newBranchId: string) => {
     const idNum = parseInt(newBranchId, 10);
@@ -487,6 +574,7 @@ export default function POSPage() {
     setSelectedDrawerId('');
     setSelectedStationFilter('ALL');
     setOrderTargetStation('AUTO');
+    setStockAlert(null);
     loadInitialData(idNum);
   };
 
@@ -525,8 +613,8 @@ export default function POSPage() {
         setAppliedPromo(res.data);
         setPromoCodeInput('');
       }
-    } catch (err: any) {
-      setPromoError(err.message || 'Invalid promo code');
+    } catch (err: unknown) {
+      setPromoError(getErrorMessage(err, 'Invalid promo code'));
     } finally {
       setIsValidatingPromo(false);
     }
@@ -534,7 +622,6 @@ export default function POSPage() {
 
   const currencySymbol = business?.currency || financialSettings?.baseCurrency || 'KES';
 
-  // Unique station names available for catalog filtering
   const availableStationNames = useMemo(() => {
     const names = new Set<string>();
     kitchenStations.forEach((st) => {
@@ -546,7 +633,6 @@ export default function POSPage() {
     return Array.from(names).sort();
   }, [kitchenStations, itemStationMap]);
 
-  // Resolve effective KDS target station for any catalog or cart item
   const getEffectiveItemStation = useCallback(
     (item: { id: string; targetStation?: string }) => {
       if (orderTargetStation !== 'AUTO') {
@@ -587,15 +673,20 @@ export default function POSPage() {
   }, [menuItems, selectedCategory, selectedStationFilter, itemStationMap, searchQuery]);
 
   const addToCart = (item: MenuItem) => {
-    const flag = availabilityMap[Number(item.id)];
-    if (flag?.is86ed) return;
+    const { remaining, limitingName } = getRemainingSellable(Number(item.id));
+    if (remaining !== null && remaining <= 0) {
+      setStockAlert(
+        limitingName
+          ? `Cannot add "${item.name}": available stock for ${limitingName} is exhausted.`
+          : `Cannot add "${item.name}": no available stock remaining.`
+      );
+      return;
+    }
 
+    setStockAlert(null);
     setCart((prev) => {
       const existing = prev.find((c) => c.id === item.id && !c.notes && !c.targetStation);
       if (existing) {
-        if (flag?.remainingCount !== null && flag?.remainingCount !== undefined) {
-          if (existing.quantity >= flag.remainingCount) return prev;
-        }
         return prev.map((c) =>
           c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
         );
@@ -612,6 +703,22 @@ export default function POSPage() {
   };
 
   const updateQuantity = (cartItemId: string, delta: number) => {
+    const targetLine = cart.find((c) => c.cartItemId === cartItemId);
+    if (!targetLine) return;
+
+    if (delta > 0) {
+      const { remaining, limitingName } = getRemainingSellable(Number(targetLine.id));
+      if (remaining !== null && delta > remaining) {
+        setStockAlert(
+          limitingName
+            ? `Stock limit reached for "${targetLine.name}" (limited by ${limitingName}).`
+            : `Stock limit reached for "${targetLine.name}".`
+        );
+        return;
+      }
+    }
+
+    setStockAlert(null);
     setCart((prev) =>
       prev
         .map((item) => {
@@ -634,11 +741,11 @@ export default function POSPage() {
       setOrderTargetStation('AUTO');
       setAppliedPromo(null);
       setPromoError(null);
+      setStockAlert(null);
       setGuestCount(1);
     }
   };
 
-  // Group active cart items by resolved KDS station for checkout preview
   const stationRoutingPreview = useMemo(() => {
     const grouped: Record<
       string,
@@ -663,13 +770,11 @@ export default function POSPage() {
     return Object.values(grouped);
   }, [cart, getEffectiveItemStation]);
 
-  // Real-Time Enterprise Financial & Loyalty Calculations
   const calculations = useMemo(() => {
     const rawSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const manualDiscountKes = rawSubtotal * (orderDiscountPercent / 100);
     const promoDiscountKes = appliedPromo ? appliedPromo.calculatedDiscountKes : 0;
 
-    // Loyalty Reward Discount (if FIXED or PERCENTAGE reward redeemed)
     let rewardDiscountKes = 0;
     if (selectedReward) {
       if (selectedReward.rewardType === 'DISCOUNT_FIXED') {
@@ -726,7 +831,6 @@ export default function POSPage() {
       grandTotal = netAmount + vatAmount + levyAmount + serviceChargeAmount + packingChargeAmount;
     }
 
-    // Loyalty Points Earned Preview (1 point per 100 KES * Tier Multiplier)
     const basePoints = Math.floor(grandTotal / 100);
     const multiplier = selectedCustomer?.earningMultiplier || 1;
     const estimatedPointsEarned = selectedCustomer ? Math.round(basePoints * multiplier) : 0;
@@ -759,7 +863,6 @@ export default function POSPage() {
     [drawers, selectedDrawerId]
   );
 
-  // Cash Change Calculation
   const cashChangeDue = useMemo(() => {
     if (paymentMethod === 'Cash') {
       const tendered = parseFloat(cashTendered) || 0;
@@ -773,7 +876,6 @@ export default function POSPage() {
     return 0;
   }, [paymentMethod, cashTendered, splitCashAmount, splitMpesaAmount, calculations.grandTotal]);
 
-  // Safe Drop Alert Telemetry Check
   const isSafeDropWarning = useMemo(() => {
     if (!financialSettings?.enableSafeDropAlerts) return false;
     const currentBalance =
@@ -785,7 +887,6 @@ export default function POSPage() {
     return currentBalance >= threshold * 0.9;
   }, [financialSettings, activeShift, selectedDrawerObj, custodianGuardrails]);
 
-  // Max discount ceiling allowed for this cashier assignment
   const maxAllowedDiscount = useMemo(() => {
     if (!custodianGuardrails) return 20;
     if (!custodianGuardrails.allowManualDiscount) return 0;
@@ -795,9 +896,11 @@ export default function POSPage() {
   const handleOpenPayment = () => {
     if (cart.length === 0) return;
     if (activeServiceModel?.requiresTable && !selectedTableId) {
-      alert('This service model requires assigning a dining table before settlement.');
+      setStockAlert('This service model requires assigning a dining table before settlement.');
       return;
     }
+    setCheckoutError(null);
+    setStockAlert(null);
     setCashTendered(calculations.grandTotal.toFixed(2));
     setMpesaPhone(customerPhone || '');
     setSplitCashAmount((calculations.grandTotal / 2).toFixed(2));
@@ -806,11 +909,26 @@ export default function POSPage() {
   };
 
   const handleCompleteCheckout = async () => {
+    if (isCheckingOut) return;
     setIsCheckingOut(true);
+    setCheckoutError(null);
+
     try {
       const tableObj = tables.find((t) => String(t.id) === selectedTableId);
 
-      // 1. If Loyalty Reward was redeemed, execute redemption deduction first
+      // 0. Authoritative live database stock verification before taking payment
+      await fetchApi('/api/v1/pos/validate-stock', {
+        method: 'POST',
+        body: JSON.stringify({
+          branchId: activeBranch?.id,
+          items: cart.map((i) => ({
+            menuItemId: parseInt(i.id, 10),
+            quantity: i.quantity,
+          })),
+        }),
+      });
+
+      // 1. Redeem Loyalty Reward if selected
       if (selectedCustomer && selectedReward) {
         await fetchApi('/api/v1/loyalty/rewards/redeem', {
           method: 'POST',
@@ -856,7 +974,7 @@ export default function POSPage() {
                 : calculations.grandTotal,
           changeReturned: cashChangeDue,
           items: cart.map((i) => ({
-            menuItemId: parseInt(i.id, 10) || 1,
+            menuItemId: parseInt(i.id, 10),
             name: i.name,
             quantity: i.quantity,
             unitPrice: i.price,
@@ -941,7 +1059,8 @@ export default function POSPage() {
         kraPin: financialSettings?.taxPin || activeBranch?.kraPin || business?.kraPin || '',
         etimsDeviceSerial:
           activeBranch?.etimsDeviceSerial ||
-          (financialSettings as any)?.etimsDeviceSerial ||
+          (financialSettings as (FinancialSettings & { etimsDeviceSerial?: string }) | null)
+            ?.etimsDeviceSerial ||
           'OSCU-SCU-2026-NBO',
         footerMessage: receiptTemplate?.footerMessage || 'Thank you for your business. Karibu tena!',
         returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
@@ -957,8 +1076,12 @@ export default function POSPage() {
       setIsPaymentModalOpen(false);
       setMobileTab('menu');
       loadInitialData(activeBranch?.id);
-    } catch (error: any) {
-      alert(error.message || 'POS Checkout transaction encountered an error.');
+    } catch (error: unknown) {
+      setCheckoutError(
+        getErrorMessage(error, 'POS Checkout transaction encountered an error.')
+      );
+      // Refresh live stock levels in case another terminal depleted stock concurrently
+      loadInitialData(activeBranch?.id);
     } finally {
       setIsCheckingOut(false);
     }
@@ -1039,7 +1162,6 @@ export default function POSPage() {
               border-bottom: 2px solid #000000;
               margin: 5px 0;
             }
-            * { color: #000000 !important; box-sizing: border-box; }
           </style>
         </head>
         <body>
@@ -1149,6 +1271,7 @@ export default function POSPage() {
           )}
 
           <button
+            type="button"
             onClick={() => loadInitialData(activeBranch?.id)}
             title="Sync Workspace, Drawers & Catalog"
             className="p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
@@ -1158,9 +1281,31 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* INLINE STOCK GUARDRAIL ALERT BANNER */}
+      {stockAlert && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 text-rose-800 px-4 py-2 rounded-xl text-xs font-semibold shrink-0"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle size={14} className="text-rose-600 shrink-0" />
+            <span>{stockAlert}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setStockAlert(null)}
+            aria-label="Dismiss stock alert"
+            className="text-rose-600 hover:text-rose-900"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* MOBILE SCREEN NAVIGATION DOCK */}
       <div className="flex lg:hidden bg-white p-1 rounded-xl border border-gray-200 shadow-xs shrink-0">
         <button
+          type="button"
           onClick={() => setMobileTab('menu')}
           className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
             mobileTab === 'menu'
@@ -1171,6 +1316,7 @@ export default function POSPage() {
           <Layers size={15} /> Catalog ({filteredItems.length})
         </button>
         <button
+          type="button"
           onClick={() => setMobileTab('cart')}
           className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
             mobileTab === 'cart'
@@ -1211,7 +1357,6 @@ export default function POSPage() {
                 />
               </div>
 
-              {/* Station Filter Dropdown */}
               {availableStationNames.length > 0 && (
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
                   <ChefHat size={13} className="text-servora-core" />
@@ -1230,7 +1375,6 @@ export default function POSPage() {
                 </div>
               )}
 
-              {/* Table assignment selector for Dine-in orders */}
               {activeServiceModel?.requiresTable && (
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
                   <Utensils size={13} className="text-servora-core" />
@@ -1264,6 +1408,7 @@ export default function POSPage() {
               {categories.map((cat) => (
                 <button
                   key={cat}
+                  type="button"
                   onClick={() => setSelectedCategory(cat)}
                   className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                     selectedCategory === cat
@@ -1277,7 +1422,7 @@ export default function POSPage() {
             </div>
           </div>
 
-          {/* Product Cards Grid with 86'd, Low-Stock & Station Routing Telemetry */}
+          {/* Product Cards Grid with Live Stock Enforcement */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
@@ -1294,18 +1439,18 @@ export default function POSPage() {
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
                 {filteredItems.map((item) => {
-                  const flag = availabilityMap[Number(item.id)];
-                  const is86ed = flag?.is86ed === true;
-                  const lowCount = flag?.remainingCount;
+                  const { remaining } = getRemainingSellable(Number(item.id));
+                  const isOutOfStock = remaining !== null && remaining <= 0;
                   const mappedStation = itemStationMap[Number(item.id)];
 
                   return (
                     <button
                       key={item.id}
+                      type="button"
                       onClick={() => addToCart(item)}
-                      disabled={is86ed}
+                      disabled={isOutOfStock}
                       className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
-                        is86ed
+                        isOutOfStock
                           ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
                           : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
                       }`}
@@ -1315,13 +1460,17 @@ export default function POSPage() {
                           <span className="text-[9px] font-bold uppercase tracking-wider text-servora-deepTeal bg-slate-100 px-1.5 py-0.5 rounded-md truncate">
                             {item.category}
                           </span>
-                          {is86ed ? (
-                            <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md">
-                              86&apos;d
+                          {isOutOfStock ? (
+                            <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md shrink-0">
+                              Out of Stock
                             </span>
-                          ) : lowCount !== null && lowCount !== undefined && lowCount <= 5 ? (
-                            <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md">
-                              {lowCount} left
+                          ) : remaining !== null && remaining <= 5 ? (
+                            <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md shrink-0">
+                              {remaining} left
+                            </span>
+                          ) : remaining !== null ? (
+                            <span className="text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md shrink-0">
+                              {remaining} avail
                             </span>
                           ) : null}
                         </div>
@@ -1369,6 +1518,7 @@ export default function POSPage() {
                 return (
                   <button
                     key={model.id}
+                    type="button"
                     onClick={() => setActiveServiceModel(model)}
                     className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
                       isSelected
@@ -1418,12 +1568,11 @@ export default function POSPage() {
                 </span>
                 <span>
                   {tables.find((t) => String(t.id) === selectedTableId)?.tableLabel ||
-                    '⚠️ Table Required'}
+                    'Table Required'}
                 </span>
               </div>
             )}
 
-            {/* CRM & Loyalty Directory Search Bar */}
             {!selectedCustomer ? (
               <div className="relative">
                 <Award
@@ -1466,7 +1615,6 @@ export default function POSPage() {
                 )}
               </div>
             ) : (
-              /* Active Loyalty Member Profile Card */
               <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-2">
@@ -1491,7 +1639,6 @@ export default function POSPage() {
                   </button>
                 </div>
 
-                {/* Eligible Rewards Redemption Dropdown */}
                 {loyaltyRewards.length > 0 && (
                   <div className="flex items-center gap-1.5">
                     <Gift size={13} className="text-amber-700 shrink-0" />
@@ -1519,7 +1666,6 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Walk-in / Manual Guest Fields */}
             {!selectedCustomer && (
               <div className="grid grid-cols-2 gap-2">
                 <input
@@ -1539,7 +1685,6 @@ export default function POSPage() {
               </div>
             )}
 
-            {/* Buyer KRA PIN, Guest Covers & Custodian-Guarded Discount */}
             <div className="flex gap-2">
               <input
                 type="text"
@@ -1588,7 +1733,6 @@ export default function POSPage() {
               </div>
             </div>
 
-            {/* Dynamic Promotional Code Input */}
             <div className="flex gap-1.5 items-center">
               {!appliedPromo ? (
                 <>
@@ -1633,7 +1777,7 @@ export default function POSPage() {
             {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
           </div>
 
-          {/* Cart Itemized List with Per-Item Station Override & Prep Note */}
+          {/* Cart Itemized List with Stock-Guarded Increment Controls */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -1646,6 +1790,8 @@ export default function POSPage() {
                 const defaultSt =
                   itemStationMap[Number(item.id)]?.stationName || 'Main Kitchen';
                 const resolvedSt = getEffectiveItemStation(item);
+                const { remaining } = getRemainingSellable(Number(item.id));
+                const atStockLimit = remaining !== null && remaining <= 0;
 
                 return (
                   <div
@@ -1654,9 +1800,16 @@ export default function POSPage() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 pr-2">
-                        <h4 className="text-xs font-bold text-servora-navy line-clamp-1">
-                          {item.name}
-                        </h4>
+                        <div className="flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-servora-navy line-clamp-1">
+                            {item.name}
+                          </h4>
+                          {atStockLimit && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0">
+                              Max Stock
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[11px] font-mono font-bold text-servora-core">
                           {currencySymbol} {(item.price * item.quantity).toLocaleString()}
                         </p>
@@ -1664,7 +1817,9 @@ export default function POSPage() {
 
                       <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-gray-200 shadow-xs">
                         <button
+                          type="button"
                           onClick={() => updateQuantity(item.cartItemId, -1)}
+                          aria-label={`Decrease quantity of ${item.name}`}
                           className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                         >
                           {item.quantity === 1 ? <Trash2 size={12} /> : <Minus size={12} />}
@@ -1673,15 +1828,18 @@ export default function POSPage() {
                           {item.quantity}
                         </span>
                         <button
+                          type="button"
                           onClick={() => updateQuantity(item.cartItemId, 1)}
-                          className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer"
+                          disabled={atStockLimit}
+                          title={atStockLimit ? 'Maximum available stock reached' : 'Add one more'}
+                          aria-label={`Increase quantity of ${item.name}`}
+                          className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <Plus size={12} />
                         </button>
                       </div>
                     </div>
 
-                    {/* Per-Item KDS Station Redirect & Kitchen Note */}
                     <div className="flex items-center gap-1.5 pt-1 border-t border-gray-100">
                       <select
                         value={
@@ -1830,6 +1988,7 @@ export default function POSPage() {
 
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
+                type="button"
                 onClick={clearCart}
                 disabled={cart.length === 0}
                 className="py-2.5 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-rose-600 transition-colors disabled:opacity-40 cursor-pointer"
@@ -1837,6 +1996,7 @@ export default function POSPage() {
                 Clear Ticket
               </button>
               <button
+                type="button"
                 onClick={handleOpenPayment}
                 disabled={cart.length === 0}
                 className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-97 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
@@ -1851,7 +2011,11 @@ export default function POSPage() {
 
       {/* TENDER SETTLEMENT & STATION ROUTING MODAL */}
       {isPaymentModalOpen && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
+        >
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
@@ -1867,12 +2031,23 @@ export default function POSPage() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsPaymentModalOpen(false)}
                 className="text-gray-400 hover:text-servora-navy cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
+
+            {checkoutError && (
+              <div
+                role="alert"
+                className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-start gap-2"
+              >
+                <AlertTriangle size={14} className="text-rose-600 shrink-0 mt-0.5" />
+                <span>{checkoutError}</span>
+              </div>
+            )}
 
             <div className="p-3.5 bg-slate-50 border border-gray-200 rounded-xl flex justify-between items-center">
               <span className="text-xs font-bold text-servora-navy uppercase tracking-wider">
@@ -1887,7 +2062,6 @@ export default function POSPage() {
               </span>
             </div>
 
-            {/* KDS Prep Station Dispatch Preview */}
             {stationRoutingPreview.length > 0 && (
               <div className="p-3 bg-blue-50/50 border border-blue-100 rounded-xl space-y-1.5 text-xs">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-servora-navy flex items-center gap-1">
@@ -1916,6 +2090,7 @@ export default function POSPage() {
               {(['Cash', 'M-Pesa', 'Card', 'Split'] as PaymentMethod[]).map((method) => (
                 <button
                   key={method}
+                  type="button"
                   onClick={() => setPaymentMethod(method)}
                   className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                     paymentMethod === method
@@ -2008,6 +2183,7 @@ export default function POSPage() {
             )}
 
             <button
+              type="button"
               onClick={handleCompleteCheckout}
               disabled={
                 isCheckingOut ||
@@ -2016,7 +2192,7 @@ export default function POSPage() {
               className="w-full py-3 bg-servora-core hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex justify-center items-center gap-2 text-xs disabled:opacity-40 cursor-pointer"
             >
               {isCheckingOut ? (
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
                 <>
                   <CheckCircle size={15} />
@@ -2071,7 +2247,7 @@ export default function POSPage() {
                 )}
               </div>
 
-              <div className="dashed-divider"></div>
+              <div className="dashed-divider" />
 
               <div className="text-[11px] space-y-0.5">
                 {receiptTemplate?.showCustomerDetails !== false && (
@@ -2100,10 +2276,10 @@ export default function POSPage() {
                 )}
               </div>
 
-              <div className="dashed-divider"></div>
+              <div className="dashed-divider" />
 
               <div className="space-y-1">
-                {completedOrder.items.map((i: any) => (
+                {completedOrder.items.map((i: CartItem) => (
                   <div key={i.cartItemId} className="space-y-0.5">
                     <div className="flex-between text-[11px]">
                       <span className="font-bold max-w-[70%] break-words">
@@ -2120,7 +2296,7 @@ export default function POSPage() {
                 ))}
               </div>
 
-              <div className="dashed-divider"></div>
+              <div className="dashed-divider" />
 
               <div className="space-y-1 text-[11px]">
                 <div className="flex-between">
@@ -2192,7 +2368,7 @@ export default function POSPage() {
                   </div>
                 )}
 
-                <div className="solid-divider"></div>
+                <div className="solid-divider" />
 
                 <div className="flex-between font-black text-sm pt-0.5">
                   <span>TOTAL DUE:</span>
@@ -2206,7 +2382,7 @@ export default function POSPage() {
                 </div>
               </div>
 
-              <div className="dashed-divider"></div>
+              <div className="dashed-divider" />
 
               <div className="space-y-0.5 text-[11px]">
                 <div className="flex-between font-bold">
@@ -2221,25 +2397,24 @@ export default function POSPage() {
                     </span>
                   </div>
                 )}
-                {receiptTemplate?.showLoyaltyPoints !== false &&
-                  completedOrder.loyaltyTier && (
-                    <div className="pt-1 border-t border-dashed border-gray-400 space-y-0.5">
-                      <div className="flex-between">
-                        <span>Loyalty Tier:</span>
-                        <span className="font-bold">{completedOrder.loyaltyTier}</span>
-                      </div>
-                      <div className="flex-between">
-                        <span>Points Earned:</span>
-                        <span className="font-bold">+{completedOrder.estimatedPointsEarned} pts</span>
-                      </div>
-                      <div className="flex-between">
-                        <span>New Balance:</span>
-                        <span className="font-bold">
-                          {completedOrder.loyaltyPointsBalance?.toLocaleString()} pts
-                        </span>
-                      </div>
+                {receiptTemplate?.showLoyaltyPoints !== false && completedOrder.loyaltyTier && (
+                  <div className="pt-1 border-t border-dashed border-gray-400 space-y-0.5">
+                    <div className="flex-between">
+                      <span>Loyalty Tier:</span>
+                      <span className="font-bold">{completedOrder.loyaltyTier}</span>
                     </div>
-                  )}
+                    <div className="flex-between">
+                      <span>Points Earned:</span>
+                      <span className="font-bold">+{completedOrder.estimatedPointsEarned} pts</span>
+                    </div>
+                    <div className="flex-between">
+                      <span>New Balance:</span>
+                      <span className="font-bold">
+                        {completedOrder.loyaltyPointsBalance?.toLocaleString()} pts
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {receiptTemplate?.showEtimsQrCode !== false && (
@@ -2249,7 +2424,9 @@ export default function POSPage() {
                   </div>
                   <p className="text-[9px] font-bold">KRA eTIMS FISCAL INVOICE</p>
                   {completedOrder.etimsDeviceSerial && (
-                    <p className="text-[8px] text-gray-700">SCU: {completedOrder.etimsDeviceSerial}</p>
+                    <p className="text-[8px] text-gray-700">
+                      SCU: {completedOrder.etimsDeviceSerial}
+                    </p>
                   )}
                 </div>
               )}

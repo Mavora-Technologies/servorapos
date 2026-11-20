@@ -1,3 +1,4 @@
+// apps/api/src/controllers/pos-terminal.controller.ts
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as posRepo from '../repositories/pos-terminal.repository';
@@ -5,6 +6,7 @@ import {
   posBootstrapQuerySchema,
   posCustomerSearchQuerySchema,
   posValidatePromoSchema,
+  posValidateStockSchema,
 } from '../validators/pos-terminal.validator';
 
 export const getPosContext = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -21,8 +23,10 @@ export const getPosContext = async (req: AuthRequest, res: Response): Promise<vo
 
     const context = await posRepo.getPosTerminalContext(tenantId, userId, branchId);
     res.status(200).json({ status: 'success', data: context });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to load POS terminal context' });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Failed to load POS terminal context';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -42,8 +46,9 @@ export const searchPosCustomers = async (req: AuthRequest, res: Response): Promi
 
     const results = await posRepo.searchPosCustomersWithLoyalty(tenantId, parsed.data.search);
     res.status(200).json({ status: 'success', data: results });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Customer search failed' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Customer search failed';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -67,7 +72,47 @@ export const postValidatePromo = async (req: AuthRequest, res: Response): Promis
       parsed.data.subtotalKes
     );
     res.status(200).json({ status: 'success', data: result });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message || 'Promo code invalid' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Promo code invalid';
+    res.status(400).json({ status: 'error', message });
+  }
+};
+
+export const postValidateStock = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const parsed = posValidateStockSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'Invalid stock validation payload',
+      });
+      return;
+    }
+
+    const validation = await posRepo.validateOrderStockAvailability(
+      tenantId,
+      parsed.data.items,
+      parsed.data.branchId ?? req.user?.defaultBranchId ?? undefined
+    );
+
+    if (!validation.valid) {
+      res.status(409).json({
+        status: 'error',
+        message: validation.shortages.map((s) => s.reason).join(' '),
+        shortages: validation.shortages,
+      });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', data: validation });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Stock validation failed';
+    res.status(500).json({ status: 'error', message });
   }
 };

@@ -5,16 +5,17 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { db } from '../config/db';
 import { users } from '../config/schema';
 import * as orderRepo from '../repositories/order.repository';
+import * as posRepo from '../repositories/pos-terminal.repository';
 import { listOrdersQuerySchema } from '../validators/order.validator';
 
 const resolveAuthenticatedUserId = async (req: AuthRequest): Promise<number | null> => {
   const rawId =
-    (req.user as any)?.userId ??
-    (req.user as any)?.id ??
-    (req.user as any)?.sub ??
+    (req.user as { userId?: number; id?: number; sub?: number } | undefined)?.userId ??
+    (req.user as { userId?: number; id?: number; sub?: number } | undefined)?.id ??
+    (req.user as { userId?: number; id?: number; sub?: number } | undefined)?.sub ??
     null;
 
-  if (rawId && !isNaN(Number(rawId))) {
+  if (rawId && !Number.isNaN(Number(rawId))) {
     return Number(rawId);
   }
 
@@ -64,9 +65,37 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       branchId !== undefined && branchId !== null
         ? Number(branchId)
         : req.user?.defaultBranchId
-        ? Number(req.user.defaultBranchId)
-        : null;
+          ? Number(req.user.defaultBranchId)
+          : null;
 
+    const normalizedItems: Array<{ menuItemId: number; quantity: number }> = Array.isArray(items)
+      ? items
+          .map((i: { menuItemId?: number | string; quantity?: number | string }) => ({
+            menuItemId: Number(i.menuItemId),
+            quantity: Number(i.quantity),
+          }))
+          .filter((i) => Number.isInteger(i.menuItemId) && i.menuItemId > 0 && i.quantity > 0)
+      : [];
+
+    // 1. Enforce live stock & manual availability limits before creating the order
+    if (normalizedItems.length > 0) {
+      const stockCheck = await posRepo.validateOrderStockAvailability(
+        tenantId,
+        normalizedItems,
+        effectiveBranchId ?? undefined
+      );
+
+      if (!stockCheck.valid) {
+        res.status(409).json({
+          status: 'error',
+          message: stockCheck.shortages.map((s) => s.reason).join(' '),
+          shortages: stockCheck.shortages,
+        });
+        return;
+      }
+    }
+
+    // 2. Create the order record
     const order = await orderRepo.createOrderRecord(
       tenantId,
       {
@@ -96,10 +125,23 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       items
     );
 
+    // 3. Synchronize menu_item_availability remainingCount / is86ed (and deduct stock if not already done)
+    if (order?.id && normalizedItems.length > 0) {
+      await posRepo.syncPostOrderStockAndAvailability({
+        tenantId,
+        branchId: effectiveBranchId,
+        userId: cashierId,
+        orderId: Number(order.id),
+        orderNumber: String(order.orderNumber || `ORD-${order.id}`),
+        items: normalizedItems,
+      });
+    }
+
     res.status(201).json({ status: 'success', data: order });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[Order Error]:', error);
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to process order' });
+    const message = error instanceof Error ? error.message : 'Failed to process order';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -109,8 +151,9 @@ export const getOpenOrders = async (req: AuthRequest, res: Response): Promise<vo
     const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
     const openOrders = await orderRepo.fetchOpenOrders(tenantId, branchId);
     res.status(200).json({ status: 'success', data: openOrders });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch open orders' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch open orders';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -123,8 +166,9 @@ export const updateStatus = async (req: AuthRequest, res: Response): Promise<voi
 
     await orderRepo.updateOrderStatus(tenantId, parseInt(id, 10), status, userId);
     res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to update order status' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to update order status';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
@@ -134,8 +178,9 @@ export const getTakeawayOrders = async (req: AuthRequest, res: Response): Promis
     const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
     const takeawayOrders = await orderRepo.fetchTakeawayOrders(tenantId, branchId);
     res.status(200).json({ status: 'success', data: takeawayOrders });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch takeaway orders' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch takeaway orders';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -148,8 +193,9 @@ export const getOrders = async (req: AuthRequest, res: Response): Promise<void> 
       parsed.success ? parsed.data : undefined
     );
     res.status(200).json({ status: 'success', data: allOrders });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch orders' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch orders';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -157,7 +203,7 @@ export const getOrderDetail = async (req: AuthRequest, res: Response): Promise<v
   try {
     const tenantId = req.user!.tenantId;
     const orderId = parseInt(String(req.params.id), 10);
-    if (isNaN(orderId)) {
+    if (Number.isNaN(orderId)) {
       res.status(400).json({ status: 'error', message: 'Invalid order ID' });
       return;
     }
@@ -169,8 +215,9 @@ export const getOrderDetail = async (req: AuthRequest, res: Response): Promise<v
     }
 
     res.status(200).json({ status: 'success', data: detail });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to load order details' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to load order details';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -180,7 +227,8 @@ export const getOnlineOrders = async (req: AuthRequest, res: Response): Promise<
     const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
     const onlineOrders = await orderRepo.fetchOnlineStorefrontOrders(tenantId, branchId);
     res.status(200).json({ status: 'success', data: onlineOrders });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch online orders' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch online orders';
+    res.status(500).json({ status: 'error', message });
   }
 };

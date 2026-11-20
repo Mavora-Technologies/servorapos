@@ -1,5 +1,5 @@
 // apps/api/src/repositories/pos-terminal.repository.ts
-import { eq, and, desc, asc, sql, or, ilike, isNull } from 'drizzle-orm';
+import { eq, and, desc, asc, sql, or, ilike, isNull, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   branches,
@@ -15,7 +15,44 @@ import {
   kitchenStations,
   menuItems,
   menuCategories,
+  inventoryItems,
+  recipes,
+  recipeIngredients,
+  orders,
+  stockMovements,
 } from '../config/schema';
+
+export interface StockRequirementLine {
+  inventoryItemId: number;
+  inventoryItemName: string;
+  requiredPerPortion: number;
+  unit: string;
+  currentStock: number;
+  allowNegativeStock: boolean;
+}
+
+export interface ComputedItemAvailability {
+  menuItemId: number;
+  is86ed: boolean;
+  remainingCount: number | null;
+  maxAvailable: number | null; // null = untracked / unlimited
+  stockTrackingType: string;
+  limitingIngredientName: string | null;
+  requirements: StockRequirementLine[];
+}
+
+export interface StockShortageDetail {
+  menuItemId?: number;
+  menuItemName?: string;
+  inventoryItemId?: number;
+  inventoryItemName?: string;
+  requested: number;
+  available: number;
+  unit: string;
+  reason: string;
+}
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export const getPosTerminalContext = async (
   tenantId: number,
@@ -50,7 +87,7 @@ export const getPosTerminalContext = async (
     : undefined;
   const shiftBranchCondition = activeBranch ? eq(cashierShifts.branchId, activeBranch.id) : undefined;
 
-  // 2. Parallel Fetch: Drawers, Active Shift, Custodian Guardrails, Rewards, 86'd Items, Kitchen Stations & Catalog Routing
+  // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory & Recipes
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [
@@ -61,6 +98,8 @@ export const getPosTerminalContext = async (
     unavailableItems,
     allTenantKitchenStations,
     tenantCatalogRouting,
+    tenantInventory,
+    tenantRecipes,
   ] = await Promise.all([
     db
       .select({
@@ -126,7 +165,9 @@ export const getPosTerminalContext = async (
         minTierId: loyaltyRewardsCatalog.minTierId,
       })
       .from(loyaltyRewardsCatalog)
-      .where(and(eq(loyaltyRewardsCatalog.tenantId, tenantId), eq(loyaltyRewardsCatalog.isActive, true)))
+      .where(
+        and(eq(loyaltyRewardsCatalog.tenantId, tenantId), eq(loyaltyRewardsCatalog.isActive, true))
+      )
       .orderBy(asc(loyaltyRewardsCatalog.pointsCost)),
 
     activeBranch
@@ -140,7 +181,10 @@ export const getPosTerminalContext = async (
           .where(
             and(
               eq(menuItemAvailability.tenantId, tenantId),
-              eq(menuItemAvailability.branchId, activeBranch.id)
+              or(
+                eq(menuItemAvailability.branchId, activeBranch.id),
+                isNull(menuItemAvailability.branchId)
+              )
             )
           )
       : Promise.resolve([]),
@@ -165,15 +209,182 @@ export const getPosTerminalContext = async (
     db
       .select({
         id: menuItems.id,
+        name: menuItems.name,
         kitchenStation: menuItems.kitchenStation,
+        stockTrackingType: menuItems.stockTrackingType,
+        directInventoryItemId: menuItems.directInventoryItemId,
         categoryName: menuCategories.name,
       })
       .from(menuItems)
-      .leftJoin(menuCategories, eq(menuItems.categoryId, menuCategories.id))
+      .leftJoin(
+        menuCategories,
+        and(eq(menuItems.categoryId, menuCategories.id), eq(menuCategories.tenantId, tenantId))
+      )
       .where(eq(menuItems.tenantId, tenantId)),
+
+    db
+      .select({
+        id: inventoryItems.id,
+        name: inventoryItems.name,
+        unit: inventoryItems.unit,
+        currentStock: inventoryItems.currentStock,
+        allowNegativeStock: inventoryItems.allowNegativeStock,
+        isActive: inventoryItems.isActive,
+      })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.tenantId, tenantId)),
+
+    db
+      .select({
+        recipeId: recipes.id,
+        menuItemId: recipes.menuItemId,
+        yieldPortions: recipes.yieldPortions,
+      })
+      .from(recipes)
+      .where(and(eq(recipes.tenantId, tenantId), eq(recipes.isActive, true))),
   ]);
 
-  // 3. Prefer branch-specific stations; fall back to tenant-wide shared stations if branch has none configured
+  // Fetch recipe ingredients for all active tenant recipes
+  const recipeIds = tenantRecipes.map((r) => r.recipeId);
+  const allRecipeIngredients =
+    recipeIds.length > 0
+      ? await db
+          .select({
+            recipeId: recipeIngredients.recipeId,
+            inventoryItemId: recipeIngredients.inventoryItemId,
+            quantity: recipeIngredients.quantity,
+            unit: recipeIngredients.unit,
+            wastagePercentage: recipeIngredients.wastagePercentage,
+          })
+          .from(recipeIngredients)
+          .where(
+            and(
+              eq(recipeIngredients.tenantId, tenantId),
+              inArray(recipeIngredients.recipeId, recipeIds)
+            )
+          )
+      : [];
+
+  // Index inventory and recipes for O(1) lookup
+  const invById = new Map(
+    tenantInventory.map((inv) => [
+      inv.id,
+      {
+        ...inv,
+        stockNum: parseFloat(inv.currentStock) || 0,
+      },
+    ])
+  );
+
+  const manualAvailByMenuId = new Map(
+    unavailableItems.map((u) => [u.menuItemId, u])
+  );
+
+  const recipeByMenuId = new Map(
+    tenantRecipes.map((r) => [
+      r.menuItemId,
+      {
+        recipeId: r.recipeId,
+        yieldPortions: parseFloat(r.yieldPortions) || 1,
+      },
+    ])
+  );
+
+  const ingredientsByRecipeId = new Map<number, typeof allRecipeIngredients>();
+  for (const ing of allRecipeIngredients) {
+    const list = ingredientsByRecipeId.get(ing.recipeId) ?? [];
+    list.push(ing);
+    ingredientsByRecipeId.set(ing.recipeId, list);
+  }
+
+  // 3. Compute Authoritative Per-Item Stock Availability (Manual 86 + Direct Stock + Recipe BOM)
+  const computedAvailability: ComputedItemAvailability[] = tenantCatalogRouting.map((item) => {
+    const manualFlag = manualAvailByMenuId.get(item.id);
+    const manual86 = manualFlag?.is86ed === true;
+    const manualRemaining = manualFlag?.remainingCount ?? null;
+
+    const requirements: StockRequirementLine[] = [];
+    let inventoryLimit: number | null = null;
+    let limitingIngredientName: string | null = null;
+
+    if (item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItemId) {
+      const inv = invById.get(item.directInventoryItemId);
+      if (inv) {
+        requirements.push({
+          inventoryItemId: inv.id,
+          inventoryItemName: inv.name,
+          requiredPerPortion: 1,
+          unit: inv.unit,
+          currentStock: inv.stockNum,
+          allowNegativeStock: inv.allowNegativeStock,
+        });
+
+        if (!inv.allowNegativeStock) {
+          inventoryLimit = Math.max(0, Math.floor(inv.stockNum));
+          limitingIngredientName = inv.name;
+        }
+      }
+    } else if (
+      item.stockTrackingType === 'RECIPE' ||
+      item.stockTrackingType === 'COMPOSITE'
+    ) {
+      const rec = recipeByMenuId.get(item.id);
+      if (rec) {
+        const ings = ingredientsByRecipeId.get(rec.recipeId) ?? [];
+        const yieldPortions = rec.yieldPortions > 0 ? rec.yieldPortions : 1;
+
+        for (const ing of ings) {
+          const inv = invById.get(ing.inventoryItemId);
+          if (!inv) continue;
+
+          const baseQty = parseFloat(ing.quantity) || 0;
+          const wastagePct = parseFloat(ing.wastagePercentage) || 0;
+          const requiredPerPortion = (baseQty * (1 + wastagePct / 100)) / yieldPortions;
+
+          if (requiredPerPortion <= 0) continue;
+
+          requirements.push({
+            inventoryItemId: inv.id,
+            inventoryItemName: inv.name,
+            requiredPerPortion,
+            unit: ing.unit || inv.unit,
+            currentStock: inv.stockNum,
+            allowNegativeStock: inv.allowNegativeStock,
+          });
+
+          if (!inv.allowNegativeStock) {
+            const possiblePortions = Math.max(0, Math.floor(inv.stockNum / requiredPerPortion));
+            if (inventoryLimit === null || possiblePortions < inventoryLimit) {
+              inventoryLimit = possiblePortions;
+              limitingIngredientName = inv.name;
+            }
+          }
+        }
+      }
+    }
+
+    let maxAvailable: number | null = inventoryLimit;
+    if (manualRemaining !== null) {
+      maxAvailable =
+        maxAvailable === null
+          ? Math.max(0, manualRemaining)
+          : Math.min(maxAvailable, Math.max(0, manualRemaining));
+    }
+
+    const isOutOfStock = manual86 || (maxAvailable !== null && maxAvailable <= 0);
+
+    return {
+      menuItemId: item.id,
+      is86ed: isOutOfStock,
+      remainingCount: maxAvailable,
+      maxAvailable,
+      stockTrackingType: item.stockTrackingType,
+      limitingIngredientName,
+      requirements,
+    };
+  });
+
+  // 4. Prefer branch-specific stations; fall back to tenant-wide shared stations if branch has none
   const branchSpecificStations = activeBranch
     ? allTenantKitchenStations.filter((s) => s.branchId === activeBranch.id)
     : [];
@@ -201,7 +412,7 @@ export const getPosTerminalContext = async (
     };
   };
 
-  // 4. Resolve default station per menu item (Category/Alias Routing -> Station Name/Code/Type -> Fallback)
+  // 5. Resolve default station per menu item
   const itemStationMap: Record<
     number,
     {
@@ -217,7 +428,6 @@ export const getPosTerminalContext = async (
     const rawItemStation = (item.kitchenStation || '').trim();
     const rawItemStationLower = rawItemStation.toLowerCase();
 
-    // Match by category name or station alias in assignedCategories (excluding 'all' wildcard)
     const matchedByCategory = effectiveStations.find((st) =>
       (st.assignedCategories || []).some((c) => {
         const cLow = c.trim().toLowerCase();
@@ -233,7 +443,6 @@ export const getPosTerminalContext = async (
       continue;
     }
 
-    // Match by station display name, code, or BAR station type
     const matchedByName = effectiveStations.find(
       (st) =>
         st.name.trim().toLowerCase() === rawItemStationLower ||
@@ -279,10 +488,480 @@ export const getPosTerminalContext = async (
       ...r,
       rewardValue: Number(r.rewardValue),
     })),
-    itemAvailability: unavailableItems,
+    itemAvailability: computedAvailability,
     kitchenStations: effectiveStations,
     itemStationMap,
   };
+};
+
+/**
+ * Authoritative live database stock validation for a POS order cart.
+ * Aggregates shared raw materials across all cart lines and checks manual 86'd caps.
+ */
+export const validateOrderStockAvailability = async (
+  tenantId: number,
+  requestedItems: Array<{ menuItemId: number; quantity: number }>,
+  branchId?: number
+): Promise<{ valid: boolean; shortages: StockShortageDetail[] }> => {
+  const uniqueMenuIds = Array.from(new Set(requestedItems.map((i) => i.menuItemId)));
+  if (uniqueMenuIds.length === 0) {
+    return { valid: true, shortages: [] };
+  }
+
+  // Aggregate quantity per menuItemId
+  const qtyByMenuItem = new Map<number, number>();
+  for (const line of requestedItems) {
+    qtyByMenuItem.set(
+      line.menuItemId,
+      (qtyByMenuItem.get(line.menuItemId) ?? 0) + line.quantity
+    );
+  }
+
+  const [menuRows, availRows, recipeRows] = await Promise.all([
+    db
+      .select({
+        id: menuItems.id,
+        name: menuItems.name,
+        stockTrackingType: menuItems.stockTrackingType,
+        directInventoryItemId: menuItems.directInventoryItemId,
+        isAvailable: menuItems.isAvailable,
+      })
+      .from(menuItems)
+      .where(and(eq(menuItems.tenantId, tenantId), inArray(menuItems.id, uniqueMenuIds))),
+
+    branchId
+      ? db
+          .select({
+            menuItemId: menuItemAvailability.menuItemId,
+            is86ed: menuItemAvailability.is86ed,
+            remainingCount: menuItemAvailability.remainingCount,
+          })
+          .from(menuItemAvailability)
+          .where(
+            and(
+              eq(menuItemAvailability.tenantId, tenantId),
+              inArray(menuItemAvailability.menuItemId, uniqueMenuIds),
+              or(
+                eq(menuItemAvailability.branchId, branchId),
+                isNull(menuItemAvailability.branchId)
+              )
+            )
+          )
+      : db
+          .select({
+            menuItemId: menuItemAvailability.menuItemId,
+            is86ed: menuItemAvailability.is86ed,
+            remainingCount: menuItemAvailability.remainingCount,
+          })
+          .from(menuItemAvailability)
+          .where(
+            and(
+              eq(menuItemAvailability.tenantId, tenantId),
+              inArray(menuItemAvailability.menuItemId, uniqueMenuIds)
+            )
+          ),
+
+    db
+      .select({
+        recipeId: recipes.id,
+        menuItemId: recipes.menuItemId,
+        yieldPortions: recipes.yieldPortions,
+      })
+      .from(recipes)
+      .where(
+        and(
+          eq(recipes.tenantId, tenantId),
+          eq(recipes.isActive, true),
+          inArray(recipes.menuItemId, uniqueMenuIds)
+        )
+      ),
+  ]);
+
+  const recipeIds = recipeRows.map((r) => r.recipeId);
+  const ingredientRows =
+    recipeIds.length > 0
+      ? await db
+          .select({
+            recipeId: recipeIngredients.recipeId,
+            inventoryItemId: recipeIngredients.inventoryItemId,
+            quantity: recipeIngredients.quantity,
+            unit: recipeIngredients.unit,
+            wastagePercentage: recipeIngredients.wastagePercentage,
+          })
+          .from(recipeIngredients)
+          .where(
+            and(
+              eq(recipeIngredients.tenantId, tenantId),
+              inArray(recipeIngredients.recipeId, recipeIds)
+            )
+          )
+      : [];
+
+  const menuById = new Map(menuRows.map((m) => [m.id, m]));
+  const availByMenuId = new Map(availRows.map((a) => [a.menuItemId, a]));
+  const recipeByMenuId = new Map(recipeRows.map((r) => [r.menuItemId, r]));
+
+  const shortages: StockShortageDetail[] = [];
+
+  // 1. Check menu-level availability, 86'd status, and manual remainingCount caps
+  const requiredInventoryIds = new Set<number>();
+  const demandByInventoryId = new Map<number, number>();
+
+  for (const [menuItemId, requestedQty] of qtyByMenuItem.entries()) {
+    const item = menuById.get(menuItemId);
+    if (!item || !item.isAvailable) {
+      shortages.push({
+        menuItemId,
+        menuItemName: item?.name ?? `Item #${menuItemId}`,
+        requested: requestedQty,
+        available: 0,
+        unit: 'portion',
+        reason: 'Menu item is currently unavailable or inactive.',
+      });
+      continue;
+    }
+
+    const manualAvail = availByMenuId.get(menuItemId);
+    if (manualAvail?.is86ed) {
+      shortages.push({
+        menuItemId,
+        menuItemName: item.name,
+        requested: requestedQty,
+        available: 0,
+        unit: 'portion',
+        reason: `${item.name} is currently 86'd (out of stock).`,
+      });
+      continue;
+    }
+
+    if (
+      manualAvail?.remainingCount !== null &&
+      manualAvail?.remainingCount !== undefined &&
+      requestedQty > manualAvail.remainingCount
+    ) {
+      shortages.push({
+        menuItemId,
+        menuItemName: item.name,
+        requested: requestedQty,
+        available: Math.max(0, manualAvail.remainingCount),
+        unit: 'portion',
+        reason: `Only ${Math.max(0, manualAvail.remainingCount)} portion(s) of ${item.name} remaining.`,
+      });
+      continue;
+    }
+
+    // Collect inventory demand
+    if (item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItemId) {
+      requiredInventoryIds.add(item.directInventoryItemId);
+      demandByInventoryId.set(
+        item.directInventoryItemId,
+        (demandByInventoryId.get(item.directInventoryItemId) ?? 0) + requestedQty
+      );
+    } else if (
+      item.stockTrackingType === 'RECIPE' ||
+      item.stockTrackingType === 'COMPOSITE'
+    ) {
+      const rec = recipeByMenuId.get(menuItemId);
+      if (rec) {
+        const yieldPortions = parseFloat(rec.yieldPortions) || 1;
+        const ings = ingredientRows.filter((ing) => ing.recipeId === rec.recipeId);
+
+        for (const ing of ings) {
+          const baseQty = parseFloat(ing.quantity) || 0;
+          const wastagePct = parseFloat(ing.wastagePercentage) || 0;
+          const totalNeeded = (baseQty * (1 + wastagePct / 100) * requestedQty) / yieldPortions;
+          if (totalNeeded <= 0) continue;
+
+          requiredInventoryIds.add(ing.inventoryItemId);
+          demandByInventoryId.set(
+            ing.inventoryItemId,
+            (demandByInventoryId.get(ing.inventoryItemId) ?? 0) + totalNeeded
+          );
+        }
+      }
+    }
+  }
+
+  // 2. Compare aggregated inventory demand against live stock balances
+  if (requiredInventoryIds.size > 0) {
+    const invRows = await db
+      .select({
+        id: inventoryItems.id,
+        name: inventoryItems.name,
+        unit: inventoryItems.unit,
+        currentStock: inventoryItems.currentStock,
+        allowNegativeStock: inventoryItems.allowNegativeStock,
+      })
+      .from(inventoryItems)
+      .where(
+        and(
+          eq(inventoryItems.tenantId, tenantId),
+          inArray(inventoryItems.id, Array.from(requiredInventoryIds))
+        )
+      );
+
+    const invById = new Map(invRows.map((inv) => [inv.id, inv]));
+
+    for (const [invId, totalRequired] of demandByInventoryId.entries()) {
+      const inv = invById.get(invId);
+      if (!inv) continue;
+      if (inv.allowNegativeStock) continue;
+
+      const availableStock = parseFloat(inv.currentStock) || 0;
+      if (totalRequired > availableStock + 0.00001) {
+        shortages.push({
+          inventoryItemId: inv.id,
+          inventoryItemName: inv.name,
+          requested: Number(totalRequired.toFixed(4)),
+          available: Number(Math.max(0, availableStock).toFixed(4)),
+          unit: inv.unit,
+          reason: `Insufficient stock for ${inv.name}: required ${totalRequired.toFixed(2)} ${inv.unit}, available ${Math.max(0, availableStock).toFixed(2)} ${inv.unit}.`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: shortages.length === 0,
+    shortages,
+  };
+};
+
+/**
+ * Atomic transactional inventory & availability depletion for committed POS orders.
+ * Locks order, manual availability rows, and inventory rows with FOR UPDATE.
+ */
+export const deductOrderInventoryInTx = async (
+  tx: DbTransaction,
+  params: {
+    tenantId: number;
+    branchId: number | null;
+    userId: number | null;
+    orderId: number;
+    orderNumber: string;
+    items: Array<{ menuItemId: number; quantity: number }>;
+  }
+) => {
+  const { tenantId, branchId, userId, orderId, orderNumber, items } = params;
+
+  // 1. Guard against duplicate deduction on the same order
+  const [orderRow] = await tx
+    .select({ id: orders.id, inventoryDeducted: orders.inventoryDeducted })
+    .from(orders)
+    .where(and(eq(orders.id, orderId), eq(orders.tenantId, tenantId)))
+    .for('update');
+
+  if (!orderRow || orderRow.inventoryDeducted) {
+    return;
+  }
+
+  const uniqueMenuIds = Array.from(new Set(items.map((i) => i.menuItemId)));
+  if (uniqueMenuIds.length === 0) return;
+
+  const qtyByMenuItem = new Map<number, number>();
+  for (const line of items) {
+    qtyByMenuItem.set(
+      line.menuItemId,
+      (qtyByMenuItem.get(line.menuItemId) ?? 0) + line.quantity
+    );
+  }
+
+  // 2. Load menu items, active recipes, and manual availability caps
+  const [menuRows, availRows, recipeRows] = await Promise.all([
+    tx
+      .select({
+        id: menuItems.id,
+        name: menuItems.name,
+        stockTrackingType: menuItems.stockTrackingType,
+        directInventoryItemId: menuItems.directInventoryItemId,
+      })
+      .from(menuItems)
+      .where(and(eq(menuItems.tenantId, tenantId), inArray(menuItems.id, uniqueMenuIds))),
+
+    tx
+      .select()
+      .from(menuItemAvailability)
+      .where(
+        and(
+          eq(menuItemAvailability.tenantId, tenantId),
+          inArray(menuItemAvailability.menuItemId, uniqueMenuIds),
+          branchId
+            ? or(
+                eq(menuItemAvailability.branchId, branchId),
+                isNull(menuItemAvailability.branchId)
+              )
+            : isNull(menuItemAvailability.branchId)
+        )
+      )
+      .for('update'),
+
+    tx
+      .select({
+        recipeId: recipes.id,
+        menuItemId: recipes.menuItemId,
+        yieldPortions: recipes.yieldPortions,
+      })
+      .from(recipes)
+      .where(
+        and(
+          eq(recipes.tenantId, tenantId),
+          eq(recipes.isActive, true),
+          inArray(recipes.menuItemId, uniqueMenuIds)
+        )
+      ),
+  ]);
+
+  const recipeIds = recipeRows.map((r) => r.recipeId);
+  const ingredientRows =
+    recipeIds.length > 0
+      ? await tx
+          .select({
+            recipeId: recipeIngredients.recipeId,
+            inventoryItemId: recipeIngredients.inventoryItemId,
+            quantity: recipeIngredients.quantity,
+            wastagePercentage: recipeIngredients.wastagePercentage,
+          })
+          .from(recipeIngredients)
+          .where(
+            and(
+              eq(recipeIngredients.tenantId, tenantId),
+              inArray(recipeIngredients.recipeId, recipeIds)
+            )
+          )
+      : [];
+
+  const menuById = new Map(menuRows.map((m) => [m.id, m]));
+  const recipeByMenuId = new Map(recipeRows.map((r) => [r.menuItemId, r]));
+
+  // 3. Decrement manual menu_item_availability remainingCount (if configured)
+  for (const avail of availRows) {
+    const soldQty = qtyByMenuItem.get(avail.menuItemId) ?? 0;
+    if (soldQty <= 0) continue;
+
+    if (avail.is86ed) {
+      const itemName = menuById.get(avail.menuItemId)?.name ?? `Item #${avail.menuItemId}`;
+      throw new Error(`${itemName} is out of stock (86'd).`);
+    }
+
+    if (avail.remainingCount !== null) {
+      if (soldQty > avail.remainingCount) {
+        const itemName = menuById.get(avail.menuItemId)?.name ?? `Item #${avail.menuItemId}`;
+        throw new Error(
+          `Insufficient portions for ${itemName}: only ${avail.remainingCount} remaining.`
+        );
+      }
+
+      const nextRemaining = Math.max(0, Math.floor(avail.remainingCount - soldQty));
+      await tx
+        .update(menuItemAvailability)
+        .set({
+          remainingCount: nextRemaining,
+          is86ed: nextRemaining <= 0,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(menuItemAvailability.id, avail.id),
+            eq(menuItemAvailability.tenantId, tenantId)
+          )
+        );
+    }
+  }
+
+  // 4. Aggregate total raw material / stocked product consumption across the order
+  const demandByInventoryId = new Map<number, number>();
+
+  for (const [menuItemId, soldQty] of qtyByMenuItem.entries()) {
+    const item = menuById.get(menuItemId);
+    if (!item) continue;
+
+    if (item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItemId) {
+      demandByInventoryId.set(
+        item.directInventoryItemId,
+        (demandByInventoryId.get(item.directInventoryItemId) ?? 0) + soldQty
+      );
+    } else if (
+      item.stockTrackingType === 'RECIPE' ||
+      item.stockTrackingType === 'COMPOSITE'
+    ) {
+      const rec = recipeByMenuId.get(menuItemId);
+      if (!rec) continue;
+
+      const yieldPortions = parseFloat(rec.yieldPortions) || 1;
+      const ings = ingredientRows.filter((ing) => ing.recipeId === rec.recipeId);
+
+      for (const ing of ings) {
+        const baseQty = parseFloat(ing.quantity) || 0;
+        const wastagePct = parseFloat(ing.wastagePercentage) || 0;
+        const totalNeeded = (baseQty * (1 + wastagePct / 100) * soldQty) / yieldPortions;
+        if (totalNeeded <= 0) continue;
+
+        demandByInventoryId.set(
+          ing.inventoryItemId,
+          (demandByInventoryId.get(ing.inventoryItemId) ?? 0) + totalNeeded
+        );
+      }
+    }
+  }
+
+  // 5. Lock inventory rows, deduct balances, and post POS_RECIPE_DEPLETION movements
+  if (demandByInventoryId.size > 0) {
+    const invIds = Array.from(demandByInventoryId.keys());
+    const lockedInvRows = await tx
+      .select()
+      .from(inventoryItems)
+      .where(and(eq(inventoryItems.tenantId, tenantId), inArray(inventoryItems.id, invIds)))
+      .for('update');
+
+    const invById = new Map(lockedInvRows.map((inv) => [inv.id, inv]));
+
+    for (const [invId, totalNeeded] of demandByInventoryId.entries()) {
+      const inv = invById.get(invId);
+      if (!inv) continue;
+
+      const currentStock = parseFloat(inv.currentStock) || 0;
+      const newStock = currentStock - totalNeeded;
+
+      if (newStock < -0.00001 && !inv.allowNegativeStock) {
+        throw new Error(
+          `Insufficient stock for ${inv.name}: required ${totalNeeded.toFixed(2)} ${inv.unit}, available ${Math.max(0, currentStock).toFixed(2)} ${inv.unit}.`
+        );
+      }
+
+      const finalBalance = inv.allowNegativeStock ? newStock : Math.max(0, newStock);
+      const unitCost = parseFloat(inv.costPrice) || 0;
+
+      await tx
+        .update(inventoryItems)
+        .set({
+          currentStock: finalBalance.toFixed(4),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(inventoryItems.id, inv.id), eq(inventoryItems.tenantId, tenantId)));
+
+      await tx.insert(stockMovements).values({
+        tenantId,
+        branchId: branchId ?? inv.branchId ?? null,
+        inventoryItemId: inv.id,
+        userId,
+        orderId,
+        type: 'POS_RECIPE_DEPLETION',
+        quantity: (-totalNeeded).toFixed(4),
+        unitCost: unitCost.toFixed(4),
+        totalValuation: (totalNeeded * unitCost).toFixed(4),
+        balanceAfter: finalBalance.toFixed(4),
+        documentReference: orderNumber,
+        locationBin: 'POS Sale Auto-Depletion',
+        notes: `Automated stock depletion for POS Order ${orderNumber}`,
+      });
+    }
+  }
+
+  // 6. Mark order as inventory-deducted
+  await tx
+    .update(orders)
+    .set({ inventoryDeducted: true, updatedAt: new Date() })
+    .where(and(eq(orders.id, orderId), eq(orders.tenantId, tenantId)));
 };
 
 export const searchPosCustomersWithLoyalty = async (tenantId: number, search: string) => {
@@ -384,4 +1063,109 @@ export const validatePosPromoCode = async (
     discountValue: val,
     calculatedDiscountKes: Math.round(calculatedDiscountKes * 100) / 100,
   };
+};
+
+/**
+ * Synchronizes manual `menu_item_availability.remaining_count` (and `is_86ed`)
+ * after an order is committed, and triggers inventory depletion only if
+ * `orderRepo.createOrderRecord` has not already posted stock movements for this order.
+ */
+export const syncPostOrderStockAndAvailability = async (params: {
+  tenantId: number;
+  branchId: number | null;
+  userId: number | null;
+  orderId: number;
+  orderNumber: string;
+  items: Array<{ menuItemId: number; quantity: number }>;
+}) => {
+  const { tenantId, branchId, userId, orderId, orderNumber, items } = params;
+  const uniqueMenuIds = Array.from(new Set(items.map((i) => i.menuItemId)));
+  if (uniqueMenuIds.length === 0) return;
+
+  const qtyByMenuItem = new Map<number, number>();
+  for (const line of items) {
+    qtyByMenuItem.set(
+      line.menuItemId,
+      (qtyByMenuItem.get(line.menuItemId) ?? 0) + line.quantity
+    );
+  }
+
+  await db.transaction(async (tx) => {
+    // 1. Lock order row and check whether inventory was already deducted
+    const [orderRow] = await tx
+      .select({ id: orders.id, inventoryDeducted: orders.inventoryDeducted })
+      .from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.tenantId, tenantId)))
+      .for('update');
+
+    if (!orderRow) return;
+
+    const existingMovements = await tx
+      .select({ id: stockMovements.id })
+      .from(stockMovements)
+      .where(and(eq(stockMovements.tenantId, tenantId), eq(stockMovements.orderId, orderId)))
+      .limit(1);
+
+    const inventoryAlreadyDeducted =
+      orderRow.inventoryDeducted || existingMovements.length > 0;
+
+    // 2. If inventory was NOT yet deducted by orderRepo, run full atomic deduction
+    //    (which handles both menu_item_availability and inventory_items)
+    if (!inventoryAlreadyDeducted) {
+      await deductOrderInventoryInTx(tx, {
+        tenantId,
+        branchId,
+        userId,
+        orderId,
+        orderNumber,
+        items,
+      });
+      return;
+    }
+
+    // 3. Inventory was already deducted by orderRepo — decrement manual availability caps
+    const availRows = await tx
+      .select()
+      .from(menuItemAvailability)
+      .where(
+        and(
+          eq(menuItemAvailability.tenantId, tenantId),
+          inArray(menuItemAvailability.menuItemId, uniqueMenuIds),
+          branchId
+            ? or(
+                eq(menuItemAvailability.branchId, branchId),
+                isNull(menuItemAvailability.branchId)
+              )
+            : undefined
+        )
+      )
+      .for('update');
+
+    for (const avail of availRows) {
+      const soldQty = qtyByMenuItem.get(avail.menuItemId) ?? 0;
+      if (soldQty <= 0 || avail.remainingCount === null) continue;
+
+      const nextRemaining = Math.max(0, Math.floor(avail.remainingCount - soldQty));
+      await tx
+        .update(menuItemAvailability)
+        .set({
+          remainingCount: nextRemaining,
+          is86ed: nextRemaining <= 0,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(menuItemAvailability.id, avail.id),
+            eq(menuItemAvailability.tenantId, tenantId)
+          )
+        );
+    }
+
+    if (!orderRow.inventoryDeducted) {
+      await tx
+        .update(orders)
+        .set({ inventoryDeducted: true, updatedAt: new Date() })
+        .where(and(eq(orders.id, orderId), eq(orders.tenantId, tenantId)));
+    }
+  });
 };
