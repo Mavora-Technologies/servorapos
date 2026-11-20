@@ -1762,14 +1762,29 @@ export const modifierOptions = pgTable(
   'modifier_options',
   {
     id: serial('id').primaryKey(),
-    modifierGroupId: integer('modifier_group_id').notNull().references(() => modifierGroups.id, { onDelete: 'cascade' }),
-    name: varchar('name', { length: 150 }).notNull(), // e.g., "Extra Cheddar", "Well Done"
-    priceAdjustment: decimal('price_adjustment', { precision: 10, scale: 2 }).default('0.00').notNull(),
+    modifierGroupId: integer('modifier_group_id')
+      .notNull()
+      .references(() => modifierGroups.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 150 }).notNull(), // Customer-facing label (auto-filled from inventory or custom prep note)
+    priceAdjustment: decimal('price_adjustment', { precision: 10, scale: 2 })
+      .default('0.00')
+      .notNull(),
+    linkedInventoryItemId: integer('linked_inventory_item_id').references(
+      (): AnyPgColumn => inventoryItems.id,
+      { onDelete: 'set null' }
+    ),
+    linkedQuantity: decimal('linked_quantity', { precision: 12, scale: 4 })
+      .default('0.0000')
+      .notNull(),
+    linkedUnit: varchar('linked_unit', { length: 30 }),
     isDefault: boolean('is_default').default(false).notNull(),
     isAvailable: boolean('is_available').default(true).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('modifier_options_group_idx').on(t.modifierGroupId)]
+  (t) => [
+    index('modifier_options_group_idx').on(t.modifierGroupId),
+    index('modifier_options_inv_idx').on(t.linkedInventoryItemId),
+  ]
 );
 
 export const comboBundles = pgTable(
