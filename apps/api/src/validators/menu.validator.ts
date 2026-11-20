@@ -24,12 +24,16 @@ const optionalTrimmed = z
   .nullable()
   .optional();
 
-export const createCategorySchema = z.object({
-  name: z.string().trim().min(2, 'Category name must be at least 2 characters'),
+const categoryBaseSchema = z.object({
+  name: z.string().trim().min(2, 'Category name must be at least 2 characters').max(120),
   description: optionalTrimmed,
-  sortOrder: z.coerce.number().int().min(0).optional(),
+  sortOrder: z.coerce.number().int().min(0).default(0),
+  isActive: z.boolean().default(true),
   branchId: z.coerce.number().int().positive().nullable().optional(),
 });
+
+export const createCategorySchema = categoryBaseSchema;
+export const updateCategorySchema = categoryBaseSchema.partial();
 
 export const recipeIngredientInputSchema = z.object({
   inventoryItemId: z.coerce.number().int().positive('Valid raw material is required'),
@@ -82,6 +86,7 @@ export const createMenuItemSchema = menuItemBaseSchema.superRefine((data, ctx) =
 export const updateMenuItemSchema = menuItemBaseSchema.partial();
 
 export type CreateCategoryInput = z.infer<typeof createCategorySchema>;
+export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type RecipeIngredientInput = z.infer<typeof recipeIngredientInputSchema>;
 export type CreateMenuItemInput = z.infer<typeof createMenuItemSchema>;
 export type UpdateMenuItemInput = z.infer<typeof updateMenuItemSchema>;

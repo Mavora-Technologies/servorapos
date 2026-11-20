@@ -156,6 +156,24 @@ export default function CombosPage() {
     loadData();
   }, [loadData]);
 
+  // Merge catalog menu items with any linked items on the bundle being edited so options never blank out
+  const selectableMenuItems = useMemo(() => {
+    const byId = new Map<number, MenuItemOption>(menuItemsList.map((m) => [m.id, m]));
+    if (editingCombo) {
+      for (const line of editingCombo.items) {
+        if (!byId.has(line.menuItemId)) {
+          byId.set(line.menuItemId, {
+            id: line.menuItemId,
+            name: line.itemName || `Item #${line.menuItemId}`,
+            price: parseFloat(line.itemPrice || '0') || 0,
+            isAvailable: line.itemIsAvailable !== false,
+          });
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [menuItemsList, editingCombo]);
+
   const filteredCombos = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return combos.filter((combo) => {
@@ -180,13 +198,13 @@ export default function CombosPage() {
     return items.reduce((sum, row) => {
       const itemId = parseInt(row.menuItemId, 10);
       if (Number.isNaN(itemId)) return sum;
-      const match = menuItemsList.find((m) => m.id === itemId);
+      const match = selectableMenuItems.find((m) => m.id === itemId);
       if (!match) return sum;
       const qty = Math.max(0, parseInt(row.quantity, 10) || 0);
       const addPrice = Math.max(0, parseFloat(row.additionalPrice) || 0);
       return sum + (match.price + addPrice) * qty;
     }, 0);
-  }, [items, menuItemsList]);
+  }, [items, selectableMenuItems]);
 
   const openModal = (combo?: ComboBundle) => {
     setModalError(null);
@@ -195,7 +213,7 @@ export default function CombosPage() {
       setName(combo.name);
       setDescription(combo.description || '');
       setSku(combo.sku || '');
-      setBasePrice(String(parseFloat(combo.basePrice)));
+      setBasePrice((parseFloat(combo.basePrice) || 0).toFixed(2));
       setIsAvailable(combo.isAvailable);
       setItems(
         combo.items.length > 0
@@ -216,6 +234,13 @@ export default function CombosPage() {
       setItems([{ menuItemId: '', quantity: '1', additionalPrice: '0' }]);
     }
     setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    if (isSubmitting) return;
+    setIsModalOpen(false);
+    setEditingCombo(null);
+    setModalError(null);
   };
 
   const handleAddItemRow = () => {
@@ -291,6 +316,7 @@ export default function CombosPage() {
       }
 
       setIsModalOpen(false);
+      setEditingCombo(null);
       await loadData();
     } catch (err: unknown) {
       setModalError(getErrorMessage(err, 'Failed to save combo bundle.'));
@@ -553,7 +579,7 @@ export default function CombosPage() {
             return (
               <div
                 key={combo.id}
-                className="bg-white rounded-2xl border border-gray-100 p-5 shadow-xs flex flex-col justify-between"
+                className="bg-white rounded-2xl border border-gray-100 p-5 shadow-xs flex flex-col justify-between gap-4"
               >
                 <div>
                   <div className="flex items-start justify-between gap-2 mb-2">
@@ -566,7 +592,7 @@ export default function CombosPage() {
                           type="button"
                           onClick={() => handleToggleAvailability(combo)}
                           title="Toggle POS availability"
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors ${
+                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
                             combo.isAvailable
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                               : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
@@ -591,27 +617,6 @@ export default function CombosPage() {
                           {combo.description}
                         </p>
                       )}
-                    </div>
-
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => openModal(combo)}
-                        aria-label={`Edit ${combo.name}`}
-                        title="Edit Bundle"
-                        className="p-1.5 text-gray-400 hover:text-servora-core rounded-lg hover:bg-servora-pale transition-colors"
-                      >
-                        <Edit3 size={15} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingDeleteCombo(combo)}
-                        aria-label={`Delete ${combo.name}`}
-                        title="Delete Bundle"
-                        className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
-                      >
-                        <Trash2 size={15} />
-                      </button>
                     </div>
                   </div>
 
@@ -659,6 +664,26 @@ export default function CombosPage() {
                     ))}
                   </div>
                 </div>
+
+                {/* Card Footer Actions */}
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={() => openModal(combo)}
+                    className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold text-servora-core bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Edit3 size={13} /> Edit Bundle
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteCombo(combo)}
+                    aria-label={`Delete ${combo.name}`}
+                    title="Delete Bundle"
+                    className="p-2 text-gray-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 border border-transparent hover:border-rose-100 transition-colors cursor-pointer"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -680,14 +705,16 @@ export default function CombosPage() {
                   {editingCombo ? `Edit Combo Bundle: ${editingCombo.name}` : 'Create Combo Bundle'}
                 </h2>
                 <p className="text-[11px] text-servora-deepTeal">
-                  Group existing POS items under a single promotional bundle price
+                  {editingCombo
+                    ? 'Modify bundle pricing, SKU, included dishes/drinks, or POS availability'
+                    : 'Group existing POS items under a single promotional bundle price'}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setIsModalOpen(false)}
+                onClick={closeModal}
                 aria-label="Close modal"
-                className="text-gray-400 hover:text-servora-navy"
+                className="text-gray-400 hover:text-servora-navy cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -774,10 +801,18 @@ export default function CombosPage() {
                   <button
                     type="button"
                     onClick={handleAddItemRow}
-                    className="text-xs font-bold text-servora-core hover:underline flex items-center gap-1"
+                    className="text-xs font-bold text-servora-core hover:underline flex items-center gap-1 cursor-pointer"
                   >
                     <Plus size={13} /> Add Dish / Drink
                   </button>
+                </div>
+
+                {/* Column Headers */}
+                <div className="grid grid-cols-12 gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  <span className="col-span-6">Menu Item</span>
+                  <span className="col-span-2 text-center">Qty</span>
+                  <span className="col-span-3">Upcharge (+KES)</span>
+                  <span className="col-span-1" />
                 </div>
 
                 <div className="space-y-2">
@@ -793,9 +828,10 @@ export default function CombosPage() {
                           className="w-full px-2.5 py-2 text-xs border border-gray-200 rounded-xl focus:border-servora-core focus:outline-none bg-white"
                         >
                           <option value="">Select a menu item...</option>
-                          {menuItemsList.map((item) => (
+                          {selectableMenuItems.map((item) => (
                             <option key={item.id} value={item.id}>
                               {item.name} (KES {item.price.toLocaleString()})
+                              {!item.isAvailable ? ' [Hidden]' : ''}
                             </option>
                           ))}
                         </select>
@@ -819,7 +855,7 @@ export default function CombosPage() {
                           step="0.01"
                           min="0"
                           aria-label="Additional upcharge (KES)"
-                          placeholder="+KES"
+                          placeholder="0.00"
                           title="Optional upcharge (KES)"
                           value={row.additionalPrice}
                           onChange={(e) =>
@@ -835,7 +871,7 @@ export default function CombosPage() {
                             type="button"
                             onClick={() => handleRemoveItemRow(idx)}
                             aria-label="Remove item row"
-                            className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg"
+                            className="p-1.5 text-gray-400 hover:text-rose-600 rounded-lg cursor-pointer"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -876,15 +912,15 @@ export default function CombosPage() {
               <div className="flex justify-end gap-2 pt-4 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors"
+                  onClick={closeModal}
+                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                  className="px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
                 >
                   {isSubmitting
                     ? 'Saving...'

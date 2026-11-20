@@ -1,5 +1,5 @@
 // apps/api/src/repositories/menu.repository.ts
-import { eq, and, or, isNull, asc, ne, inArray } from 'drizzle-orm';
+import { eq, and, or, isNull, asc, ne, inArray, ilike, sql } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   menuCategories,
@@ -10,6 +10,7 @@ import {
 } from '../config/schema';
 import type {
   CreateCategoryInput,
+  UpdateCategoryInput,
   CreateMenuItemInput,
   UpdateMenuItemInput,
   RecipeIngredientInput,
@@ -27,6 +28,16 @@ export interface LinkedIngredientDTO {
 }
 
 export const createCategory = async (tenantId: number, data: CreateCategoryInput) => {
+  const [duplicate] = await db
+    .select({ id: menuCategories.id })
+    .from(menuCategories)
+    .where(and(eq(menuCategories.tenantId, tenantId), ilike(menuCategories.name, data.name)))
+    .limit(1);
+
+  if (duplicate) {
+    throw new Error(`Category "${data.name}" already exists for this tenant.`);
+  }
+
   const [category] = await db
     .insert(menuCategories)
     .values({
@@ -35,24 +46,103 @@ export const createCategory = async (tenantId: number, data: CreateCategoryInput
       name: data.name,
       description: data.description ?? null,
       sortOrder: data.sortOrder ?? 0,
+      isActive: data.isActive ?? true,
     })
     .returning();
   return category;
 };
 
-export const getCategories = async (tenantId: number, branchId?: number) => {
-  const filter = branchId
-    ? and(
-        eq(menuCategories.tenantId, tenantId),
-        eq(menuCategories.isActive, true),
-        or(eq(menuCategories.branchId, branchId), isNull(menuCategories.branchId))
+export const updateCategoryRecord = async (
+  tenantId: number,
+  categoryId: number,
+  data: UpdateCategoryInput
+) => {
+  const [existing] = await db
+    .select({ id: menuCategories.id })
+    .from(menuCategories)
+    .where(and(eq(menuCategories.id, categoryId), eq(menuCategories.tenantId, tenantId)))
+    .limit(1);
+
+  if (!existing) return null;
+
+  if (data.name !== undefined) {
+    const [duplicate] = await db
+      .select({ id: menuCategories.id })
+      .from(menuCategories)
+      .where(
+        and(
+          eq(menuCategories.tenantId, tenantId),
+          ilike(menuCategories.name, data.name),
+          ne(menuCategories.id, categoryId)
+        )
       )
-    : and(eq(menuCategories.tenantId, tenantId), eq(menuCategories.isActive, true));
+      .limit(1);
+
+    if (duplicate) {
+      throw new Error(`Another category named "${data.name}" already exists.`);
+    }
+  }
+
+  const updateFields: Partial<typeof menuCategories.$inferInsert> = {
+    updatedAt: new Date(),
+  };
+
+  if (data.name !== undefined) updateFields.name = data.name;
+  if (data.description !== undefined) updateFields.description = data.description;
+  if (data.sortOrder !== undefined) updateFields.sortOrder = data.sortOrder;
+  if (data.isActive !== undefined) updateFields.isActive = data.isActive;
+  if (data.branchId !== undefined) updateFields.branchId = data.branchId;
+
+  const [updated] = await db
+    .update(menuCategories)
+    .set(updateFields)
+    .where(and(eq(menuCategories.id, categoryId), eq(menuCategories.tenantId, tenantId)))
+    .returning();
+
+  return updated ?? null;
+};
+
+export const deleteCategoryRecord = async (tenantId: number, categoryId: number) => {
+  const [linkedCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(menuItems)
+    .where(and(eq(menuItems.tenantId, tenantId), eq(menuItems.categoryId, categoryId)));
+
+  if ((linkedCount?.count ?? 0) > 0) {
+    const err = new Error(
+      `Cannot delete category: ${linkedCount.count} menu item(s) are still assigned to it. Reassign those items or mark the category Inactive instead.`
+    ) as Error & { statusCode?: number };
+    err.statusCode = 409;
+    throw err;
+  }
+
+  const [deleted] = await db
+    .delete(menuCategories)
+    .where(and(eq(menuCategories.id, categoryId), eq(menuCategories.tenantId, tenantId)))
+    .returning({ id: menuCategories.id });
+
+  return deleted ?? null;
+};
+
+export const getCategories = async (
+  tenantId: number,
+  branchId?: number,
+  includeInactive = false
+) => {
+  const conditions = [eq(menuCategories.tenantId, tenantId)];
+  if (!includeInactive) {
+    conditions.push(eq(menuCategories.isActive, true));
+  }
+  if (branchId) {
+    conditions.push(
+      or(eq(menuCategories.branchId, branchId), isNull(menuCategories.branchId))!
+    );
+  }
 
   return await db
     .select()
     .from(menuCategories)
-    .where(filter)
+    .where(and(...conditions))
     .orderBy(asc(menuCategories.sortOrder), asc(menuCategories.name));
 };
 

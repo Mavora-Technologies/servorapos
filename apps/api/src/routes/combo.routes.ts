@@ -15,6 +15,7 @@ router.use(requireAuth);
 router.get('/', getCombos);
 router.post('/', createCombo);
 router.put('/:id', updateCombo);
+router.patch('/:id', updateCombo);
 router.delete('/:id', deleteCombo);
 
 export default router;

@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
 import {
   createCategorySchema,
+  updateCategorySchema,
   createMenuItemSchema,
   updateMenuItemSchema,
 } from '../validators/menu.validator';
@@ -173,6 +174,79 @@ export const getActiveMenu = async (req: AuthRequest, res: Response): Promise<vo
   }
 };
 
+export const updateCategory = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const categoryId = Number(req.params.id);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid category ID' });
+      return;
+    }
+
+    const validatedData = updateCategorySchema.parse(req.body);
+    const updated = await menuService.modifyCategory(tenantId, categoryId, validatedData);
+
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Category not found' });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', data: updated });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to update category';
+    res.status(400).json({ status: 'error', message });
+  }
+};
+
+export const deleteCategory = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const categoryId = Number(req.params.id);
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid category ID' });
+      return;
+    }
+
+    const deleted = await menuService.removeCategory(tenantId, categoryId);
+    if (!deleted) {
+      res.status(404).json({ status: 'error', message: 'Category not found' });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', message: 'Category deleted successfully' });
+  } catch (error: unknown) {
+    const statusCode = (error as { statusCode?: number } | null)?.statusCode;
+    if (statusCode === 409 || getPgErrorCode(error) === '23503') {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Category still has linked menu items and cannot be deleted.';
+      res.status(409).json({ status: 'error', message });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to delete category';
+    res.status(500).json({ status: 'error', message });
+  }
+};
+
 export const getCategories = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
@@ -182,7 +256,8 @@ export const getCategories = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
-    const categories = await menuService.fetchCategories(tenantId, branchId);
+    const includeInactive = req.query.includeInactive === 'true';
+    const categories = await menuService.fetchCategories(tenantId, branchId, includeInactive);
     res.status(200).json({ status: 'success', data: categories });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to fetch categories';

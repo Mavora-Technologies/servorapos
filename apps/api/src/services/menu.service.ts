@@ -2,12 +2,25 @@
 import * as menuRepo from '../repositories/menu.repository';
 import type {
   CreateCategoryInput,
+  UpdateCategoryInput,
   CreateMenuItemInput,
   UpdateMenuItemInput,
 } from '../validators/menu.validator';
 
 export const addCategory = async (tenantId: number, data: CreateCategoryInput) => {
   return await menuRepo.createCategory(tenantId, data);
+};
+
+export const modifyCategory = async (
+  tenantId: number,
+  categoryId: number,
+  data: UpdateCategoryInput
+) => {
+  return await menuRepo.updateCategoryRecord(tenantId, categoryId, data);
+};
+
+export const removeCategory = async (tenantId: number, categoryId: number) => {
+  return await menuRepo.deleteCategoryRecord(tenantId, categoryId);
 };
 
 export const addMenuItem = async (tenantId: number, data: CreateMenuItemInput) => {
@@ -58,6 +71,10 @@ export const fetchActiveMenu = async (tenantId: number, branchId?: number) => {
   };
 };
 
-export const fetchCategories = async (tenantId: number, branchId?: number) => {
-  return await menuRepo.getCategories(tenantId, branchId);
+export const fetchCategories = async (
+  tenantId: number,
+  branchId?: number,
+  includeInactive = false
+) => {
+  return await menuRepo.getCategories(tenantId, branchId, includeInactive);
 };
