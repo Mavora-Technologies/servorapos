@@ -13,7 +13,6 @@ import {
   Search,
   DollarSign,
   TrendingDown,
-  Boxes,
   Sparkles,
   ChevronRight,
   Barcode,
@@ -68,9 +67,14 @@ interface StorageLocationOption {
   isRefrigerated: boolean;
 }
 
-interface SupplierOption {
+interface RawLocationRecord {
   id: number;
+  branchId?: number;
+  code?: string;
+  zoneCode?: string;
   name: string;
+  zoneType?: string;
+  isRefrigerated?: boolean;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -80,14 +84,33 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function normalizeLocations(raw: unknown): StorageLocationOption[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((entry): entry is RawLocationRecord => Boolean(entry && typeof entry === 'object' && 'id' in entry))
+    .map((loc) => {
+      const zoneType = loc.zoneType ?? 'DRY_AMBIENT';
+      return {
+        id: Number(loc.id),
+        branchId: Number(loc.branchId ?? 0),
+        code: loc.code ?? loc.zoneCode ?? `LOC-${loc.id}`,
+        name: loc.name,
+        zoneType,
+        isRefrigerated:
+          typeof loc.isRefrigerated === 'boolean'
+            ? loc.isRefrigerated
+            : ['COLD_STORAGE', 'DEEP_FREEZE', 'CHILLED_2_8C'].includes(zoneType),
+      };
+    });
+}
+
 export default function InventoryPage() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [storageLocations, setStorageLocations] = useState<StorageLocationOption[]>([]);
-  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Explicit Error & Banner States (Never mask failures as empty states)
+  // Explicit Error & Banner States
   const [loadError, setLoadError] = useState<string | null>(null);
   const [referenceWarning, setReferenceWarning] = useState<string | null>(null);
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
@@ -98,31 +121,10 @@ export default function InventoryPage() {
   const [materialTypeFilter, setMaterialTypeFilter] = useState<'ALL' | MaterialType>('ALL');
   const [statusFilter, setStatusFilter] = useState<StockStatusFilter>('ALL');
 
-  // Modal States
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  // Stock Movement Modal State
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<InventoryItem | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-
-  // Form States (New Item)
-  const [name, setName] = useState('');
-  const [sku, setSku] = useState('');
-  const [barcode, setBarcode] = useState('');
-  const [materialType, setMaterialType] = useState<MaterialType>('RAW_MATERIAL');
-  const [category, setCategory] = useState('PRODUCE');
-  const [unit, setUnit] = useState('kg');
-  const [purchaseUnit, setPurchaseUnit] = useState('');
-  const [conversionFactor, setConversionFactor] = useState('1');
-  const [preferredSupplierId, setPreferredSupplierId] = useState('');
-  const [openingStock, setOpeningStock] = useState('');
-  const [minThreshold, setMinThreshold] = useState('10');
-  const [reorderQuantity, setReorderQuantity] = useState('50');
-  const [costPrice, setCostPrice] = useState('');
-  const [valuationMethod, setValuationMethod] = useState<ValuationMethod>('FIFO');
-  const [storageCondition, setStorageCondition] = useState('DRY_AMBIENT');
-  const [taxClassification, setTaxClassification] = useState<TaxClassification>('A_16');
-
-  // Dynamic Movement State
   const [adjustmentQty, setAdjustmentQty] = useState('');
   const [adjustmentType, setAdjustmentType] = useState<MovementType>('GOODS_RECEIPT_PO');
   const [selectedLocationId, setSelectedLocationId] = useState('');
@@ -138,10 +140,9 @@ export default function InventoryPage() {
     setLoadError(null);
     setReferenceWarning(null);
 
-    const [itemsResult, locResult, supResult] = await Promise.allSettled([
+    const [itemsResult, locResult] = await Promise.allSettled([
       fetchApi('/api/v1/inventory/items'),
       fetchApi('/api/v1/inventory/locations'),
-      fetchApi('/api/v1/suppliers'),
     ]);
 
     // 1. Authoritative Inventory Items & Summary
@@ -161,7 +162,6 @@ export default function InventoryPage() {
             ? payload.summary
             : null;
 
-        // Compute fallback metrics directly from the returned tenant items when summary keys are absent
         let computedValuation = 0;
         let computedLowStock = 0;
         let computedOutOfStock = 0;
@@ -187,32 +187,26 @@ export default function InventoryPage() {
           totalItems:
             typeof rawSummary?.totalItems === 'number'
               ? rawSummary.totalItems
-              : typeof rawSummary?.itemCount === 'number'
-                ? rawSummary.itemCount
+              : typeof rawSummary?.totalCatalogItems === 'number'
+                ? rawSummary.totalCatalogItems
                 : rawItems.length,
           activeItems:
             typeof rawSummary?.activeItems === 'number'
               ? rawSummary.activeItems
-              : typeof rawSummary?.itemCount === 'number'
-                ? rawSummary.itemCount
-                : computedActive,
+              : computedActive,
           lowStockCount:
             typeof rawSummary?.lowStockCount === 'number'
               ? rawSummary.lowStockCount
-              : typeof rawSummary?.lowStock === 'number'
-                ? rawSummary.lowStock
-                : computedLowStock,
+              : computedLowStock,
           outOfStockCount:
             typeof rawSummary?.outOfStockCount === 'number'
               ? rawSummary.outOfStockCount
-              : typeof rawSummary?.outOfStock === 'number'
-                ? rawSummary.outOfStock
-                : computedOutOfStock,
+              : computedOutOfStock,
           totalBookValuation:
             rawSummary?.totalBookValuation !== undefined
               ? String(rawSummary.totalBookValuation)
-              : rawSummary?.totalValuation !== undefined
-                ? String(rawSummary.totalValuation)
+              : rawSummary?.totalStockValuation !== undefined
+                ? String(rawSummary.totalStockValuation)
                 : computedValuation.toFixed(2),
         });
       }
@@ -224,34 +218,19 @@ export default function InventoryPage() {
       setSummary(null);
     }
 
-    // 2. Relational Reference Data (Locations & Suppliers)
-    const warnings: string[] = [];
-
+    // 2. Facility Storage Locations (supports flat array or { zones, bins } topology)
     if (locResult.status === 'fulfilled') {
       const locPayload = locResult.value?.data;
-      // Handle both flat array or warehouse topology objects ({ zones, bins })
       const rawLocations = Array.isArray(locPayload)
         ? locPayload
         : Array.isArray(locPayload?.zones)
           ? locPayload.zones
           : locPayload?.locations;
 
-      setStorageLocations(Array.isArray(rawLocations) ? rawLocations : []);
+      setStorageLocations(normalizeLocations(rawLocations));
     } else {
       setStorageLocations([]);
-      warnings.push('Storage locations could not be loaded.');
-    }
-
-    if (supResult.status === 'fulfilled') {
-      const rawSuppliers = supResult.value?.data?.suppliers ?? supResult.value?.data;
-      setSuppliers(Array.isArray(rawSuppliers) ? rawSuppliers : []);
-    } else {
-      setSuppliers([]);
-      warnings.push('Supplier directory could not be loaded.');
-    }
-
-    if (warnings.length > 0) {
-      setReferenceWarning(warnings.join(' '));
+      setReferenceWarning('Storage locations could not be loaded.');
     }
 
     setIsLoading(false);
@@ -261,7 +240,6 @@ export default function InventoryPage() {
     loadInventoryData();
   }, [loadInventoryData]);
 
-  // Filtered List
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
       const query = searchTerm.trim().toLowerCase();
@@ -298,86 +276,6 @@ export default function InventoryPage() {
     return ['ALL', ...Array.from(set)];
   }, [items]);
 
-  const openCreateModal = () => {
-    setFormError(null);
-    setName('');
-    setSku('');
-    setBarcode('');
-    setMaterialType('RAW_MATERIAL');
-    setCategory('PRODUCE');
-    setUnit('kg');
-    setPurchaseUnit('');
-    setConversionFactor('1');
-    setPreferredSupplierId('');
-    setOpeningStock('');
-    setMinThreshold('10');
-    setReorderQuantity('50');
-    setCostPrice('');
-    setValuationMethod('FIFO');
-    setStorageCondition('DRY_AMBIENT');
-    setTaxClassification('A_16');
-    setIsAddModalOpen(true);
-  };
-
-  const handleCreateItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    setFormError(null);
-
-    const parsedConversion = parseFloat(conversionFactor);
-    if (Number.isNaN(parsedConversion) || parsedConversion <= 0) {
-      setFormError('Unit conversion multiplier must be greater than zero.');
-      return;
-    }
-
-    const parsedCost = parseFloat(costPrice);
-    if (Number.isNaN(parsedCost) || parsedCost < 0) {
-      setFormError('Standard cost must be a valid non-negative number.');
-      return;
-    }
-
-    const parsedOpening = openingStock.trim() ? parseFloat(openingStock) : 0;
-    if (Number.isNaN(parsedOpening) || parsedOpening < 0) {
-      setFormError('Initial opening stock cannot be negative.');
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      await fetchApi('/api/v1/inventory/items', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          sku: sku.trim() || undefined,
-          barcode: barcode.trim() || undefined,
-          materialType,
-          category,
-          unit,
-          purchaseUnit: purchaseUnit.trim() || undefined,
-          conversionFactor: parsedConversion,
-          preferredSupplierId: preferredSupplierId ? parseInt(preferredSupplierId, 10) : null,
-          currentStock: parsedOpening,
-          minThreshold: parseFloat(minThreshold || '0') || 0,
-          reorderQuantity: parseFloat(reorderQuantity || '0') || 0,
-          costPrice: parsedCost,
-          valuationMethod,
-          storageCondition,
-          taxClassification,
-          allowNegativeStock: false,
-          isActive: true,
-        }),
-      });
-
-      setIsAddModalOpen(false);
-      setStatusBanner(`Material article "${name.trim()}" registered in tenant catalog.`);
-      await loadInventoryData();
-    } catch (err: unknown) {
-      setFormError(getErrorMessage(err, 'Failed to register inventory item.'));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const openAdjustModal = (
     item: InventoryItem,
     defaultType: MovementType = 'GOODS_RECEIPT_PO'
@@ -394,7 +292,7 @@ export default function InventoryPage() {
     if (storageLocations.length > 0) {
       const matchLoc = storageLocations.find((l) => {
         if (item.storageCondition === 'CHILLED_2_8C' || item.storageCondition === 'CHILLED') {
-          return l.isRefrigerated || l.zoneType.includes('CHILLED');
+          return l.isRefrigerated || l.zoneType.includes('CHILLED') || l.zoneType.includes('COLD');
         }
         if (item.storageCondition === 'DEEP_FREEZE') {
           return l.zoneType.includes('FREEZE');
@@ -535,10 +433,10 @@ export default function InventoryPage() {
             <span className="text-xs font-bold text-servora-navy">Stock Overview</span>
           </div>
           <h1 className="text-xl font-bold text-servora-navy">
-            Inventory &amp; Materials Management
+            Inventory Balances &amp; Stock Movements
           </h1>
           <p className="text-xs sm:text-sm text-servora-deepTeal mt-0.5">
-            Manage inventory master data, stock balances, material movements, and procurement controls across your authorized locations.
+            Monitor live stock on hand, book valuation, low-stock alerts, and post auditable material movements.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -552,26 +450,18 @@ export default function InventoryPage() {
             Refresh
           </button>
           <Link
-            href="/inventory/items"
-            className="px-3.5 py-2 text-xs font-semibold text-servora-navy bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors border border-gray-200 inline-flex items-center gap-1.5"
-          >
-            <Boxes size={14} className="text-servora-deepTeal" />
-            Item Specifications
-          </Link>
-          <Link
             href="/inventory/reorder"
             className="px-3.5 py-2 text-xs font-semibold text-servora-core bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors border border-blue-100 inline-flex items-center gap-1.5"
           >
             <Sparkles size={14} />
             Smart Reorder (MRP)
           </Link>
-          <button
-            type="button"
-            onClick={openCreateModal}
-            className="bg-servora-core text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs hover:bg-blue-700 transition-colors flex items-center gap-2"
+          <Link
+            href="/inventory/items"
+            className="bg-servora-core text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xs hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
           >
-            <Plus size={15} /> Create Product
-          </button>
+            <Plus size={15} /> Create / Manage Items
+          </Link>
         </div>
       </div>
 
@@ -757,15 +647,14 @@ export default function InventoryPage() {
             </div>
             <h2 className="text-sm font-bold text-servora-navy">No Inventory Articles Configured</h2>
             <p className="text-xs text-servora-deepTeal max-w-md mx-auto">
-              Your tenant material catalog is currently empty. Create your first raw ingredient, beverage, or consumable article to begin tracking stock movements.
+              Your tenant material catalog is currently empty. Register your first raw ingredient, beverage, or consumable in Material Specifications to begin tracking stock movements.
             </p>
-            <button
-              type="button"
-              onClick={openCreateModal}
+            <Link
+              href="/inventory/items"
               className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700"
             >
-              <Plus size={14} /> Create First Product
-            </button>
+              <Plus size={14} /> Go to Material Specifications
+            </Link>
           </div>
         ) : filteredItems.length === 0 ? (
           <div className="p-12 text-center text-servora-deepTeal text-xs">
@@ -903,335 +792,6 @@ export default function InventoryPage() {
           </div>
         )}
       </div>
-
-      {/* CREATE INVENTORY ITEM MODAL */}
-      {isAddModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="create-item-modal-title"
-          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
-        >
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-xl border border-gray-100 space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-              <div>
-                <h3 id="create-item-modal-title" className="text-sm font-bold text-servora-navy">
-                  Register New Material Article
-                </h3>
-                <p className="text-[11px] text-servora-deepTeal">
-                  Define kitchen ingredients, procurement packages, and tax rules
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsAddModalOpen(false)}
-                aria-label="Close modal"
-                className="text-gray-400 hover:text-servora-navy"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {formError && (
-              <div
-                role="alert"
-                className="rounded-xl bg-rose-50 border border-rose-200 px-3.5 py-2.5 text-xs font-semibold text-rose-800"
-              >
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreateItem} className="space-y-3.5">
-              <div>
-                <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-name">
-                  Article Description *
-                </label>
-                <input
-                  id="item-name"
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Kerrygold Pure Unsalted Butter"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none font-bold"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-sku">
-                    Internal SKU
-                  </label>
-                  <input
-                    id="item-sku"
-                    type="text"
-                    value={sku}
-                    onChange={(e) => setSku(e.target.value)}
-                    placeholder="ING-BTR-01"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-barcode">
-                    GTIN / EAN Barcode
-                  </label>
-                  <input
-                    id="item-barcode"
-                    type="text"
-                    value={barcode}
-                    onChange={(e) => setBarcode(e.target.value)}
-                    placeholder="6001234567890"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-mat-type">
-                    Material Classification *
-                  </label>
-                  <select
-                    id="item-mat-type"
-                    value={materialType}
-                    onChange={(e) => setMaterialType(e.target.value as MaterialType)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
-                  >
-                    <option value="RAW_MATERIAL">Raw Material (Kitchen Ingredient)</option>
-                    <option value="SEMI_FINISHED">Semi-Finished (Sub-Prep Batch)</option>
-                    <option value="FINISHED_GOOD">Finished Good (Direct Sale)</option>
-                    <option value="CONSUMABLE">Operating Consumable</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-category">
-                    Category *
-                  </label>
-                  <select
-                    id="item-category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
-                  >
-                    <option value="PRODUCE">PRODUCE (Vegetables, Fruits, Herbs)</option>
-                    <option value="MEAT">MEAT &amp; POULTRY (Beef, Goat, Chicken)</option>
-                    <option value="DAIRY">DAIRY (Milk, Cheese, Butter)</option>
-                    <option value="PANTRY">PANTRY &amp; DRY (Spices, Oils, Sauces)</option>
-                    <option value="BAKERY">BAKERY (Flour, Yeast, Buns)</option>
-                    <option value="BEVERAGE">BEVERAGES (Syrups, Coffee, Tea)</option>
-                    <option value="PACKAGING">PACKAGING (Boxes, Cups, Cutlery)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Dual UoM Procurement Bridge */}
-              <div className="p-3 bg-slate-50 border border-gray-200 rounded-xl space-y-2">
-                <span className="text-[11px] font-bold uppercase text-servora-navy tracking-wider block">
-                  Dual Unit of Measure (UoM) Conversion
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1" htmlFor="item-unit">
-                      Base Tracking Unit
-                    </label>
-                    <select
-                      id="item-unit"
-                      value={unit}
-                      onChange={(e) => setUnit(e.target.value)}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white font-bold"
-                    >
-                      <option value="kg">kg (Kilograms)</option>
-                      <option value="g">g (Grams)</option>
-                      <option value="litres">litres (Litres)</option>
-                      <option value="ml">ml (Millilitres)</option>
-                      <option value="pcs">pcs (Pieces)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1" htmlFor="item-purchase-unit">
-                      Purchase Package
-                    </label>
-                    <input
-                      id="item-purchase-unit"
-                      type="text"
-                      value={purchaseUnit}
-                      onChange={(e) => setPurchaseUnit(e.target.value)}
-                      placeholder="e.g. Crate, Bag, Box"
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-500 mb-1" htmlFor="item-conv">
-                      Multiplier Ratio
-                    </label>
-                    <input
-                      id="item-conv"
-                      type="number"
-                      step="0.0001"
-                      min="0.0001"
-                      value={conversionFactor}
-                      onChange={(e) => setConversionFactor(e.target.value)}
-                      className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded-lg bg-white font-bold"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-cost">
-                    Standard Cost / {unit} (KES) *
-                  </label>
-                  <input
-                    id="item-cost"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    required
-                    value={costPrice}
-                    onChange={(e) => setCostPrice(e.target.value)}
-                    placeholder="850.00"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-min">
-                    Safety Reorder Min
-                  </label>
-                  <input
-                    id="item-min"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={minThreshold}
-                    onChange={(e) => setMinThreshold(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-opening">
-                    Opening Stock (Ledger)
-                  </label>
-                  <input
-                    id="item-opening"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={openingStock}
-                    onChange={(e) => setOpeningStock(e.target.value)}
-                    placeholder="0"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none font-bold"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-supplier">
-                    Preferred Supplier
-                  </label>
-                  <select
-                    id="item-supplier"
-                    value={preferredSupplierId}
-                    onChange={(e) => setPreferredSupplierId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
-                  >
-                    <option value="">
-                      {suppliers.length === 0 ? 'No active suppliers configured' : 'No supplier assigned'}
-                    </option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-tax">
-                    Tax Classification *
-                  </label>
-                  <select
-                    id="item-tax"
-                    value={taxClassification}
-                    onChange={(e) => setTaxClassification(e.target.value as TaxClassification)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-bold"
-                  >
-                    <option value="A_16">Class A: Standard Rated (16.00%)</option>
-                    <option value="B_ZERO">Class B: Zero Rated (0.00%)</option>
-                    <option value="E_EXEMPT">Class E: VAT Exempt</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-reorder">
-                    Reorder Lot Qty
-                  </label>
-                  <input
-                    id="item-reorder"
-                    type="number"
-                    step="0.001"
-                    min="0"
-                    value={reorderQuantity}
-                    onChange={(e) => setReorderQuantity(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-val">
-                    Valuation Method
-                  </label>
-                  <select
-                    id="item-val"
-                    value={valuationMethod}
-                    onChange={(e) => setValuationMethod(e.target.value as ValuationMethod)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
-                  >
-                    <option value="FIFO">FIFO (First-In, First-Out)</option>
-                    <option value="AVCO">AVCO (Weighted Average)</option>
-                    <option value="STANDARD">STANDARD Cost</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="item-storage">
-                    Storage Condition
-                  </label>
-                  <select
-                    id="item-storage"
-                    value={storageCondition}
-                    onChange={(e) => setStorageCondition(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
-                  >
-                    <option value="DRY_AMBIENT">Dry Ambient</option>
-                    <option value="CHILLED_2_8C">Chilled (2&deg;C – 8&deg;C)</option>
-                    <option value="DEEP_FREEZE">Deep Freeze</option>
-                    <option value="WARM_HEATED">Warm / Heated</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 rounded-xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 shadow-xs disabled:opacity-50 transition-colors"
-                >
-                  {isSubmitting ? 'Registering...' : 'Save Material Article'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ADJUST STOCK & GOODS RECEIPT MODAL */}
       {isAdjustModalOpen && selectedItem && (
