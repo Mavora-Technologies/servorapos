@@ -14,6 +14,7 @@ export const initiateStockCountSchema = z
   .object({
     countType: z.enum(COUNT_TYPES).default('FULL'),
     category: optionalTrimmed,
+    inventoryItemIds: z.array(z.coerce.number().int().positive()).optional(),
     isBlindCount: z.boolean().default(true),
     notes: optionalTrimmed,
   })
@@ -23,6 +24,16 @@ export const initiateStockCountSchema = z
         code: z.ZodIssueCode.custom,
         path: ['category'],
         message: 'A target category is required for a Cycle Count audit.',
+      });
+    }
+    if (
+      data.countType === 'SPOT_CHECK' &&
+      (!data.inventoryItemIds || data.inventoryItemIds.length === 0)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['inventoryItemIds'],
+        message: 'Please select at least one product for a Spot Check audit.',
       });
     }
   });

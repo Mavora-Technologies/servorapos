@@ -1,5 +1,5 @@
 // apps/api/src/repositories/stock-count.repository.ts
-import { eq, desc, and, asc } from 'drizzle-orm';
+import { eq, desc, and, asc, inArray } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   stockCounts,
@@ -104,6 +104,11 @@ export const createStockCountSessionTransaction = async (
   payload: InitiateStockCountInput
 ) => {
   return await db.transaction(async (tx) => {
+    const uniqueItemIds =
+      payload.countType === 'SPOT_CHECK' && payload.inventoryItemIds
+        ? Array.from(new Set(payload.inventoryItemIds))
+        : [];
+
     const scopeConditions =
       payload.countType === 'CYCLE' && payload.category
         ? and(
@@ -111,7 +116,13 @@ export const createStockCountSessionTransaction = async (
             eq(inventoryItems.isActive, true),
             eq(inventoryItems.category, payload.category)
           )
-        : and(eq(inventoryItems.tenantId, tenantId), eq(inventoryItems.isActive, true));
+        : payload.countType === 'SPOT_CHECK' && uniqueItemIds.length > 0
+          ? and(
+              eq(inventoryItems.tenantId, tenantId),
+              eq(inventoryItems.isActive, true),
+              inArray(inventoryItems.id, uniqueItemIds)
+            )
+          : and(eq(inventoryItems.tenantId, tenantId), eq(inventoryItems.isActive, true));
 
     const snapshotItems = await tx
       .select({
@@ -122,6 +133,15 @@ export const createStockCountSessionTransaction = async (
       .from(inventoryItems)
       .where(scopeConditions)
       .orderBy(asc(inventoryItems.name));
+
+    if (
+      payload.countType === 'SPOT_CHECK' &&
+      snapshotItems.length !== uniqueItemIds.length
+    ) {
+      throw new Error(
+        'One or more selected products are invalid, inactive, or do not belong to this tenant.'
+      );
+    }
 
     if (snapshotItems.length === 0) {
       throw new Error('No active inventory articles found for the selected audit scope.');

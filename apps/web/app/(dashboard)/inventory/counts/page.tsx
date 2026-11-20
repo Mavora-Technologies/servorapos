@@ -61,6 +61,14 @@ interface DetailedStockCount extends StockCountHeader {
   items: StockCountItemLine[];
 }
 
+interface CatalogItemOption {
+  id: number;
+  name: string;
+  sku: string | null;
+  category: string;
+  unit: string;
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message) {
     return error.message;
@@ -71,6 +79,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 export default function StockCountsPage() {
   const [counts, setCounts] = useState<StockCountHeader[]>([]);
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [availableItems, setAvailableItems] = useState<CatalogItemOption[]>([]);
   const [activeCount, setActiveCount] = useState<DetailedStockCount | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuditing, setIsAuditing] = useState(false);
@@ -91,6 +100,8 @@ export default function StockCountsPage() {
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
   const [newCountType, setNewCountType] = useState<CountType>('FULL');
   const [newCategory, setNewCategory] = useState('');
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [itemPickerSearch, setItemPickerSearch] = useState('');
   const [newIsBlind, setNewIsBlind] = useState(true);
   const [newNotes, setNewNotes] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -132,12 +143,32 @@ export default function StockCountsPage() {
       const payload = itemsResult.value?.data;
       const rawItems = Array.isArray(payload) ? payload : payload?.items;
       if (Array.isArray(rawItems)) {
-        const cats = Array.from(
-          new Set(
-            rawItems
-              .filter((it: { isActive?: boolean; category?: string }) => it.isActive !== false && it.category)
-              .map((it: { category: string }) => it.category)
+        const activeList: CatalogItemOption[] = rawItems
+          .filter(
+            (it: { isActive?: boolean; id?: number; name?: string }) =>
+              it.isActive !== false && typeof it.id === 'number' && typeof it.name === 'string'
           )
+          .map(
+            (it: {
+              id: number;
+              name: string;
+              sku?: string | null;
+              category?: string;
+              unit?: string;
+            }) => ({
+              id: it.id,
+              name: it.name,
+              sku: it.sku ?? null,
+              category: it.category ?? 'UNCATEGORIZED',
+              unit: it.unit ?? 'pcs',
+            })
+          )
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        setAvailableItems(activeList);
+
+        const cats = Array.from(
+          new Set(activeList.map((it) => it.category).filter(Boolean))
         ).sort();
         setAvailableCategories(cats);
       }
@@ -183,10 +214,30 @@ export default function StockCountsPage() {
     setNewModalError(null);
     setNewCountType('FULL');
     setNewCategory('');
+    setSelectedItemIds([]);
+    setItemPickerSearch('');
     setNewIsBlind(true);
     setNewNotes('');
     setIsNewModalOpen(true);
   };
+
+  const toggleItemSelection = (id: number) => {
+    setNewModalError(null);
+    setSelectedItemIds((prev) =>
+      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
+    );
+  };
+
+  const filteredPickerItems = useMemo(() => {
+    const q = itemPickerSearch.trim().toLowerCase();
+    if (!q) return availableItems;
+    return availableItems.filter(
+      (it) =>
+        it.name.toLowerCase().includes(q) ||
+        (it.sku && it.sku.toLowerCase().includes(q)) ||
+        it.category.toLowerCase().includes(q)
+    );
+  }, [availableItems, itemPickerSearch]);
 
   const handleInitiate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,6 +249,11 @@ export default function StockCountsPage() {
       return;
     }
 
+    if (newCountType === 'SPOT_CHECK' && selectedItemIds.length === 0) {
+      setNewModalError('Please select at least one product to include in this Spot Check audit.');
+      return;
+    }
+
     setIsCreating(true);
     try {
       const res = await fetchApi('/api/v1/inventory/counts/initiate', {
@@ -205,6 +261,7 @@ export default function StockCountsPage() {
         body: JSON.stringify({
           countType: newCountType,
           category: newCountType === 'CYCLE' ? newCategory : undefined,
+          inventoryItemIds: newCountType === 'SPOT_CHECK' ? selectedItemIds : undefined,
           isBlindCount: newIsBlind,
           notes: newNotes.trim() || undefined,
         }),
@@ -438,7 +495,11 @@ export default function StockCountsPage() {
                 Scope:{' '}
                 <strong>
                   {activeCount.countType}{' '}
-                  {activeCount.category ? `(${activeCount.category})` : ''}
+                  {activeCount.category
+                    ? `(${activeCount.category})`
+                    : activeCount.countType === 'SPOT_CHECK'
+                      ? `(${activeCount.items.length} targeted SKU${activeCount.items.length === 1 ? '' : 's'})`
+                      : ''}
                 </strong>{' '}
                 | Opened: {new Date(activeCount.createdAt).toLocaleDateString()}
               </p>
@@ -836,7 +897,12 @@ export default function StockCountsPage() {
 
                           <td className="py-3.5 px-4">
                             <span className="font-semibold text-gray-800 block">
-                              {count.countType} {count.category ? `(${count.category})` : ''}
+                              {count.countType}{' '}
+                              {count.category
+                                ? `(${count.category})`
+                                : count.countType === 'SPOT_CHECK'
+                                  ? `(${count.totalItemsCount} SKU${count.totalItemsCount === 1 ? '' : 's'})`
+                                  : ''}
                             </span>
                             {count.isBlindCount && (
                               <span className="text-[10px] text-purple-700 font-mono">
@@ -922,7 +988,7 @@ export default function StockCountsPage() {
           aria-labelledby="initiate-count-title"
           className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
         >
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-100 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
                 <h3 id="initiate-count-title" className="text-sm font-bold text-servora-navy">
@@ -959,12 +1025,15 @@ export default function StockCountsPage() {
                 <select
                   id="sc-type"
                   value={newCountType}
-                  onChange={(e) => setNewCountType(e.target.value as CountType)}
+                  onChange={(e) => {
+                    setNewCountType(e.target.value as CountType);
+                    setNewModalError(null);
+                  }}
                   className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:border-servora-core focus:outline-none bg-white font-medium"
                 >
                   <option value="FULL">Full Inventory Audit (All active catalog SKUs)</option>
                   <option value="CYCLE">Category Cycle Count (Targeted section)</option>
-                  <option value="SPOT_CHECK">Spot Check Audit</option>
+                  <option value="SPOT_CHECK">Spot Check Audit (Specific Products)</option>
                 </select>
               </div>
 
@@ -991,6 +1060,82 @@ export default function StockCountsPage() {
                       </option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {newCountType === 'SPOT_CHECK' && (
+                <div className="p-3 bg-slate-50 border border-gray-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor="sc-item-search"
+                      className="text-xs font-bold text-servora-navy"
+                    >
+                      Select Target Products * ({selectedItemIds.length} selected)
+                    </label>
+                    {selectedItemIds.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedItemIds([])}
+                        className="text-[11px] font-semibold text-rose-600 hover:underline"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2 text-gray-400" size={13} />
+                    <input
+                      id="sc-item-search"
+                      type="text"
+                      placeholder="Search product by name, SKU, or category..."
+                      value={itemPickerSearch}
+                      onChange={(e) => setItemPickerSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 text-xs bg-white border border-gray-200 rounded-lg focus:border-servora-core focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+                    {filteredPickerItems.length === 0 ? (
+                      <p className="p-3 text-center text-[11px] text-gray-400">
+                        {availableItems.length === 0
+                          ? 'No active products in catalog.'
+                          : 'No products match your search.'}
+                      </p>
+                    ) : (
+                      filteredPickerItems.map((item) => {
+                        const checked = selectedItemIds.includes(item.id);
+                        return (
+                          <label
+                            key={item.id}
+                            className={`flex items-center justify-between gap-2 px-3 py-2 text-xs cursor-pointer transition-colors ${
+                              checked ? 'bg-blue-50/70' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleItemSelection(item.id)}
+                                className="rounded border-gray-300 text-servora-core focus:ring-0 w-3.5 h-3.5 shrink-0"
+                              />
+                              <div className="truncate">
+                                <span className="font-semibold text-servora-navy block truncate">
+                                  {item.name}
+                                </span>
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {item.sku || 'NO-SKU'} &bull; {item.unit}
+                                </span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] font-bold uppercase text-servora-deepTeal bg-gray-100 px-1.5 py-0.5 rounded shrink-0">
+                              {item.category}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               )}
 
