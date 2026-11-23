@@ -15,6 +15,9 @@ import {
   kitchenStations,
   menuItems,
   menuCategories,
+  menuItemModifierGroups,
+  modifierGroups,
+  modifierOptions,
   inventoryItems,
   recipes,
   recipeIngredients,
@@ -52,6 +55,26 @@ export interface StockShortageDetail {
   reason: string;
 }
 
+export interface PosModifierOptionDTO {
+  id: number;
+  name: string;
+  priceAdjustment: number;
+  linkedInventoryItemId: number | null;
+  linkedQuantity: number;
+  linkedUnit: string | null;
+  isDefault: boolean;
+}
+
+export interface PosModifierGroupDTO {
+  id: number;
+  name: string;
+  description: string | null;
+  minSelections: number;
+  maxSelections: number;
+  isRequired: boolean;
+  options: PosModifierOptionDTO[];
+}
+
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export const getPosTerminalContext = async (
@@ -87,7 +110,7 @@ export const getPosTerminalContext = async (
     : undefined;
   const shiftBranchCondition = activeBranch ? eq(cashierShifts.branchId, activeBranch.id) : undefined;
 
-  // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory & Recipes
+  // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [
@@ -100,6 +123,7 @@ export const getPosTerminalContext = async (
     tenantCatalogRouting,
     tenantInventory,
     tenantRecipes,
+    attachedModifierLinks,
   ] = await Promise.all([
     db
       .select({
@@ -242,13 +266,38 @@ export const getPosTerminalContext = async (
       })
       .from(recipes)
       .where(and(eq(recipes.tenantId, tenantId), eq(recipes.isActive, true))),
+
+    db
+      .select({
+        menuItemId: menuItemModifierGroups.menuItemId,
+        groupId: modifierGroups.id,
+        groupName: modifierGroups.name,
+        description: modifierGroups.description,
+        minSelections: modifierGroups.minSelections,
+        maxSelections: modifierGroups.maxSelections,
+        isRequired: modifierGroups.isRequired,
+        sortOrder: menuItemModifierGroups.sortOrder,
+      })
+      .from(menuItemModifierGroups)
+      .innerJoin(
+        modifierGroups,
+        and(
+          eq(menuItemModifierGroups.modifierGroupId, modifierGroups.id),
+          eq(modifierGroups.tenantId, tenantId),
+          eq(modifierGroups.isActive, true)
+        )
+      )
+      .where(eq(menuItemModifierGroups.tenantId, tenantId))
+      .orderBy(asc(menuItemModifierGroups.sortOrder), asc(modifierGroups.name)),
   ]);
 
-  // Fetch recipe ingredients for all active tenant recipes
+  // Fetch recipe ingredients & active modifier options concurrently
   const recipeIds = tenantRecipes.map((r) => r.recipeId);
-  const allRecipeIngredients =
+  const linkedGroupIds = Array.from(new Set(attachedModifierLinks.map((l) => l.groupId)));
+
+  const [allRecipeIngredients, activeModifierOptions] = await Promise.all([
     recipeIds.length > 0
-      ? await db
+      ? db
           .select({
             recipeId: recipeIngredients.recipeId,
             inventoryItemId: recipeIngredients.inventoryItemId,
@@ -263,7 +312,65 @@ export const getPosTerminalContext = async (
               inArray(recipeIngredients.recipeId, recipeIds)
             )
           )
-      : [];
+      : Promise.resolve([]),
+
+    linkedGroupIds.length > 0
+      ? db
+          .select({
+            id: modifierOptions.id,
+            modifierGroupId: modifierOptions.modifierGroupId,
+            name: modifierOptions.name,
+            priceAdjustment: modifierOptions.priceAdjustment,
+            linkedInventoryItemId: modifierOptions.linkedInventoryItemId,
+            linkedQuantity: modifierOptions.linkedQuantity,
+            linkedUnit: modifierOptions.linkedUnit,
+            isDefault: modifierOptions.isDefault,
+          })
+          .from(modifierOptions)
+          .where(
+            and(
+              inArray(modifierOptions.modifierGroupId, linkedGroupIds),
+              eq(modifierOptions.isAvailable, true)
+            )
+          )
+          .orderBy(asc(modifierOptions.id))
+      : Promise.resolve([]),
+  ]);
+
+  // Build itemModifierGroupsMap keyed by menuItemId
+  const optionsByGroupId = new Map<number, PosModifierOptionDTO[]>();
+  for (const opt of activeModifierOptions) {
+    const list = optionsByGroupId.get(opt.modifierGroupId) ?? [];
+    list.push({
+      id: opt.id,
+      name: opt.name,
+      priceAdjustment: Number(opt.priceAdjustment) || 0,
+      linkedInventoryItemId: opt.linkedInventoryItemId,
+      linkedQuantity: Number(opt.linkedQuantity) || 0,
+      linkedUnit: opt.linkedUnit ?? null,
+      isDefault: opt.isDefault,
+    });
+    optionsByGroupId.set(opt.modifierGroupId, list);
+  }
+
+  const itemModifierGroupsMap: Record<number, PosModifierGroupDTO[]> = {};
+  for (const link of attachedModifierLinks) {
+    const groupOptions = optionsByGroupId.get(link.groupId) ?? [];
+    if (groupOptions.length === 0) continue;
+
+    if (!itemModifierGroupsMap[link.menuItemId]) {
+      itemModifierGroupsMap[link.menuItemId] = [];
+    }
+    itemModifierGroupsMap[link.menuItemId].push({
+      id: link.groupId,
+      name: link.groupName,
+      description: link.description,
+      minSelections: link.minSelections,
+      maxSelections: link.maxSelections,
+      isRequired: link.isRequired,
+      options: groupOptions,
+    });
+  }
 
   // Index inventory and recipes for O(1) lookup
   const invById = new Map(
@@ -491,6 +598,7 @@ export const getPosTerminalContext = async (
     itemAvailability: computedAvailability,
     kitchenStations: effectiveStations,
     itemStationMap,
+    itemModifierGroupsMap,
   };
 };
 

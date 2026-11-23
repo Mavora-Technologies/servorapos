@@ -1867,6 +1867,29 @@ export const menuItemAvailability = pgTable(
   ]
 );
 
+export const menuItemModifierGroups = pgTable(
+  'menu_item_modifier_groups',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    menuItemId: integer('menu_item_id')
+      .notNull()
+      .references(() => menuItems.id, { onDelete: 'cascade' }),
+    modifierGroupId: integer('modifier_group_id')
+      .notNull()
+      .references(() => modifierGroups.id, { onDelete: 'cascade' }),
+    sortOrder: integer('sort_order').default(0).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('menu_item_mod_group_unique_idx').on(t.menuItemId, t.modifierGroupId),
+    index('menu_item_mod_group_tenant_idx').on(t.tenantId),
+    index('menu_item_mod_group_item_idx').on(t.menuItemId),
+  ]
+);
+
 export const recipes = pgTable(
   'recipes',
   {

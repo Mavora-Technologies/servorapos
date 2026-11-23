@@ -7,6 +7,8 @@ import {
   inventoryItems,
   recipes,
   recipeIngredients,
+  modifierGroups,
+  menuItemModifierGroups,
 } from '../config/schema';
 import type {
   CreateCategoryInput,
@@ -25,6 +27,62 @@ export interface LinkedIngredientDTO {
   unit: string;
   wastagePercentage: string;
   unitCost: string;
+}
+
+export interface LinkedModifierGroupDTO {
+  id: number;
+  name: string;
+  isRequired: boolean;
+  sortOrder: number;
+}
+
+type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function syncMenuItemModifierGroupsInTx(
+  tx: DbTransaction,
+  tenantId: number,
+  menuItemId: number,
+  modifierGroupIds: number[]
+): Promise<void> {
+  const uniqueModGroupIds = Array.from(new Set(modifierGroupIds));
+
+  if (uniqueModGroupIds.length > 0) {
+    const matchedGroups = await tx
+      .select({ id: modifierGroups.id })
+      .from(modifierGroups)
+      .where(
+        and(
+          eq(modifierGroups.tenantId, tenantId),
+          inArray(modifierGroups.id, uniqueModGroupIds)
+        )
+      );
+
+    if (matchedGroups.length !== uniqueModGroupIds.length) {
+      throw new Error(
+        'One or more selected modifier groups do not exist or belong to another tenant.'
+      );
+    }
+  }
+
+  await tx
+    .delete(menuItemModifierGroups)
+    .where(
+      and(
+        eq(menuItemModifierGroups.tenantId, tenantId),
+        eq(menuItemModifierGroups.menuItemId, menuItemId)
+      )
+    );
+
+  if (uniqueModGroupIds.length > 0) {
+    await tx.insert(menuItemModifierGroups).values(
+      uniqueModGroupIds.map((modifierGroupId, idx) => ({
+        tenantId,
+        menuItemId,
+        modifierGroupId,
+        sortOrder: idx,
+      }))
+    );
+  }
 }
 
 export const createCategory = async (tenantId: number, data: CreateCategoryInput) => {
@@ -195,7 +253,7 @@ export const getMenuCatalogWithLinks = async (tenantId: number, branchId?: numbe
       )
     : eq(menuItems.tenantId, tenantId);
 
-  const [categories, rows, activeRecipes] = await Promise.all([
+  const [categories, rows, activeRecipes, linkedModifierRows] = await Promise.all([
     db
       .select()
       .from(menuCategories)
@@ -232,6 +290,24 @@ export const getMenuCatalogWithLinks = async (tenantId: number, branchId?: numbe
       })
       .from(recipes)
       .where(and(eq(recipes.tenantId, tenantId), eq(recipes.isActive, true))),
+    db
+      .select({
+        menuItemId: menuItemModifierGroups.menuItemId,
+        modifierGroupId: modifierGroups.id,
+        modifierGroupName: modifierGroups.name,
+        isRequired: modifierGroups.isRequired,
+        sortOrder: menuItemModifierGroups.sortOrder,
+      })
+      .from(menuItemModifierGroups)
+      .innerJoin(
+        modifierGroups,
+        and(
+          eq(menuItemModifierGroups.modifierGroupId, modifierGroups.id),
+          eq(modifierGroups.tenantId, tenantId)
+        )
+      )
+      .where(eq(menuItemModifierGroups.tenantId, tenantId))
+      .orderBy(asc(menuItemModifierGroups.sortOrder), asc(modifierGroups.name)),
   ]);
 
   const recipeIds = activeRecipes.map((r) => r.recipeId);
@@ -286,37 +362,55 @@ export const getMenuCatalogWithLinks = async (tenantId: number, branchId?: numbe
     }
   }
 
-  const items = rows.map((row) => ({
-    id: row.item.id,
-    categoryId: row.item.categoryId,
-    category: row.categoryName,
-    branchId: row.item.branchId,
-    name: row.item.name,
-    sku: row.item.sku,
-    description: row.item.description,
-    price: parseFloat(row.item.price),
-    costEstimate: parseFloat(row.item.costEstimate),
-    stockTrackingType: row.item.stockTrackingType,
-    directInventoryItemId: row.item.directInventoryItemId,
-    directInventoryItem: row.item.directInventoryItemId
-      ? {
-          id: row.item.directInventoryItemId,
-          name: row.directInventoryName ?? 'Unknown Item',
-          sku: row.directInventorySku ?? null,
-          unit: row.directInventoryUnit ?? '',
-          costPrice: row.directInventoryCost ?? '0.0000',
-          currentStock: row.directInventoryStock ?? '0.0000',
-        }
-      : null,
-    recipeIngredients: ingredientsByMenuItemId.get(row.item.id) ?? [],
-    kitchenStation: row.item.kitchenStation,
-    prepTimeMinutes: row.item.prepTimeMinutes,
-    taxRate: parseFloat(row.item.taxRate),
-    cateringLevyRate: parseFloat(row.item.cateringLevyRate),
-    isTaxInclusive: row.item.isTaxInclusive,
-    isAvailable: row.item.isAvailable,
-    imageUrl: row.item.imageUrl,
-  }));
+  const modGroupsByMenuItemId = new Map<number, LinkedModifierGroupDTO[]>();
+  for (const row of linkedModifierRows) {
+    const list = modGroupsByMenuItemId.get(row.menuItemId) ?? [];
+    list.push({
+      id: row.modifierGroupId,
+      name: row.modifierGroupName,
+      isRequired: row.isRequired,
+      sortOrder: row.sortOrder,
+    });
+    modGroupsByMenuItemId.set(row.menuItemId, list);
+  }
+
+  const items = rows.map((row) => {
+    const attachedModGroups = modGroupsByMenuItemId.get(row.item.id) ?? [];
+
+    return {
+      id: row.item.id,
+      categoryId: row.item.categoryId,
+      category: row.categoryName,
+      branchId: row.item.branchId,
+      name: row.item.name,
+      sku: row.item.sku,
+      description: row.item.description,
+      price: parseFloat(row.item.price),
+      costEstimate: parseFloat(row.item.costEstimate),
+      stockTrackingType: row.item.stockTrackingType,
+      directInventoryItemId: row.item.directInventoryItemId,
+      directInventoryItem: row.item.directInventoryItemId
+        ? {
+            id: row.item.directInventoryItemId,
+            name: row.directInventoryName ?? 'Unknown Item',
+            sku: row.directInventorySku ?? null,
+            unit: row.directInventoryUnit ?? '',
+            costPrice: row.directInventoryCost ?? '0.0000',
+            currentStock: row.directInventoryStock ?? '0.0000',
+          }
+        : null,
+      recipeIngredients: ingredientsByMenuItemId.get(row.item.id) ?? [],
+      modifierGroupIds: attachedModGroups.map((g) => g.id),
+      modifierGroups: attachedModGroups,
+      kitchenStation: row.item.kitchenStation,
+      prepTimeMinutes: row.item.prepTimeMinutes,
+      taxRate: parseFloat(row.item.taxRate),
+      cateringLevyRate: parseFloat(row.item.cateringLevyRate),
+      isTaxInclusive: row.item.isTaxInclusive,
+      isAvailable: row.item.isAvailable,
+      imageUrl: row.item.imageUrl,
+    };
+  });
 
   return { categories, items };
 };
@@ -455,6 +549,16 @@ export const createMenuItemTransaction = async (
           unit: line.unit,
           wastagePercentage: (line.wastagePercentage ?? 0).toFixed(2),
         }))
+      );
+    }
+
+    // 6. Attach Modifier Groups if provided
+    if (data.modifierGroupIds !== undefined) {
+      await syncMenuItemModifierGroupsInTx(
+        tx,
+        tenantId,
+        createdItem.id,
+        data.modifierGroupIds
       );
     }
 
@@ -650,6 +754,11 @@ export const updateMenuItemTransaction = async (
           );
         }
       }
+    }
+
+    // Sync Attached Modifier Groups if provided
+    if (data.modifierGroupIds !== undefined) {
+      await syncMenuItemModifierGroupsInTx(tx, tenantId, itemId, data.modifierGroupIds);
     }
 
     const [updated] = await tx

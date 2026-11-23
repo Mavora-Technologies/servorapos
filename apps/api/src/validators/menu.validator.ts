@@ -56,6 +56,7 @@ const menuItemBaseSchema = z.object({
     z.number().int().positive('Invalid linked inventory item').nullable()
   ),
   recipeIngredients: z.array(recipeIngredientInputSchema).optional(),
+  modifierGroupIds: z.array(z.coerce.number().int().positive()).optional(),
   kitchenStation: z.string().trim().min(2).default('MAIN_KITCHEN'),
   prepTimeMinutes: z.coerce.number().int().min(0).default(15),
   taxRate: z.coerce.number().min(0).max(100).default(16),

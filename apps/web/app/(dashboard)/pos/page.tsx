@@ -39,6 +39,7 @@ import {
   Lock,
   ChefHat,
   ArrowRight,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -167,6 +168,35 @@ interface ItemStationMapping {
   originalStationName: string;
 }
 
+interface PosModifierOption {
+  id: number;
+  name: string;
+  priceAdjustment: number;
+  linkedInventoryItemId: number | null;
+  linkedQuantity: number;
+  linkedUnit: string | null;
+  isDefault: boolean;
+}
+
+interface PosModifierGroup {
+  id: number;
+  name: string;
+  description: string | null;
+  minSelections: number;
+  maxSelections: number;
+  isRequired: boolean;
+  options: PosModifierOption[];
+}
+
+interface SelectedCartModifier {
+  modifierId: number;
+  groupName: string;
+  name: string;
+  price: number;
+  linkedInventoryItemId?: number | null;
+  linkedQuantity?: number;
+}
+
 interface ComboComponentItem {
   menuItemId: number;
   quantity: number;
@@ -190,8 +220,10 @@ interface MenuItem {
 
 interface CartItem extends MenuItem {
   cartItemId: string;
+  basePrice?: number;
   quantity: number;
   targetStation?: string;
+  selectedModifiers?: SelectedCartModifier[];
   modifiers?: string[];
   notes?: string;
 }
@@ -286,6 +318,14 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function getModifierSignature(mods?: SelectedCartModifier[]): string {
+  if (!mods || mods.length === 0) return '';
+  return mods
+    .map((m) => m.modifierId)
+    .sort((a, b) => a - b)
+    .join(',');
+}
+
 export default function POSPage() {
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get('tableId');
@@ -303,7 +343,7 @@ export default function POSPage() {
   const [activeShift, setActiveShift] = useState<ActiveCashierShift | null>(null);
   const [custodianGuardrails, setCustodianGuardrails] = useState<CustodianGuardrails | null>(null);
 
-  // Catalog, Availability & Prep Station Routing Matrix
+  // Catalog, Availability, Modifiers & Prep Station Routing Matrix
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>(['All']);
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -312,7 +352,15 @@ export default function POSPage() {
   const [availabilityMap, setAvailabilityMap] = useState<Record<number, ItemAvailabilityFlag>>({});
   const [kitchenStations, setKitchenStations] = useState<KitchenStationOption[]>([]);
   const [itemStationMap, setItemStationMap] = useState<Record<number, ItemStationMapping>>({});
+  const [itemModifierGroupsMap, setItemModifierGroupsMap] = useState<
+    Record<number, PosModifierGroup[]>
+  >({});
   const [orderTargetStation, setOrderTargetStation] = useState<string>('AUTO');
+
+  // Modifier Customization Modal State
+  const [customizingItem, setCustomizingItem] = useState<MenuItem | null>(null);
+  const [draftSelections, setDraftSelections] = useState<Record<number, number[]>>({});
+  const [modifierModalError, setModifierModalError] = useState<string | null>(null);
 
   // Inline Stock & Checkout Alert Banners
   const [stockAlert, setStockAlert] = useState<string | null>(null);
@@ -421,6 +469,7 @@ export default function POSPage() {
           setLoyaltyRewards(ctx.loyaltyRewards || []);
           setKitchenStations(ctx.kitchenStations || []);
           setItemStationMap(ctx.itemStationMap || {});
+          setItemModifierGroupsMap(ctx.itemModifierGroupsMap || {});
 
           if (ctx.custodianGuardrails?.cashDrawerId) {
             setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
@@ -598,9 +647,10 @@ export default function POSPage() {
     return qtyMap;
   }, [cart]);
 
-  // Compute total raw-material consumption already reserved by current cart items (standalone + combos)
+  // Compute total raw-material consumption already reserved by current cart items (recipes + combos + linked modifiers)
   const cartIngredientConsumption = useMemo(() => {
     const usedByInvId: Record<number, number> = {};
+
     for (const [menuIdStr, totalQty] of Object.entries(cartMenuItemQuantities)) {
       const flag = availabilityMap[Number(menuIdStr)];
       if (!flag?.requirements?.length) continue;
@@ -609,8 +659,20 @@ export default function POSPage() {
           (usedByInvId[req.inventoryItemId] ?? 0) + req.requiredPerPortion * totalQty;
       }
     }
+
+    for (const cartLine of cart) {
+      if (!cartLine.selectedModifiers?.length) continue;
+      for (const mod of cartLine.selectedModifiers) {
+        if (mod.linkedInventoryItemId && mod.linkedQuantity && mod.linkedQuantity > 0) {
+          usedByInvId[mod.linkedInventoryItemId] =
+            (usedByInvId[mod.linkedInventoryItemId] ?? 0) +
+            mod.linkedQuantity * cartLine.quantity;
+        }
+      }
+    }
+
     return usedByInvId;
-  }, [cartMenuItemQuantities, availabilityMap]);
+  }, [cartMenuItemQuantities, availabilityMap, cart]);
 
   // Compute remaining sellable units for a single menu item given current cart reservations
   const getSingleItemRemainingSellable = useCallback(
@@ -661,7 +723,6 @@ export default function POSPage() {
       let comboLimit: number | null = null;
       let limitingName: string | null = null;
 
-      // Aggregate ingredient demand per 1 bundle across all combo components
       const bundleInvDemand: Record<
         number,
         { neededPerBundle: number; currentStock: number; name: string }
@@ -860,6 +921,21 @@ export default function POSPage() {
     });
   }, [menuItems, selectedCategory, selectedStationFilter, itemStationMap, searchQuery]);
 
+  // Open modifier customization modal with default options pre-selected
+  const openModifierPicker = (item: MenuItem, groups: PosModifierGroup[]) => {
+    const initial: Record<number, number[]> = {};
+    for (const g of groups) {
+      const defaults = g.options
+        .filter((o) => o.isDefault)
+        .slice(0, g.maxSelections)
+        .map((o) => o.id);
+      initial[g.id] = defaults;
+    }
+    setDraftSelections(initial);
+    setModifierModalError(null);
+    setCustomizingItem(item);
+  };
+
   const addToCart = (item: MenuItem) => {
     const { remaining, limitingName } = getItemRemainingSellable(item);
     if (remaining !== null && remaining <= 0) {
@@ -871,9 +947,23 @@ export default function POSPage() {
       return;
     }
 
+    // If item has attached modifier groups, prompt cashier to confirm/pick options
+    const attachedGroups = !item.isCombo ? itemModifierGroupsMap[Number(item.id)] : undefined;
+    if (attachedGroups && attachedGroups.length > 0) {
+      setStockAlert(null);
+      openModifierPicker(item, attachedGroups);
+      return;
+    }
+
     setStockAlert(null);
     setCart((prev) => {
-      const existing = prev.find((c) => c.id === item.id && !c.notes && !c.targetStation);
+      const existing = prev.find(
+        (c) =>
+          c.id === item.id &&
+          !c.notes &&
+          !c.targetStation &&
+          (!c.selectedModifiers || c.selectedModifiers.length === 0)
+      );
       if (existing) {
         return prev.map((c) =>
           c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
@@ -883,11 +973,92 @@ export default function POSPage() {
         ...prev,
         {
           ...item,
+          basePrice: item.price,
           cartItemId: crypto.randomUUID(),
           quantity: 1,
         },
       ];
     });
+  };
+
+  // Live preview of customized unit price inside modifier modal
+  const draftCustomizedUnitPrice = useMemo(() => {
+    if (!customizingItem) return 0;
+    const groups = itemModifierGroupsMap[Number(customizingItem.id)] || [];
+    let delta = 0;
+    for (const g of groups) {
+      const picked = draftSelections[g.id] || [];
+      for (const optId of picked) {
+        const opt = g.options.find((o) => o.id === optId);
+        if (opt) delta += opt.priceAdjustment;
+      }
+    }
+    return Number((customizingItem.price + delta).toFixed(2));
+  }, [customizingItem, itemModifierGroupsMap, draftSelections]);
+
+  const handleConfirmModifiers = () => {
+    if (!customizingItem) return;
+    const groups = itemModifierGroupsMap[Number(customizingItem.id)] || [];
+
+    const chosen: SelectedCartModifier[] = [];
+    for (const g of groups) {
+      const pickedIds = draftSelections[g.id] || [];
+      const requiredMin = g.isRequired ? Math.max(1, g.minSelections) : g.minSelections;
+      if (pickedIds.length < requiredMin) {
+        setModifierModalError(`"${g.name}" requires at least ${requiredMin} selection(s).`);
+        return;
+      }
+      if (pickedIds.length > g.maxSelections) {
+        setModifierModalError(`"${g.name}" allows at most ${g.maxSelections} selection(s).`);
+        return;
+      }
+      for (const optId of pickedIds) {
+        const opt = g.options.find((o) => o.id === optId);
+        if (opt) {
+          chosen.push({
+            modifierId: opt.id,
+            groupName: g.name,
+            name: opt.name,
+            price: opt.priceAdjustment,
+            linkedInventoryItemId: opt.linkedInventoryItemId,
+            linkedQuantity: opt.linkedQuantity,
+          });
+        }
+      }
+    }
+
+    const modDelta = chosen.reduce((sum, m) => sum + m.price, 0);
+    const unitPriceWithMods = Number((customizingItem.price + modDelta).toFixed(2));
+    const newSig = getModifierSignature(chosen);
+
+    setCart((prev) => {
+      const existing = prev.find(
+        (c) =>
+          c.id === customizingItem.id &&
+          !c.notes &&
+          !c.targetStation &&
+          getModifierSignature(c.selectedModifiers) === newSig
+      );
+      if (existing) {
+        return prev.map((c) =>
+          c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
+        );
+      }
+      return [
+        ...prev,
+        {
+          ...customizingItem,
+          basePrice: customizingItem.price,
+          price: unitPriceWithMods,
+          selectedModifiers: chosen,
+          cartItemId: crypto.randomUUID(),
+          quantity: 1,
+        },
+      ];
+    });
+
+    setCustomizingItem(null);
+    setModifierModalError(null);
   };
 
   const updateQuantity = (cartItemId: string, delta: number) => {
@@ -934,7 +1105,7 @@ export default function POSPage() {
     }
   };
 
-  // Expand combos into their constituent menu items with cent-balanced prorated pricing for API & stock validation
+  // Expand combos into constituent menu items & attach selectedModifiers for API / KDS
   const expandCartForOrderApi = useCallback(
     (cartLines: CartItem[]) => {
       const expanded: Array<{
@@ -942,9 +1113,11 @@ export default function POSPage() {
         name: string;
         quantity: number;
         unitPrice: number;
+        modifiersPrice?: number;
         totalPrice: number;
         sku?: string;
         targetStation?: string;
+        selectedModifiers?: Array<{ modifierId: number; name: string; price: number }>;
         notes?: string;
       }> = [];
 
@@ -985,16 +1158,33 @@ export default function POSPage() {
             });
           });
         } else {
+          const modList = (line.selectedModifiers ?? []).map((m) => ({
+            modifierId: m.modifierId,
+            name: `${m.groupName}: ${m.name}`,
+            price: m.price,
+          }));
+          const modifiersPrice = Number(
+            modList.reduce((sum, m) => sum + m.price, 0).toFixed(2)
+          );
+          const modNoteText =
+            modList.length > 0 ? modList.map((m) => m.name).join(' | ') : '';
+          const combinedNote =
+            modNoteText && line.notes
+              ? `${modNoteText} — ${line.notes}`
+              : line.notes || modNoteText || undefined;
+
           expanded.push({
             menuItemId: parseInt(line.id, 10),
             name: line.name,
             quantity: line.quantity,
             unitPrice: line.price,
+            modifiersPrice,
             totalPrice: Number((line.price * line.quantity).toFixed(2)),
             sku: line.sku,
             targetStation:
               orderTargetStation !== 'AUTO' ? orderTargetStation : line.targetStation,
-            notes: line.notes,
+            selectedModifiers: modList.length > 0 ? modList : undefined,
+            notes: combinedNote,
           });
         }
       }
@@ -1691,7 +1881,7 @@ export default function POSPage() {
             </div>
           </div>
 
-          {/* Product & Combo Cards Grid with Live Stock Enforcement */}
+          {/* Product & Combo Cards Grid with Live Stock & Modifier Indicators */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
               <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
@@ -1711,6 +1901,8 @@ export default function POSPage() {
                   const { remaining } = getItemRemainingSellable(item);
                   const isOutOfStock = remaining !== null && remaining <= 0;
                   const resolvedStation = getEffectiveItemStation(item);
+                  const hasModifiers =
+                    !item.isCombo && (itemModifierGroupsMap[Number(item.id)]?.length ?? 0) > 0;
 
                   return (
                     <button
@@ -1763,18 +1955,28 @@ export default function POSPage() {
                       </div>
 
                       <div className="space-y-1 pt-1 border-t border-gray-50">
-                        <div className="flex items-center gap-1 text-[9.5px] font-mono text-gray-500 truncate">
-                          {item.isCombo && item.comboItems ? (
-                            <span className="truncate text-servora-deepTeal font-sans">
-                              {item.comboItems
-                                .map((c) => `${c.quantity}x ${c.itemName}`)
-                                .join(' + ')}
+                        <div className="flex items-center justify-between gap-1 text-[9.5px] font-mono text-gray-500">
+                          <div className="flex items-center gap-1 truncate">
+                            {item.isCombo && item.comboItems ? (
+                              <span className="truncate text-servora-deepTeal font-sans">
+                                {item.comboItems
+                                  .map((c) => `${c.quantity}x ${c.itemName}`)
+                                  .join(' + ')}
+                              </span>
+                            ) : (
+                              <>
+                                <ChefHat size={10} className="text-servora-core shrink-0" />
+                                <span className="truncate">{resolvedStation.stationName}</span>
+                              </>
+                            )}
+                          </div>
+                          {hasModifiers && (
+                            <span
+                              title="Customizable options available"
+                              className="inline-flex items-center gap-0.5 text-[9px] font-sans font-bold text-purple-700 bg-purple-50 px-1 py-0.2 rounded shrink-0"
+                            >
+                              <SlidersHorizontal size={8} /> Opts
                             </span>
-                          ) : (
-                            <>
-                              <ChefHat size={10} className="text-servora-core shrink-0" />
-                              <span className="truncate">{resolvedStation.stationName}</span>
-                            </>
                           )}
                         </div>
                         <div className="flex justify-between items-center">
@@ -2068,13 +2270,15 @@ export default function POSPage() {
             {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
           </div>
 
-          {/* Cart Itemized List with Stock-Guarded Increment Controls */}
+          {/* Cart Itemized List with Selected Modifiers & Stock-Guarded Controls */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
                 <ShoppingBag size={36} className="mb-2 opacity-25" />
                 <p className="text-xs font-bold text-servora-navy">Ticket is empty</p>
-                <p className="text-[11px] text-gray-400">Select dishes, drinks, or combos from catalog</p>
+                <p className="text-[11px] text-gray-400">
+                  Select dishes, drinks, or combos from catalog
+                </p>
               </div>
             ) : (
               cart.map((item) => {
@@ -2111,7 +2315,26 @@ export default function POSPage() {
                               .join(', ')}
                           </p>
                         )}
-                        <p className="text-[11px] font-mono font-bold text-servora-core">
+                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {item.selectedModifiers.map((m) => (
+                              <div
+                                key={`${m.groupName}-${m.modifierId}`}
+                                className="flex items-center justify-between text-[10px] text-purple-800 bg-purple-50/70 px-1.5 py-0.5 rounded"
+                              >
+                                <span className="truncate">
+                                  + {m.name}
+                                </span>
+                                {m.price > 0 && (
+                                  <span className="font-mono font-semibold shrink-0 ml-2">
+                                    +{currencySymbol} {m.price.toFixed(0)}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <p className="text-[11px] font-mono font-bold text-servora-core mt-0.5">
                           {currencySymbol} {(item.price * item.quantity).toLocaleString()}
                         </p>
                       </div>
@@ -2309,6 +2532,154 @@ export default function POSPage() {
           </div>
         </div>
       </div>
+
+      {/* ITEM MODIFIER CUSTOMIZATION MODAL */}
+      {customizingItem && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customize-item-title"
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-gray-200 space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div>
+                <h3 id="customize-item-title" className="text-sm font-bold text-servora-navy">
+                  Customize: {customizingItem.name}
+                </h3>
+                <p className="text-[11px] text-gray-500">
+                  Base: {currencySymbol} {customizingItem.price.toLocaleString()} &bull; Customized:{' '}
+                  <strong className="font-mono text-servora-core">
+                    {currencySymbol} {draftCustomizedUnitPrice.toLocaleString()}
+                  </strong>
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomizingItem(null)}
+                aria-label="Close customization modal"
+                className="text-gray-400 hover:text-servora-navy cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {modifierModalError && (
+              <div
+                role="alert"
+                className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs font-semibold flex items-center gap-2"
+              >
+                <AlertTriangle size={14} className="shrink-0" />
+                <span>{modifierModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {(itemModifierGroupsMap[Number(customizingItem.id)] || []).map((group) => {
+                const picked = draftSelections[group.id] || [];
+                const isSingle = group.maxSelections === 1;
+
+                return (
+                  <div key={group.id} className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-xs font-bold text-servora-navy block">
+                          {group.name}
+                        </span>
+                        {group.description && (
+                          <span className="text-[10px] text-gray-400">{group.description}</span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                          group.isRequired
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {group.isRequired ? 'Required' : 'Optional'} &bull;{' '}
+                        {isSingle ? 'Pick 1' : `Up to ${group.maxSelections}`}
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {group.options.map((opt) => {
+                        const active = picked.includes(opt.id);
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setModifierModalError(null);
+                              setDraftSelections((prev) => {
+                                const cur = prev[group.id] || [];
+                                if (isSingle) {
+                                  return {
+                                    ...prev,
+                                    [group.id]: active && !group.isRequired ? [] : [opt.id],
+                                  };
+                                }
+                                if (active) {
+                                  return {
+                                    ...prev,
+                                    [group.id]: cur.filter((id) => id !== opt.id),
+                                  };
+                                }
+                                if (cur.length >= group.maxSelections) return prev;
+                                return { ...prev, [group.id]: [...cur, opt.id] };
+                              });
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${
+                              active
+                                ? 'bg-blue-50 border-servora-core text-servora-navy font-bold'
+                                : 'bg-slate-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                            }`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span
+                                className={`w-3.5 h-3.5 rounded-${isSingle ? 'full' : 'sm'} border flex items-center justify-center ${
+                                  active
+                                    ? 'border-servora-core bg-servora-core text-white'
+                                    : 'border-gray-300 bg-white'
+                                }`}
+                              >
+                                {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                              </span>
+                              <span>{opt.name}</span>
+                            </span>
+                            <span className="font-mono text-servora-core">
+                              {opt.priceAdjustment > 0
+                                ? `+${currencySymbol} ${opt.priceAdjustment.toFixed(2)}`
+                                : 'Free'}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setCustomizingItem(null)}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmModifiers}
+                className="px-5 py-2 text-xs font-bold text-white bg-servora-core hover:bg-blue-700 rounded-xl cursor-pointer"
+              >
+                Add to Order ({currencySymbol} {draftCustomizedUnitPrice.toLocaleString()})
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* TENDER SETTLEMENT & STATION ROUTING MODAL */}
       {isPaymentModalOpen && (
@@ -2598,6 +2969,18 @@ export default function POSPage() {
                           .join(', ')}
                       </p>
                     )}
+                    {receiptTemplate?.showItemModifiers !== false &&
+                      i.selectedModifiers &&
+                      i.selectedModifiers.length > 0 && (
+                        <div className="pl-2 space-y-0.5">
+                          {i.selectedModifiers.map((m) => (
+                            <p key={`${m.groupName}-${m.modifierId}`} className="text-[9px] text-gray-700">
+                              + {m.name}
+                              {m.price > 0 ? ` (+${currencySymbol} ${m.price.toFixed(0)})` : ''}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     {receiptTemplate?.showKitchenNotes && i.notes && (
                       <p className="text-[9.5px] italic pl-2">* {i.notes}</p>
                     )}

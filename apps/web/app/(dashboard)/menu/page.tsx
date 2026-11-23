@@ -20,6 +20,7 @@ import {
   Package,
   ChefHat,
   RefreshCw,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -51,6 +52,22 @@ interface DirectInventoryLink {
   currentStock: string;
 }
 
+interface LinkedModifierGroupSummary {
+  id: number;
+  name: string;
+  isRequired: boolean;
+  sortOrder?: number;
+}
+
+interface ModifierGroupOption {
+  id: number;
+  name: string;
+  isRequired: boolean;
+  minSelections: number;
+  maxSelections: number;
+  options: Array<{ id: number; name: string }>;
+}
+
 interface MenuItemRecord {
   id: number;
   categoryId: number;
@@ -64,6 +81,8 @@ interface MenuItemRecord {
   directInventoryItemId: number | null;
   directInventoryItem: DirectInventoryLink | null;
   recipeIngredients: LinkedIngredient[];
+  modifierGroupIds?: number[];
+  modifierGroups?: LinkedModifierGroupSummary[];
   kitchenStation: string;
   prepTimeMinutes: number;
   taxRate: number;
@@ -104,6 +123,7 @@ export default function AdvancedMenuManagementPage() {
   const [categories, setCategories] = useState<MenuCategoryRecord[]>([]);
   const [items, setItems] = useState<MenuItemRecord[]>([]);
   const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([]);
+  const [modifierGroupsList, setModifierGroupsList] = useState<ModifierGroupOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Page Feedback
@@ -136,19 +156,21 @@ export default function AdvancedMenuManagementPage() {
   const [prepTimeMinutes, setPrepTimeMinutes] = useState('15');
   const [isAvailable, setIsAvailable] = useState(true);
 
-  // Inventory & Raw Material Linkage Fields
+  // Inventory, Raw Material & Modifier Linkage Fields
   const [stockTrackingType, setStockTrackingType] = useState<StockTrackingType>('RECIPE');
   const [directInventoryItemId, setDirectInventoryItemId] = useState('');
   const [recipeLines, setRecipeLines] = useState<RecipeFormLine[]>([]);
+  const [selectedModifierGroupIds, setSelectedModifierGroupIds] = useState<number[]>([]);
 
   const loadMenuData = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     setReferenceWarning(null);
 
-    const [catalogResult, invResult] = await Promise.allSettled([
+    const [catalogResult, invResult, modResult] = await Promise.allSettled([
       fetchApi('/api/v1/menu/catalog'),
       fetchApi('/api/v1/inventory/items'),
+      fetchApi('/api/v1/menu/modifiers'),
     ]);
 
     if (catalogResult.status === 'fulfilled') {
@@ -167,6 +189,8 @@ export default function AdvancedMenuManagementPage() {
       setItems([]);
     }
 
+    const warnings: string[] = [];
+
     if (invResult.status === 'fulfilled') {
       const payload = invResult.value?.data;
       const rawInv = Array.isArray(payload) ? payload : payload?.items;
@@ -179,9 +203,19 @@ export default function AdvancedMenuManagementPage() {
       }
     } else {
       setInventoryOptions([]);
-      setReferenceWarning(
-        'Inventory catalog could not be loaded. Raw material and product linking may be unavailable.'
-      );
+      warnings.push('Inventory catalog could not be loaded.');
+    }
+
+    if (modResult.status === 'fulfilled') {
+      const rawMods = modResult.value?.data;
+      setModifierGroupsList(Array.isArray(rawMods) ? rawMods : []);
+    } else {
+      setModifierGroupsList([]);
+      warnings.push('Modifier groups could not be loaded.');
+    }
+
+    if (warnings.length > 0) {
+      setReferenceWarning(`${warnings.join(' ')} Some linking options may be unavailable.`);
     }
 
     setIsLoading(false);
@@ -200,7 +234,8 @@ export default function AdvancedMenuManagementPage() {
         !query ||
         item.name.toLowerCase().includes(query) ||
         (item.sku && item.sku.toLowerCase().includes(query)) ||
-        (item.directInventoryItem?.name.toLowerCase().includes(query) ?? false);
+        (item.directInventoryItem?.name.toLowerCase().includes(query) ?? false) ||
+        (item.modifierGroups?.some((g) => g.name.toLowerCase().includes(query)) ?? false);
       return matchesCategory && matchesSearch;
     });
   }, [items, selectedCategoryId, searchQuery]);
@@ -247,6 +282,9 @@ export default function AdvancedMenuManagementPage() {
           wastagePercentage: String(parseFloat(ing.wastagePercentage || '0')),
         }))
       );
+      setSelectedModifierGroupIds(
+        item.modifierGroupIds ?? (item.modifierGroups ?? []).map((g) => g.id)
+      );
     } else {
       setEditingItem(null);
       setItemName('');
@@ -260,6 +298,7 @@ export default function AdvancedMenuManagementPage() {
       setStockTrackingType('RECIPE');
       setDirectInventoryItemId('');
       setRecipeLines([]);
+      setSelectedModifierGroupIds([]);
     }
     setIsItemModalOpen(true);
   };
@@ -282,7 +321,6 @@ export default function AdvancedMenuManagementPage() {
       prev.map((line, idx) => {
         if (idx !== index) return line;
         const next = { ...line, ...patch };
-        // Auto-sync base unit when switching raw material
         if (patch.inventoryItemId) {
           const inv = inventoryOptions.find((i) => String(i.id) === patch.inventoryItemId);
           if (inv) next.unit = inv.unit;
@@ -294,6 +332,12 @@ export default function AdvancedMenuManagementPage() {
 
   const removeRecipeLine = (index: number) => {
     setRecipeLines((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const toggleModifierGroup = (groupId: number) => {
+    setSelectedModifierGroupIds((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
+    );
   };
 
   const handleSaveItem = async (e: React.FormEvent) => {
@@ -344,6 +388,7 @@ export default function AdvancedMenuManagementPage() {
         directInventoryItemId:
           stockTrackingType === 'STOCKED_PRODUCT' ? parseInt(directInventoryItemId, 10) : null,
         recipeIngredients: sanitizedRecipeLines,
+        modifierGroupIds: selectedModifierGroupIds,
         isAvailable,
       };
 
@@ -352,7 +397,7 @@ export default function AdvancedMenuManagementPage() {
           method: 'PUT',
           body: JSON.stringify(payload),
         });
-        setStatusBanner(`Updated menu item "${itemName.trim()}" and inventory linkage.`);
+        setStatusBanner(`Updated menu item "${itemName.trim()}", inventory, and modifier links.`);
       } else {
         await fetchApi('/api/v1/menu/items', {
           method: 'POST',
@@ -391,45 +436,60 @@ export default function AdvancedMenuManagementPage() {
   };
 
   const renderInventoryLinkCell = (item: MenuItemRecord) => {
-    if (item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItem) {
-      return (
-        <div className="space-y-0.5">
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-            <Package size={10} /> Direct Product
-          </span>
-          <span className="block text-[11px] font-medium text-servora-navy">
-            {item.directInventoryItem.name}
-          </span>
-        </div>
-      );
-    }
-
-    if (item.stockTrackingType === 'RECIPE' || item.stockTrackingType === 'COMPOSITE') {
-      const count = item.recipeIngredients?.length ?? 0;
-      return (
-        <div className="space-y-0.5">
-          <span
-            className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-              count > 0
-                ? 'text-blue-700 bg-blue-50 border-blue-200'
-                : 'text-amber-700 bg-amber-50 border-amber-200'
-            }`}
-          >
-            <ChefHat size={10} /> {count > 0 ? `BOM (${count} raw mat${count === 1 ? '' : 's'})` : 'Recipe Unlinked'}
-          </span>
-          {item.costEstimate > 0 && (
-            <span className="block text-[10px] font-mono text-gray-500">
-              Est. Cost: KES {item.costEstimate.toFixed(2)}
-            </span>
-          )}
-        </div>
-      );
-    }
+    const modCount = item.modifierGroups?.length ?? item.modifierGroupIds?.length ?? 0;
 
     return (
-      <span className="text-[10px] font-semibold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md">
-        Non-Tracked
-      </span>
+      <div className="space-y-1">
+        {item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItem ? (
+          <div>
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+              <Package size={10} /> Direct Product
+            </span>
+            <span className="block text-[11px] font-medium text-servora-navy mt-0.5">
+              {item.directInventoryItem.name}
+            </span>
+          </div>
+        ) : item.stockTrackingType === 'RECIPE' || item.stockTrackingType === 'COMPOSITE' ? (
+          <div>
+            <span
+              className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                (item.recipeIngredients?.length ?? 0) > 0
+                  ? 'text-blue-700 bg-blue-50 border-blue-200'
+                  : 'text-amber-700 bg-amber-50 border-amber-200'
+              }`}
+            >
+              <ChefHat size={10} />{' '}
+              {(item.recipeIngredients?.length ?? 0) > 0
+                ? `BOM (${item.recipeIngredients.length} raw mat${
+                    item.recipeIngredients.length === 1 ? '' : 's'
+                  })`
+                : 'Recipe Unlinked'}
+            </span>
+            {item.costEstimate > 0 && (
+              <span className="block text-[10px] font-mono text-gray-500 mt-0.5">
+                Est. Cost: KES {item.costEstimate.toFixed(2)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="inline-block text-[10px] font-semibold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md">
+            Non-Tracked
+          </span>
+        )}
+
+        {modCount > 0 && (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {(item.modifierGroups ?? []).map((g) => (
+              <span
+                key={g.id}
+                className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.5 rounded"
+              >
+                <SlidersHorizontal size={9} /> {g.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
     );
   };
 
@@ -507,7 +567,7 @@ export default function AdvancedMenuManagementPage() {
         <div>
           <h1 className="text-xl font-bold text-servora-navy">Advanced Menu &amp; POS Catalog</h1>
           <p className="text-servora-deepTeal text-xs mt-1">
-            Configure POS pricing, kitchen station routing, direct stocked product links, and recipe raw-material BOMs.
+            Configure POS pricing, kitchen station routing, raw-material BOMs, and attached modifier groups.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -518,6 +578,13 @@ export default function AdvancedMenuManagementPage() {
             className="bg-gray-50 border border-gray-200 text-servora-deepTeal text-xs font-semibold px-3 py-2 rounded-xl hover:bg-gray-100 transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
           >
             <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} /> Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/menu/modifiers')}
+            className="bg-white border border-gray-200 text-servora-navy text-xs font-semibold px-4 py-2 rounded-xl shadow-2xs hover:bg-gray-50 transition-colors flex items-center gap-2"
+          >
+            <SlidersHorizontal size={14} /> Modifiers
           </button>
           <button
             type="button"
@@ -543,8 +610,8 @@ export default function AdvancedMenuManagementPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
           <input
             type="text"
-            aria-label="Search menu items by name, SKU, or linked product"
-            placeholder="Search by item name, SKU, or linked material..."
+            aria-label="Search menu items by name, SKU, linked material, or modifier"
+            placeholder="Search by item name, SKU, material, or modifier..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core"
@@ -661,7 +728,7 @@ export default function AdvancedMenuManagementPage() {
                   <tr className="bg-slate-50 text-servora-deepTeal uppercase tracking-wider border-b border-gray-100 text-[11px] font-bold">
                     <th scope="col" className="p-4">Item Name</th>
                     <th scope="col" className="p-4">Category &amp; Station</th>
-                    <th scope="col" className="p-4">Inventory / Raw Material Link</th>
+                    <th scope="col" className="p-4">Inventory &amp; Modifiers</th>
                     <th scope="col" className="p-4 text-right">Price (KES)</th>
                     <th scope="col" className="p-4">Status</th>
                     <th scope="col" className="p-4 text-right">Actions</th>
@@ -702,7 +769,7 @@ export default function AdvancedMenuManagementPage() {
                           <button
                             type="button"
                             onClick={() => openItemModal(item)}
-                            title="Edit Menu Item & Inventory Link"
+                            title="Edit Menu Item, Inventory & Modifiers"
                             aria-label={`Edit ${item.name}`}
                             className="p-1.5 text-gray-500 hover:text-servora-core hover:bg-servora-pale rounded-lg transition-colors"
                           >
@@ -728,7 +795,7 @@ export default function AdvancedMenuManagementPage() {
         </div>
       </div>
 
-      {/* CREATE / EDIT MENU ITEM MODAL WITH INVENTORY & RAW MATERIAL LINKAGE */}
+      {/* CREATE / EDIT MENU ITEM MODAL WITH INVENTORY & MODIFIER GROUP LINKAGE */}
       {isItemModalOpen && (
         <div
           role="dialog"
@@ -743,7 +810,7 @@ export default function AdvancedMenuManagementPage() {
                   {editingItem ? `Edit POS Menu Item: ${editingItem.name}` : 'Add POS Menu Item'}
                 </h3>
                 <p className="text-[11px] text-servora-deepTeal">
-                  Configure selling price, kitchen routing, and linked inventory / raw materials
+                  Configure selling price, kitchen routing, raw-material BOM, and POS modifier groups
                 </p>
               </div>
               <button
@@ -1021,6 +1088,60 @@ export default function AdvancedMenuManagementPage() {
                         </p>
                       </div>
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* ATTACHED MODIFIER GROUPS PANEL */}
+              <div className="p-4 bg-slate-50 border border-gray-200 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-servora-navy flex items-center gap-1.5">
+                    <SlidersHorizontal size={14} className="text-purple-600" />
+                    Attached POS Modifier Groups ({selectedModifierGroupIds.length})
+                  </span>
+                  <Link
+                    href="/menu/modifiers"
+                    className="text-[11px] font-semibold text-servora-core hover:underline"
+                  >
+                    Manage Groups &rarr;
+                  </Link>
+                </div>
+
+                {modifierGroupsList.length === 0 ? (
+                  <p className="text-[11px] text-gray-500 bg-white border border-dashed border-gray-300 rounded-xl p-3 text-center">
+                    No modifier groups configured yet. Create reusable groups in Modifiers &amp; Add-ons to attach them here.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto">
+                    {modifierGroupsList.map((group) => {
+                      const checked = selectedModifierGroupIds.includes(group.id);
+                      return (
+                        <label
+                          key={group.id}
+                          className={`flex items-center justify-between gap-2 p-2.5 rounded-xl border text-xs cursor-pointer transition-colors ${
+                            checked
+                              ? 'bg-purple-50 border-purple-300 text-servora-navy'
+                              : 'bg-white border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleModifierGroup(group.id)}
+                              className="rounded border-gray-300 text-purple-600 w-3.5 h-3.5 shrink-0"
+                            />
+                            <div className="truncate">
+                              <span className="font-bold block truncate">{group.name}</span>
+                              <span className="text-[10px] text-gray-500">
+                                {group.options?.length ?? 0} options &bull;{' '}
+                                {group.isRequired ? 'Required' : 'Optional'}
+                              </span>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
                 )}
               </div>
