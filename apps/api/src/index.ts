@@ -11,6 +11,7 @@ import tenantRoutes from './routes/tenant.routes';
 import authRoutes from './routes/auth.routes';
 import branchRoutes from './routes/branch.routes';
 import businessRoutes from './routes/business.routes';
+import { globalAuditLogger } from './middleware/audit-logger.middleware';
 
 // Menu & Catalog Routes
 import modifierRoutes from './routes/modifier.routes';
@@ -162,6 +163,7 @@ app.get('/health', (req: Request, res: Response) => {
    ========================================================================== */
 
 // 1. System, Tenant & Core Infrastructure
+app.use('/api/v1', globalAuditLogger);
 app.use('/api/v1/system', systemRoutes);
 app.use('/api/v1/tenants', tenantRoutes);
 app.use('/api/v1/auth', authRoutes);
