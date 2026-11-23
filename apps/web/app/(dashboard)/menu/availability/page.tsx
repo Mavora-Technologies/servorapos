@@ -488,11 +488,10 @@ export default function AvailabilityPage() {
               key={tab.id}
               type="button"
               onClick={() => setStatusFilter(tab.id)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                statusFilter === tab.id
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${statusFilter === tab.id
                   ? 'bg-white shadow-xs text-servora-navy font-bold'
                   : 'text-gray-500 hover:text-gray-900'
-              }`}
+                }`}
             >
               {tab.label}
             </button>
@@ -531,11 +530,10 @@ export default function AvailabilityPage() {
           {filteredItems.map((item) => (
             <div
               key={item.id}
-              className={`rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all ${
-                item.is86ed
+              className={`rounded-2xl border p-5 shadow-xs flex flex-col justify-between transition-all ${item.is86ed
                   ? 'bg-rose-50/40 border-rose-200'
                   : 'bg-white border-gray-100 hover:border-gray-200'
-              }`}
+                }`}
             >
               <div>
                 <div className="flex items-start justify-between gap-2 mb-2">
@@ -562,9 +560,8 @@ export default function AvailabilityPage() {
                 </div>
 
                 <h3
-                  className={`text-sm font-bold mt-1 ${
-                    item.is86ed ? 'text-gray-500 line-through' : 'text-servora-navy'
-                  }`}
+                  className={`text-sm font-bold mt-1 ${item.is86ed ? 'text-gray-500 line-through' : 'text-servora-navy'
+                    }`}
                 >
                   {item.name}
                 </h3>
@@ -601,11 +598,10 @@ export default function AvailabilityPage() {
                 {/* Live Effective Portion Telemetry */}
                 {!item.is86ed && item.effectiveRemaining !== null && (
                   <div
-                    className={`mt-2.5 flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border ${
-                      item.effectiveRemaining <= 5
+                    className={`mt-2.5 flex items-center justify-between gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-semibold border ${item.effectiveRemaining <= 5
                         ? 'text-amber-800 bg-amber-50 border-amber-200'
                         : 'text-emerald-800 bg-emerald-50/60 border-emerald-100'
-                    }`}
+                      }`}
                   >
                     <span className="inline-flex items-center gap-1">
                       <Flame size={12} />
@@ -629,28 +625,35 @@ export default function AvailabilityPage() {
                   Portion Cap
                 </button>
 
-                <button
-                  type="button"
-                  disabled={actionLoadingId === item.id}
-                  onClick={() => handleStockToggleClick(item)}
-                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
-                    item.isManually86ed
-                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                      : 'bg-rose-600 hover:bg-rose-700 text-white'
-                  }`}
-                >
-                  {item.isManually86ed ? (
-                    <>
-                      <RotateCcw size={13} />
-                      Clear 86
-                    </>
-                  ) : (
-                    <>
-                      <Ban size={13} />
-                      86 Item
-                    </>
-                  )}
-                </button>
+                {item.isManually86ed ? (
+                  <button
+                    type="button"
+                    disabled={actionLoadingId === item.id}
+                    onClick={() => handleStockToggleClick(item)}
+                    className="px-3 py-1.5 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    <RotateCcw size={13} />
+                    Restore Item
+                  </button>
+                ) : item.isInventoryDepleted ? (
+                  <Link
+                    href="/inventory"
+                    className="px-3 py-1.5 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-200"
+                  >
+                    <Package size={13} />
+                    Restock Inventory
+                  </Link>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={actionLoadingId === item.id}
+                    onClick={() => handleStockToggleClick(item)}
+                    className="px-3 py-1.5 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 bg-rose-600 hover:bg-rose-700 text-white"
+                  >
+                    <Ban size={13} />
+                    Mark Out of Stock
+                  </button>
+                )}
               </div>
             </div>
           ))}
