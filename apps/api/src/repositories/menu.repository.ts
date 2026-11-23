@@ -1,9 +1,10 @@
 // apps/api/src/repositories/menu.repository.ts
-import { eq, and, or, isNull, asc, ne, inArray, ilike, sql } from 'drizzle-orm';
+import { eq, and, or, isNull, asc, desc, ne, inArray, ilike, sql } from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   menuCategories,
   menuItems,
+  itemPricingRules,
   inventoryItems,
   recipes,
   recipeIngredients,
@@ -221,7 +222,15 @@ export const getActiveMenu = async (tenantId: number, branchId?: number) => {
       )
     : and(eq(menuItems.tenantId, tenantId), eq(menuItems.isAvailable, true));
 
-  const [categories, items] = await Promise.all([
+  const ruleFilter = branchId
+    ? and(
+        eq(itemPricingRules.tenantId, tenantId),
+        eq(itemPricingRules.isActive, true),
+        or(eq(itemPricingRules.branchId, branchId), isNull(itemPricingRules.branchId))
+      )
+    : and(eq(itemPricingRules.tenantId, tenantId), eq(itemPricingRules.isActive, true));
+
+  const [categories, items, pricingRules] = await Promise.all([
     db
       .select()
       .from(menuCategories)
@@ -232,9 +241,25 @@ export const getActiveMenu = async (tenantId: number, branchId?: number) => {
       .from(menuItems)
       .where(itemFilter)
       .orderBy(asc(menuItems.name)),
+    db
+      .select({
+        id: itemPricingRules.id,
+        branchId: itemPricingRules.branchId,
+        menuItemId: itemPricingRules.menuItemId,
+        ruleName: itemPricingRules.ruleName,
+        ruleType: itemPricingRules.ruleType,
+        value: itemPricingRules.value,
+        startTime: itemPricingRules.startTime,
+        endTime: itemPricingRules.endTime,
+        daysOfWeek: itemPricingRules.daysOfWeek,
+        isActive: itemPricingRules.isActive,
+      })
+      .from(itemPricingRules)
+      .where(ruleFilter)
+      .orderBy(desc(itemPricingRules.createdAt)),
   ]);
 
-  return { categories, items };
+  return { categories, items, pricingRules };
 };
 
 export const getMenuCatalogWithLinks = async (tenantId: number, branchId?: number) => {

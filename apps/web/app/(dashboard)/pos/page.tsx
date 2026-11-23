@@ -210,6 +210,12 @@ interface MenuItem {
   name: string;
   category: string;
   price: number;
+  originalPrice?: number;
+  activePricingRule?: {
+    id: number;
+    ruleName: string;
+    ruleType: string;
+  } | null;
   isAvailable: boolean;
   sku?: string;
   image?: string;
@@ -1469,7 +1475,7 @@ export default function POSPage() {
               result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
             notes: `POS Tender for ${customerName || 'Guest'}`,
           }),
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       const dispatchedStations = Array.from(
@@ -1502,8 +1508,8 @@ export default function POSPage() {
         loyaltyTier: selectedCustomer?.tierName || null,
         loyaltyPointsBalance: selectedCustomer
           ? selectedCustomer.currentPoints -
-            (selectedReward?.pointsCost || 0) +
-            calculations.estimatedPointsEarned
+          (selectedReward?.pointsCost || 0) +
+          calculations.estimatedPointsEarned
           : null,
         servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
         drawerName: selectedDrawerObj?.name || 'Main Till',
@@ -1763,22 +1769,20 @@ export default function POSPage() {
         <button
           type="button"
           onClick={() => setMobileTab('menu')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
-            mobileTab === 'menu'
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${mobileTab === 'menu'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
-          }`}
+            }`}
         >
           <Layers size={15} /> Catalog ({filteredItems.length})
         </button>
         <button
           type="button"
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
-            mobileTab === 'cart'
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${mobileTab === 'cart'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
-          }`}
+            }`}
         >
           <ShoppingCart size={15} /> Current Order
           {totalItemsCount > 0 && (
@@ -1793,9 +1797,8 @@ export default function POSPage() {
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
         {/* LEFT COLUMN: ITEM CATALOG & STATION LOOKUP */}
         <div
-          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
-            mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
-          }`}
+          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
+            }`}
         >
           <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
             <div className="flex flex-wrap items-center gap-2">
@@ -1866,13 +1869,12 @@ export default function POSPage() {
                   key={cat}
                   type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${
-                    selectedCategory === cat
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${selectedCategory === cat
                       ? 'bg-servora-navy text-white shadow-xs'
                       : cat === COMBOS_CATEGORY_LABEL
                         ? 'bg-blue-50 text-servora-core border border-blue-200 hover:bg-blue-100'
                         : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
-                  }`}
+                    }`}
                 >
                   {cat === COMBOS_CATEGORY_LABEL && <ShoppingBasket size={12} />}
                   {cat}
@@ -1910,22 +1912,20 @@ export default function POSPage() {
                       type="button"
                       onClick={() => addToCart(item)}
                       disabled={isOutOfStock}
-                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
-                        isOutOfStock
+                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${isOutOfStock
                           ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
                           : item.isCombo
                             ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-97 cursor-pointer'
                             : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
-                      }`}
+                        }`}
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span
-                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${
-                              item.isCombo
+                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${item.isCombo
                                 ? 'bg-servora-core text-white'
                                 : 'text-servora-deepTeal bg-slate-100'
-                            }`}
+                              }`}
                           >
                             {item.isCombo ? (
                               <>
@@ -1979,11 +1979,23 @@ export default function POSPage() {
                             </span>
                           )}
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-mono font-bold text-servora-core">
-                            {currencySymbol} {item.price.toLocaleString()}
-                          </span>
-                          <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors">
+                        <div className="flex justify-between items-center gap-1">
+                          <div className="flex items-baseline gap-1.5 min-w-0">
+                            <span className="text-xs font-mono font-bold text-servora-core">
+                              {currencySymbol} {item.price.toLocaleString()}
+                            </span>
+                            {item.activePricingRule &&
+                              item.originalPrice !== undefined &&
+                              item.originalPrice !== item.price && (
+                                <span
+                                  title={item.activePricingRule.ruleName}
+                                  className="text-[10px] font-mono text-gray-400 line-through truncate"
+                                >
+                                  {item.originalPrice.toLocaleString()}
+                                </span>
+                              )}
+                          </div>
+                          <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors shrink-0">
                             <Plus size={11} />
                           </div>
                         </div>
@@ -1998,9 +2010,8 @@ export default function POSPage() {
 
         {/* RIGHT COLUMN: ACTIVE CHECK, STATION ROUTING, CRM LOYALTY & FISCAL LEDGER */}
         <div
-          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
-            mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
-          }`}
+          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
+            }`}
         >
           {/* Dynamic Service Model Revenue Center Selectors */}
           <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
@@ -2013,11 +2024,10 @@ export default function POSPage() {
                     key={model.id}
                     type="button"
                     onClick={() => setActiveServiceModel(model)}
-                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                      isSelected
+                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${isSelected
                         ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
                         : 'text-gray-500 hover:text-servora-navy'
-                    }`}
+                      }`}
                   >
                     <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
                     <span className="truncate">{model.name}</span>
@@ -2381,11 +2391,10 @@ export default function POSPage() {
                           );
                         }}
                         title="Redirect this item to a specific kitchen/bar station"
-                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${
-                          resolvedSt.isRedirected
+                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${resolvedSt.isRedirected
                             ? 'bg-amber-50 border-amber-300 text-amber-800'
                             : 'bg-white border-gray-200 text-servora-navy'
-                        }`}
+                          }`}
                       >
                         <option value="">Default ({resolvedSt.stationName})</option>
                         {kitchenStations
@@ -2591,11 +2600,10 @@ export default function POSPage() {
                         )}
                       </div>
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
-                          group.isRequired
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${group.isRequired
                             ? 'bg-amber-50 text-amber-700 border border-amber-200'
                             : 'bg-gray-100 text-gray-600'
-                        }`}
+                          }`}
                       >
                         {group.isRequired ? 'Required' : 'Optional'} &bull;{' '}
                         {isSingle ? 'Pick 1' : `Up to ${group.maxSelections}`}
@@ -2629,19 +2637,17 @@ export default function POSPage() {
                                 return { ...prev, [group.id]: [...cur, opt.id] };
                               });
                             }}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${
-                              active
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${active
                                 ? 'bg-blue-50 border-servora-core text-servora-navy font-bold'
                                 : 'bg-slate-50 border-gray-200 text-gray-700 hover:bg-gray-100'
-                            }`}
+                              }`}
                           >
                             <span className="flex items-center gap-2">
                               <span
-                                className={`w-3.5 h-3.5 rounded-${isSingle ? 'full' : 'sm'} border flex items-center justify-center ${
-                                  active
+                                className={`w-3.5 h-3.5 rounded-${isSingle ? 'full' : 'sm'} border flex items-center justify-center ${active
                                     ? 'border-servora-core bg-servora-core text-white'
                                     : 'border-gray-300 bg-white'
-                                }`}
+                                  }`}
                               >
                                 {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                               </span>
@@ -2743,11 +2749,10 @@ export default function POSPage() {
                   {stationRoutingPreview.map((st) => (
                     <span
                       key={st.stationName}
-                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-mono font-bold border inline-flex items-center gap-1 ${
-                        st.isRedirected || st.isFailover
+                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-mono font-bold border inline-flex items-center gap-1 ${st.isRedirected || st.isFailover
                           ? 'bg-amber-50 text-amber-800 border-amber-200'
                           : 'bg-white text-servora-navy border-gray-200'
-                      }`}
+                        }`}
                     >
                       <ArrowRight size={10} className="text-servora-core" />
                       {st.stationName}: {st.unitsCount} item(s)
@@ -2764,11 +2769,10 @@ export default function POSPage() {
                   key={method}
                   type="button"
                   onClick={() => setPaymentMethod(method)}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
-                    paymentMethod === method
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${paymentMethod === method
                       ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
+                    }`}
                 >
                   {method}
                 </button>
@@ -2881,9 +2885,8 @@ export default function POSPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
           <div
             id="thermal-receipt-printable"
-            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
-              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
-            }`}
+            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
+              }`}
           >
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
               <div className="text-center space-y-0.5">
