@@ -1,12 +1,14 @@
 // apps/api/src/controllers/pricing.controller.ts
 import { Response } from 'express';
-import { eq, and, desc } from 'drizzle-orm';
-import { db } from '../config/db';
-import { menuItems, itemPricingRules } from '../config/schema';
+import { ZodError } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
-import { createPricingRuleSchema, bulkUpdatePricesSchema } from '../validators/pricing.validator';
+import * as pricingService from '../services/pricing.service';
+import {
+  createPricingRuleSchema,
+  updatePricingRuleSchema,
+  bulkUpdatePricesSchema,
+} from '../validators/pricing.validator';
 
-// 1. Get all menu items with their base prices and active pricing rules
 export const getPricingOverview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
@@ -15,46 +17,14 @@ export const getPricingOverview = async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const items = await db
-      .select({
-        id: menuItems.id,
-        name: menuItems.name,
-        price: menuItems.price,
-        isAvailable: menuItems.isAvailable,
-      })
-      .from(menuItems)
-      .where(eq(menuItems.tenantId, tenantId))
-      .orderBy(desc(menuItems.id));
-
-    const rules = await db
-      .select({
-        id: itemPricingRules.id,
-        menuItemId: itemPricingRules.menuItemId,
-        ruleName: itemPricingRules.ruleName,
-        ruleType: itemPricingRules.ruleType,
-        value: itemPricingRules.value,
-        startTime: itemPricingRules.startTime,
-        endTime: itemPricingRules.endTime,
-        daysOfWeek: itemPricingRules.daysOfWeek,
-        isActive: itemPricingRules.isActive,
-      })
-      .from(itemPricingRules)
-      .where(eq(itemPricingRules.tenantId, tenantId))
-      .orderBy(desc(itemPricingRules.createdAt));
-
-    const data = items.map((item) => ({
-      ...item,
-      rules: rules.filter((r) => r.menuItemId === item.id),
-    }));
-
+    const data = await pricingService.fetchTenantPricingOverview(tenantId);
     res.status(200).json({ status: 'success', data });
-  } catch (error: any) {
-    console.error('[Pricing Overview Error]:', error);
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch pricing data' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch pricing data';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
-// 2. Bulk update base item prices (instant inline edits)
 export const bulkUpdatePrices = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
@@ -64,73 +34,114 @@ export const bulkUpdatePrices = async (req: AuthRequest, res: Response): Promise
     }
 
     const { updates } = bulkUpdatePricesSchema.parse(req.body);
+    const result = await pricingService.saveBulkBasePrices(tenantId, updates);
 
-    await db.transaction(async (tx) => {
-      for (const update of updates) {
-        await tx
-          .update(menuItems)
-          .set({ price: update.price.toFixed(2), updatedAt: new Date() })
-          .where(and(eq(menuItems.id, update.id), eq(menuItems.tenantId, tenantId)));
-      }
+    res.status(200).json({
+      status: 'success',
+      message: `Updated ${result.updatedCount} base price(s) successfully.`,
+      data: result,
     });
-
-    res.status(200).json({ status: 'success', message: 'Prices updated successfully' });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to update base prices';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
-// 3. Create a dynamic price rule (Happy hour, surge, etc.)
 export const createPricingRule = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    const branchId = req.user?.defaultBranchId;
     if (!tenantId) {
       res.status(401).json({ status: 'error', message: 'Unauthorized' });
       return;
     }
 
     const payload = createPricingRuleSchema.parse(req.body);
-
-    const [rule] = await db
-      .insert(itemPricingRules)
-      .values({
-        tenantId,
-        branchId: branchId || null,
-        menuItemId: payload.menuItemId,
-        ruleName: payload.ruleName,
-        ruleType: payload.ruleType,
-        value: payload.value.toFixed(2),
-        startTime: payload.startTime || null,
-        endTime: payload.endTime || null,
-        daysOfWeek: payload.daysOfWeek || 'ALL',
-        isActive: payload.isActive ?? true,
-      })
-      .returning();
+    const branchId = req.user?.defaultBranchId ?? null;
+    const rule = await pricingService.registerPricingRule(tenantId, branchId, payload);
 
     res.status(201).json({ status: 'success', data: rule });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to create pricing rule';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
-// 4. Delete a pricing rule
-export const deletePricingRule = async (req: AuthRequest, res: Response): Promise<void> => {
+export const updatePricingRule = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    const { id } = req.params;
-
     if (!tenantId) {
       res.status(401).json({ status: 'error', message: 'Unauthorized' });
       return;
     }
 
-    await db
-      .delete(itemPricingRules)
-      .where(and(eq(itemPricingRules.id, Number(id)), eq(itemPricingRules.tenantId, tenantId)));
+    const ruleId = Number(req.params.id);
+    if (!Number.isInteger(ruleId) || ruleId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid pricing rule ID' });
+      return;
+    }
 
-    res.status(200).json({ status: 'success', message: 'Rule removed successfully' });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message });
+    const payload = updatePricingRuleSchema.parse(req.body);
+    const updated = await pricingService.modifyPricingRule(tenantId, ruleId, payload);
+
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Pricing rule not found' });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', data: updated });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to update pricing rule';
+    res.status(400).json({ status: 'error', message });
+  }
+};
+
+export const deletePricingRule = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized' });
+      return;
+    }
+
+    const ruleId = Number(req.params.id);
+    if (!Number.isInteger(ruleId) || ruleId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid pricing rule ID' });
+      return;
+    }
+
+    const deleted = await pricingService.removePricingRule(tenantId, ruleId);
+    if (!deleted) {
+      res.status(404).json({ status: 'error', message: 'Pricing rule not found' });
+      return;
+    }
+
+    res.status(200).json({ status: 'success', message: 'Pricing rule deleted successfully' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to delete pricing rule';
+    res.status(500).json({ status: 'error', message });
   }
 };
