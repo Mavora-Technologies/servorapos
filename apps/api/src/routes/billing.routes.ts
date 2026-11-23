@@ -1,3 +1,4 @@
+// apps/api/src/routes/billing.routes.ts
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import {
@@ -16,9 +17,9 @@ router.use(requireAuth);
 router.get('/', getBillingDetails);
 router.put('/subscription', putSubscription);
 router.get('/invoices', getInvoices);
+router.post('/invoices/settle', postSettleInvoice);
 router.post('/payment-methods', postPaymentMethod);
 router.delete('/payment-methods/:id', deletePaymentMethod);
 router.post('/payment-methods/:id/set-default', postSetDefaultPaymentMethod);
-router.post('/invoices/settle', postSettleInvoice);
 
 export default router;

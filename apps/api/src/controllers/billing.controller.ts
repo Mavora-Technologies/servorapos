@@ -1,6 +1,8 @@
+// apps/api/src/controllers/billing.controller.ts
 import { Response } from 'express';
+import { ZodError } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
-import * as billingRepo from '../repositories/billing.repository';
+import * as billingService from '../services/billing.service';
 import {
   updateSubscriptionPlanSchema,
   addPaymentMethodSchema,
@@ -16,10 +18,11 @@ export const getBillingDetails = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
-    const overview = await billingRepo.getBillingOverview(tenantId);
+    const overview = await billingService.fetchTenantBillingOverview(tenantId);
     res.status(200).json({ status: 'success', data: overview });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch billing details' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch billing details';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -32,20 +35,27 @@ export const putSubscription = async (req: AuthRequest, res: Response): Promise<
     }
 
     const input = updateSubscriptionPlanSchema.parse(req.body);
-    const updated = await billingRepo.updateTenantSubscription(tenantId, input);
+    const result = await billingService.saveTenantSubscription(tenantId, input);
 
     res.status(200).json({
       status: 'success',
-      data: updated,
-      message: 'Subscription plan and licensing allocation updated.',
+      data: result.subscription,
+      invoice: result.invoice,
+      message: result.invoice
+        ? `Subscription updated and invoice ${result.invoice.invoiceNumber} issued.`
+        : 'Subscription plan and licensing allocation updated.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      const detailed = error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ');
-      res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to update subscription' });
+    const message = error instanceof Error ? error.message : 'Failed to update subscription';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
@@ -58,20 +68,24 @@ export const getInvoices = async (req: AuthRequest, res: Response): Promise<void
     }
 
     const query = listInvoicesQuerySchema.parse(req.query);
-    const result = await billingRepo.listTenantInvoices(tenantId, query);
+    const result = await billingService.fetchTenantInvoices(tenantId, query);
 
     res.status(200).json({
       status: 'success',
       data: result.invoices,
       pagination: result.pagination,
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      const detailed = error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ');
-      res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid invoice filter query',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve invoices' });
+    const message = error instanceof Error ? error.message : 'Failed to retrieve invoices';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
@@ -84,54 +98,86 @@ export const postPaymentMethod = async (req: AuthRequest, res: Response): Promis
     }
 
     const input = addPaymentMethodSchema.parse(req.body);
-    const method = await billingRepo.addPaymentMethod(tenantId, input);
+    const method = await billingService.registerPaymentMethod(tenantId, input);
 
     res.status(201).json({
       status: 'success',
       data: method,
-      message: 'Payment method authorization token saved.',
+      message: 'Payment mandate registered successfully.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      const detailed = error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ');
-      res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to add payment method' });
+    const message = error instanceof Error ? error.message : 'Failed to add payment method';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const deletePaymentMethod = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    const methodId = parseInt(String(req.params.id), 10);
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
 
-    if (!tenantId || isNaN(methodId)) {
+    const methodId = Number(req.params.id);
+    if (!Number.isInteger(methodId) || methodId <= 0) {
       res.status(400).json({ status: 'error', message: 'Valid payment method ID required' });
       return;
     }
 
-    await billingRepo.deletePaymentMethod(tenantId, methodId);
+    const deleted = await billingService.removePaymentMethod(tenantId, methodId);
+    if (!deleted) {
+      res.status(404).json({ status: 'error', message: 'Payment method mandate not found' });
+      return;
+    }
+
     res.status(200).json({ status: 'success', message: 'Payment method removed.' });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to delete payment method' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to delete payment method';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
-export const postSetDefaultPaymentMethod = async (req: AuthRequest, res: Response): Promise<void> => {
+export const postSetDefaultPaymentMethod = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    const methodId = parseInt(String(req.params.id), 10);
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
 
-    if (!tenantId || isNaN(methodId)) {
+    const methodId = Number(req.params.id);
+    if (!Number.isInteger(methodId) || methodId <= 0) {
       res.status(400).json({ status: 'error', message: 'Valid payment method ID required' });
       return;
     }
 
-    const updated = await billingRepo.setDefaultPaymentMethod(tenantId, methodId);
-    res.status(200).json({ status: 'success', data: updated, message: 'Default payment method set.' });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to set default payment method' });
+    const updated = await billingService.markDefaultPaymentMethod(tenantId, methodId);
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Payment method mandate not found' });
+      return;
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: updated,
+      message: 'Primary payment mandate updated.',
+    });
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : 'Failed to update default payment method';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
@@ -144,19 +190,28 @@ export const postSettleInvoice = async (req: AuthRequest, res: Response): Promis
     }
 
     const input = settleInvoiceSchema.parse(req.body);
-    const settled = await billingRepo.settleInvoice(tenantId, input);
+    const settled = await billingService.processInvoiceSettlement(tenantId, input);
+
+    if (!settled) {
+      res.status(404).json({ status: 'error', message: 'Invoice not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       data: settled,
       message: `Invoice ${settled.invoiceNumber} marked as settled.`,
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      const detailed = error.errors.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ');
-      res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to settle invoice' });
+    const message = error instanceof Error ? error.message : 'Failed to settle invoice';
+    res.status(400).json({ status: 'error', message });
   }
 };
