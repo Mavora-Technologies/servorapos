@@ -9,6 +9,18 @@ const optionalPositiveInt = z.preprocess((val) => {
   return Number.isNaN(n) ? val : n;
 }, z.number().int().positive().optional());
 
+const optionalRatingNumber = z.preprocess((val) => {
+  if (val === undefined || val === null || val === '' || val === 'ALL') return undefined;
+  const n = Number(val);
+  return Number.isNaN(n) ? val : n;
+}, z.number().min(1).max(5).optional());
+
+const optionalFilterString = z
+  .string()
+  .trim()
+  .transform((v) => (v === '' || v === 'ALL' ? undefined : v))
+  .optional();
+
 const optionalDateStr = z
   .string()
   .trim()
@@ -30,24 +42,19 @@ const goalSchema = z.object({
 });
 
 export const listReviewsQuerySchema = z.object({
-  cycle: z
-    .string()
-    .trim()
-    .transform((v) => (v === '' || v === 'ALL' ? undefined : v))
-    .optional(),
+  cycle: optionalFilterString,
+  role: optionalFilterString,
   userId: optionalPositiveInt,
   branchId: optionalPositiveInt,
-  status: z
-    .string()
-    .trim()
-    .transform((v) => (v === '' || v === 'ALL' ? undefined : v))
-    .optional(),
+  status: optionalFilterString,
+  minRating: optionalRatingNumber,
   startDate: optionalDateStr,
   endDate: optionalDateStr,
 });
 
 export const telemetryQuerySchema = z.object({
   branchId: optionalPositiveInt,
+  role: optionalFilterString,
   startDate: optionalDateStr,
   endDate: optionalDateStr,
 });
@@ -83,6 +90,9 @@ export const createReviewSchema = z
   });
 
 export const updateReviewSchema = z.object({
+  reviewCycle: z.enum(['MONTHLY', 'QUARTERLY', 'BIANNUAL', 'ANNUAL']).optional(),
+  periodStart: z.string().regex(dateRegex).optional(),
+  periodEnd: z.string().regex(dateRegex).optional(),
   overallRating: z.coerce.number().min(1).max(5).optional(),
   totalSalesGenerated: z.coerce.number().min(0).optional(),
   salesTarget: z.coerce.number().min(0).optional(),

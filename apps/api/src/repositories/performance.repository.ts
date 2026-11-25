@@ -10,6 +10,7 @@ import {
   inArray,
   notInArray,
   or,
+  isNull,
   type SQL,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
@@ -18,9 +19,11 @@ import {
   staffPerformanceReviews,
   users,
   branches,
+  roles,
   userBranchMemberships,
   orders,
   refunds,
+  cashierShifts,
   attendanceRecords,
   customerFeedback,
   tenantFinancialSettings,
@@ -36,9 +39,11 @@ export interface PerformanceAuditActor {
 
 export interface ScopedPerformanceFilters {
   cycle?: string;
+  role?: string;
   userId?: number;
-  effectiveBranchIds: number[] | null; // null = all tenant branches
+  effectiveBranchIds: number[] | null;
   status?: string;
+  minRating?: number;
   startDate?: string;
   endDate?: string;
 }
@@ -46,6 +51,7 @@ export interface ScopedPerformanceFilters {
 export interface ScopedTelemetryFilters {
   authorizedBranchIds: number[] | null;
   effectiveBranchIds: number[] | null;
+  role?: string;
   startDate?: string;
   endDate?: string;
 }
@@ -72,8 +78,12 @@ export const listPerformanceReviews = async (
   const conditions: SQL[] = [eq(staffPerformanceReviews.tenantId, tenantId)];
 
   if (filters.cycle) conditions.push(eq(staffPerformanceReviews.reviewCycle, filters.cycle));
+  if (filters.role) conditions.push(eq(users.role, filters.role));
   if (filters.userId) conditions.push(eq(staffPerformanceReviews.userId, filters.userId));
   if (filters.status) conditions.push(eq(staffPerformanceReviews.status, filters.status));
+  if (filters.minRating !== undefined) {
+    conditions.push(sql`${staffPerformanceReviews.overallRating}::numeric >= ${filters.minRating}`);
+  }
   if (filters.startDate) {
     conditions.push(gte(staffPerformanceReviews.periodStart, filters.startDate));
   }
@@ -81,7 +91,6 @@ export const listPerformanceReviews = async (
     conditions.push(lte(staffPerformanceReviews.periodEnd, filters.endDate));
   }
 
-  // Scope reviews to employees assigned to the manager's authorized/filtered branches
   if (filters.effectiveBranchIds !== null) {
     if (filters.effectiveBranchIds.length === 0) return [];
     const memberSubquery = db
@@ -163,7 +172,9 @@ export const findReviewById = async (tenantId: number, reviewId: number) => {
 };
 
 /**
- * 100% Live Operational Staff KPI Telemetry from POS Orders, Refunds, Attendance & Customer Feedback.
+ * 360-Degree Live Operational KPI Telemetry:
+ * Orders (Sales, ATV, Discounts, Voids), Refunds, Cashier Shifts (Cash Variance),
+ * Attendance (Hours, Overtime, Punctuality), Guest CSAT, and Multi-Branch Productivity Matrix.
  */
 export const getLiveStaffTelemetry = async (
   tenantId: number,
@@ -173,6 +184,9 @@ export const getLiveStaffTelemetry = async (
   const endTs = parseEndTs(filters.endDate);
 
   const staffConditions: SQL[] = [eq(users.tenantId, tenantId), eq(users.isActive, true)];
+  if (filters.role) {
+    staffConditions.push(eq(users.role, filters.role));
+  }
   if (filters.effectiveBranchIds !== null) {
     if (filters.effectiveBranchIds.length === 0) {
       staffConditions.push(sql`FALSE`);
@@ -213,8 +227,10 @@ export const getLiveStaffTelemetry = async (
   const [
     staffList,
     authorizedBranches,
+    tenantRoles,
     orderStatsRows,
     refundStatsRows,
+    shiftVarianceRows,
     attendanceRows,
     feedbackRows,
     [finSettings],
@@ -246,11 +262,20 @@ export const getLiveStaffTelemetry = async (
       .where(and(...branchDropdownConditions))
       .orderBy(desc(branches.isMainBranch), asc(branches.name)),
 
-    // 1. Real POS Orders attributed to cashierId / waiterId
+    db
+      .select({ id: roles.id, name: roles.name, slug: roles.slug })
+      .from(roles)
+      .where(
+        or(eq(roles.tenantId, tenantId), and(eq(roles.isSystemRole, true), isNull(roles.tenantId)))
+      )
+      .orderBy(asc(roles.name)),
+
+    // 1. Real POS Orders (Sales, Discounts, Completed, Cancelled)
     db
       .select({
         staffId: sql<number>`COALESCE(${orders.cashierId}, ${orders.waiterId})`,
         totalSales: sql<number>`coalesce(sum(case when ${orders.status} not in ('Cancelled', 'Draft') then ${orders.total}::numeric else 0 end), 0)::float`,
+        discountTotal: sql<number>`coalesce(sum(case when ${orders.status} not in ('Cancelled', 'Draft') then ${orders.discountTotal}::numeric else 0 end), 0)::float`,
         completedOrders: sql<number>`count(case when ${orders.status} not in ('Cancelled', 'Draft') then 1 end)::int`,
         cancelledOrders: sql<number>`count(case when ${orders.status} = 'Cancelled' then 1 end)::int`,
       })
@@ -266,7 +291,7 @@ export const getLiveStaffTelemetry = async (
       )
       .groupBy(sql`COALESCE(${orders.cashierId}, ${orders.waiterId})`),
 
-    // 2. Real Refunds processed per operator
+    // 2. Real Refunds
     db
       .select({
         staffId: refunds.processedById,
@@ -285,13 +310,32 @@ export const getLiveStaffTelemetry = async (
       )
       .groupBy(refunds.processedById),
 
-    // 3. Real Attendance punctuality & hours worked
+    // 3. Real Cashier Shift Cash Variances
+    db
+      .select({
+        cashierId: cashierShifts.cashierId,
+        closedShifts: sql<number>`count(case when ${cashierShifts.status} = 'CLOSED' then 1 end)::int`,
+        netCashVariance: sql<number>`coalesce(sum(case when ${cashierShifts.status} = 'CLOSED' then coalesce(${cashierShifts.variance}::numeric, 0) else 0 end), 0)::float`,
+      })
+      .from(cashierShifts)
+      .where(
+        and(
+          eq(cashierShifts.tenantId, tenantId),
+          gte(cashierShifts.openedAt, startTs),
+          lte(cashierShifts.openedAt, endTs),
+          branchFilter(cashierShifts.branchId)
+        )
+      )
+      .groupBy(cashierShifts.cashierId),
+
+    // 4. Real Attendance (Punctuality, Hours, Overtime)
     db
       .select({
         userId: attendanceRecords.userId,
         totalShifts: sql<number>`count(*)::int`,
         onTimeShifts: sql<number>`count(case when ${attendanceRecords.verificationStatus} = 'VERIFIED' then 1 end)::int`,
         totalMinutes: sql<number>`coalesce(sum(${attendanceRecords.totalDurationMinutes}), 0)::int`,
+        overtimeHours: sql<number>`coalesce(sum(${attendanceRecords.overtimeHours}::numeric), 0)::float`,
       })
       .from(attendanceRecords)
       .where(
@@ -304,7 +348,7 @@ export const getLiveStaffTelemetry = async (
       )
       .groupBy(attendanceRecords.userId),
 
-    // 4. Real Guest Feedback / CSAT ratings attributed to staff
+    // 5. Real Guest Feedback / CSAT
     db
       .select({
         staffId: customerFeedback.staffId,
@@ -335,26 +379,36 @@ export const getLiveStaffTelemetry = async (
 
   const orderMap = new Map(orderStatsRows.map((o) => [Number(o.staffId), o]));
   const refundMap = new Map(refundStatsRows.map((r) => [Number(r.staffId), r.refundCount]));
+  const shiftVarMap = new Map(shiftVarianceRows.map((s) => [s.cashierId, s]));
   const attMap = new Map(attendanceRows.map((a) => [a.userId, a]));
   const fbMap = new Map(feedbackRows.map((f) => [Number(f.staffId), f]));
 
   const telemetry = staffList.map((member) => {
     const ord = orderMap.get(member.id);
     const refundCount = refundMap.get(member.id) ?? 0;
+    const sv = shiftVarMap.get(member.id);
     const att = attMap.get(member.id);
     const fb = fbMap.get(member.id);
 
     const totalSales = Number((ord?.totalSales ?? 0).toFixed(2));
+    const discountTotal = Number((ord?.discountTotal ?? 0).toFixed(2));
     const completedOrders = ord?.completedOrders ?? 0;
     const cancelledOrders = ord?.cancelledOrders ?? 0;
     const averageTicketValue =
       completedOrders > 0 ? Number((totalSales / completedOrders).toFixed(2)) : 0;
+    const discountRatePct =
+      totalSales + discountTotal > 0
+        ? Number(((discountTotal / (totalSales + discountTotal)) * 100).toFixed(1))
+        : 0;
 
     const totalShifts = att?.totalShifts ?? 0;
     const onTimeShifts = att?.onTimeShifts ?? 0;
     const attendanceScore =
       totalShifts > 0 ? Math.round((onTimeShifts / totalShifts) * 100) : null;
     const hoursWorked = Number(((att?.totalMinutes ?? 0) / 60).toFixed(1));
+    const overtimeHours = Number((att?.overtimeHours ?? 0).toFixed(1));
+    const salesPerLaborHour =
+      hoursWorked > 0 ? Number((totalSales / hoursWorked).toFixed(2)) : 0;
 
     return {
       userId: member.id,
@@ -364,22 +418,101 @@ export const getLiveStaffTelemetry = async (
       branchName: member.branchName || 'Unassigned',
       branchCode: member.branchCode || '',
       totalSales,
+      discountTotal,
+      discountRatePct,
       completedOrders,
       averageTicketValue,
       voidRefundCount: cancelledOrders + refundCount,
+      netCashVariance: Number((sv?.netCashVariance ?? 0).toFixed(2)),
+      closedTillShifts: sv?.closedShifts ?? 0,
       attendanceScore,
       shiftsWorked: totalShifts,
       hoursWorked,
+      overtimeHours,
+      salesPerLaborHour,
       csatRating: fb && fb.feedbackCount > 0 ? Number(fb.avgRating.toFixed(1)) : null,
       csatCount: fb?.feedbackCount ?? 0,
     };
   });
 
+  // Aggregate Branch-by-Branch Workforce Productivity Matrix
+  const branchAggMap = new Map<
+    number,
+    {
+      branchId: number;
+      branchName: string;
+      branchCode: string;
+      headcount: number;
+      totalSales: number;
+      totalOrders: number;
+      totalHoursWorked: number;
+      totalOvertimeHours: number;
+      netCashVariance: number;
+      voidRefundCount: number;
+      csatWeightedSum: number;
+      csatCount: number;
+    }
+  >();
+
+  for (const b of authorizedBranches) {
+    branchAggMap.set(b.id, {
+      branchId: b.id,
+      branchName: b.name,
+      branchCode: b.code,
+      headcount: 0,
+      totalSales: 0,
+      totalOrders: 0,
+      totalHoursWorked: 0,
+      totalOvertimeHours: 0,
+      netCashVariance: 0,
+      voidRefundCount: 0,
+      csatWeightedSum: 0,
+      csatCount: 0,
+    });
+  }
+
+  for (const t of telemetry) {
+    if (!t.branchId) continue;
+    const agg = branchAggMap.get(t.branchId);
+    if (!agg) continue;
+    agg.headcount += 1;
+    agg.totalSales += t.totalSales;
+    agg.totalOrders += t.completedOrders;
+    agg.totalHoursWorked += t.hoursWorked;
+    agg.totalOvertimeHours += t.overtimeHours;
+    agg.netCashVariance += t.netCashVariance;
+    agg.voidRefundCount += t.voidRefundCount;
+    if (t.csatRating !== null && t.csatCount > 0) {
+      agg.csatWeightedSum += t.csatRating * t.csatCount;
+      agg.csatCount += t.csatCount;
+    }
+  }
+
+  const branchProductivity = Array.from(branchAggMap.values())
+    .map((b) => ({
+      branchId: b.branchId,
+      branchName: b.branchName,
+      branchCode: b.branchCode,
+      headcount: b.headcount,
+      totalSales: Number(b.totalSales.toFixed(2)),
+      totalOrders: b.totalOrders,
+      totalHoursWorked: Number(b.totalHoursWorked.toFixed(1)),
+      totalOvertimeHours: Number(b.totalOvertimeHours.toFixed(1)),
+      salesPerLaborHour:
+        b.totalHoursWorked > 0 ? Number((b.totalSales / b.totalHoursWorked).toFixed(2)) : 0,
+      netCashVariance: Number(b.netCashVariance.toFixed(2)),
+      voidRefundCount: b.voidRefundCount,
+      avgCsat: b.csatCount > 0 ? Number((b.csatWeightedSum / b.csatCount).toFixed(1)) : null,
+    }))
+    .sort((a, b) => b.totalSales - a.totalSales);
+
   return {
     currency: finSettings?.baseCurrency ?? 'KES',
     tipDistributionModel: finSettings?.tipDistributionModel ?? 'HOURS_WEIGHTED',
     branches: authorizedBranches,
+    roles: tenantRoles,
     telemetry,
+    branchProductivity,
   };
 };
 
@@ -393,8 +526,6 @@ export const createReviewTransaction = async (
     const [employee] = await tx
       .select({
         id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
         defaultBranchId: users.defaultBranchId,
         isActive: users.isActive,
       })
@@ -434,7 +565,8 @@ export const createReviewTransaction = async (
       tenantId,
       branchId: employee.defaultBranchId ?? null,
       userId: actor.userId,
-      action: 'STAFF_APPRAISAL_CREATED',
+      action:
+        created.status === 'DRAFT' ? 'STAFF_APPRAISAL_DRAFTED' : 'STAFF_APPRAISAL_CREATED',
       module: 'WORKFORCE_HCM',
       entityType: 'staff_performance_reviews',
       entityId: String(created.id),
@@ -494,6 +626,9 @@ export const updateReviewTransaction = async (
       updatedAt: new Date(),
     };
 
+    if (input.reviewCycle !== undefined) updateSet.reviewCycle = input.reviewCycle;
+    if (input.periodStart !== undefined) updateSet.periodStart = input.periodStart;
+    if (input.periodEnd !== undefined) updateSet.periodEnd = input.periodEnd;
     if (input.overallRating !== undefined) updateSet.overallRating = input.overallRating.toFixed(2);
     if (input.totalSalesGenerated !== undefined) {
       updateSet.totalSalesGenerated = input.totalSalesGenerated.toFixed(2);
@@ -525,6 +660,24 @@ export const updateReviewTransaction = async (
       )
       .returning();
 
+    // Notify employee when transitioning from DRAFT → SUBMITTED
+    if (existing.status === 'DRAFT' && updated.status === 'SUBMITTED') {
+      await tx.insert(notifications).values({
+        tenantId,
+        userId: updated.userId,
+        title: `New ${updated.reviewCycle} Performance Appraisal Ready`,
+        detail: `Your ${updated.reviewCycle.toLowerCase()} appraisal (${updated.periodStart} – ${updated.periodEnd}) has been published with an overall rating of ${updated.overallRating}/5.0.`,
+        severity: 'INFO',
+        module: 'WORKFORCE_HCM',
+        category: 'ACTION_REQUIRED',
+        entityType: 'staff_performance_reviews',
+        entityId: String(updated.id),
+        actionUrl: '/staff/performance',
+        isRead: false,
+        isResolved: false,
+      });
+    }
+
     await tx.insert(auditLogs).values({
       tenantId,
       branchId: null,
@@ -540,6 +693,50 @@ export const updateReviewTransaction = async (
     });
 
     return updated;
+  });
+};
+
+export const deleteDraftReviewTransaction = async (
+  tenantId: number,
+  reviewId: number,
+  actor: PerformanceAuditActor
+) => {
+  return await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(staffPerformanceReviews)
+      .where(
+        and(eq(staffPerformanceReviews.id, reviewId), eq(staffPerformanceReviews.tenantId, tenantId))
+      )
+      .limit(1);
+
+    if (!existing) return null;
+
+    if (existing.status !== 'DRAFT') {
+      throw new Error(
+        'Governance policy: Only DRAFT appraisals can be deleted. Submitted or finalized records are immutable.'
+      );
+    }
+
+    await tx
+      .delete(staffPerformanceReviews)
+      .where(
+        and(eq(staffPerformanceReviews.id, reviewId), eq(staffPerformanceReviews.tenantId, tenantId))
+      );
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: null,
+      userId: actor.userId,
+      action: 'STAFF_APPRAISAL_DRAFT_DELETED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'staff_performance_reviews',
+      entityId: String(reviewId),
+      previousValues: { userId: existing.userId, reviewCycle: existing.reviewCycle },
+      ipAddress: actor.ipAddress ?? null,
+    });
+
+    return { id: reviewId };
   });
 };
 

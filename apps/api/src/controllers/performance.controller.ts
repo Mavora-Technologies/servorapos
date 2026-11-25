@@ -183,3 +183,33 @@ export const postAcknowledge = async (req: AuthRequest, res: Response): Promise<
     res.status(400).json({ status: 'error', message });
   }
 };
+
+export const deleteReview = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const actor = getActor(req);
+    if (!actor) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const reviewId = Number(req.params.id);
+    if (!Number.isInteger(reviewId) || reviewId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid review identifier' });
+      return;
+    }
+
+    const deleted = await perfService.removeDraftAppraisal(actor, reviewId);
+    if (!deleted) {
+      res.status(404).json({ status: 'error', message: 'Appraisal draft not found' });
+      return;
+    }
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Draft appraisal deleted successfully.',
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to delete draft appraisal';
+    res.status(400).json({ status: 'error', message });
+  }
+};

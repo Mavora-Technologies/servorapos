@@ -46,9 +46,11 @@ export const fetchPerformanceReviews = async (
   const { effectiveBranchIds } = await resolveBranchScope(actor, query.branchId);
   return await perfRepo.listPerformanceReviews(actor.tenantId, {
     cycle: query.cycle,
+    role: query.role,
     userId: query.userId,
     effectiveBranchIds,
     status: query.status,
+    minRating: query.minRating,
     startDate: query.startDate,
     endDate: query.endDate,
   });
@@ -65,8 +67,26 @@ export const fetchLiveTelemetry = async (
   return await perfRepo.getLiveStaffTelemetry(actor.tenantId, {
     authorizedBranchIds,
     effectiveBranchIds,
+    role: query.role,
     startDate: query.startDate,
     endDate: query.endDate,
+  });
+};
+
+export const removeDraftAppraisal = async (
+  actor: PerformanceActorContext,
+  reviewId: number
+) => {
+  const existing = await perfRepo.findReviewById(actor.tenantId, reviewId);
+  if (!existing) return null;
+
+  if (existing.employeeDefaultBranchId) {
+    await resolveBranchScope(actor, existing.employeeDefaultBranchId);
+  }
+
+  return await perfRepo.deleteDraftReviewTransaction(actor.tenantId, reviewId, {
+    userId: actor.userId,
+    ipAddress: actor.ipAddress,
   });
 };
 
