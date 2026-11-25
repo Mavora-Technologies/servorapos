@@ -1,279 +1,721 @@
-import { eq, and, gte, lte, sql, desc, asc } from 'drizzle-orm';
-import { db } from '../config/db';
-import { workSchedules, shiftTemplates, users, branches, roles } from '../config/schema';
+// apps/api/src/repositories/schedule.repository.ts
 import {
+  eq,
+  and,
+  gte,
+  lte,
+  ne,
+  asc,
+  desc,
+  inArray,
+  or,
+  isNull,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import { db } from '../config/db';
+import {
+  workSchedules,
+  shiftTemplates,
+  users,
+  branches,
+  roles,
+  userBranchMemberships,
+  tenantFinancialSettings,
+  auditLogs,
+} from '../config/schema';
+import type {
   CreateScheduleInput,
   UpdateScheduleInput,
   CreateTemplateInput,
 } from '../validators/schedule.validator';
 
-export interface RosterFilters {
-  weekStart: string; // "YYYY-MM-DD"
-  weekEnd: string;   // "YYYY-MM-DD"
-  branchId?: number;
+export interface ScheduleAuditActor {
+  userId: number;
+  ipAddress?: string | null;
+}
+
+export interface ScopedRosterFilters {
+  weekStart: string;
+  weekEnd: string;
+  authorizedBranchIds: number[] | null; // null = all tenant branches
+  effectiveBranchIds: number[] | null;  // active filter slice
   role?: string;
 }
 
-export const getWeeklyRoster = async (tenantId: number, filters: RosterFilters) => {
-  const conditions = [
+function toMinuteInterval(startTime: string, endTime: string): [number, number] {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  const start = sh * 60 + sm;
+  let end = eh * 60 + em;
+  if (end <= start) end += 24 * 60; // Overnight shift
+  return [start, end];
+}
+
+function intervalsOverlap(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string
+): boolean {
+  const [s1, e1] = toMinuteInterval(aStart, aEnd);
+  const [s2, e2] = toMinuteInterval(bStart, bEnd);
+  return s1 < e2 && e1 > s2;
+}
+
+function addDaysToIsoDate(isoDate: string, days: number): string {
+  const [y, m, d] = isoDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  return dt.toISOString().split('T')[0];
+}
+
+export const getWeeklyRoster = async (tenantId: number, filters: ScopedRosterFilters) => {
+  const shiftConditions: SQL[] = [
     eq(workSchedules.tenantId, tenantId),
     gte(workSchedules.shiftDate, filters.weekStart),
     lte(workSchedules.shiftDate, filters.weekEnd),
-    ...(filters.branchId ? [eq(workSchedules.branchId, filters.branchId)] : []),
-    ...(filters.role && filters.role !== 'ALL' ? [eq(workSchedules.role, filters.role)] : []),
+    ne(workSchedules.status, 'CANCELLED'),
   ];
 
-  const shifts = await db
-    .select({
-      id: workSchedules.id,
-      shiftDate: workSchedules.shiftDate,
-      startTime: workSchedules.startTime,
-      endTime: workSchedules.endTime,
-      breakMinutes: workSchedules.breakMinutes,
-      role: workSchedules.role,
-      status: workSchedules.status,
-      hourlyWage: workSchedules.hourlyWage,
-      notes: workSchedules.notes,
-      templateId: workSchedules.templateId,
-      branchId: workSchedules.branchId,
-      branchName: branches.name,
-      branchCode: branches.code,
-      userId: workSchedules.userId,
-      userFirstName: users.firstName,
-      userLastName: users.lastName,
-      userEmail: users.email,
-    })
-    .from(workSchedules)
-    .innerJoin(users, eq(workSchedules.userId, users.id))
-    .innerJoin(branches, eq(workSchedules.branchId, branches.id))
-    .where(and(...conditions))
-    .orderBy(asc(workSchedules.shiftDate), asc(workSchedules.startTime));
+  if (filters.role) {
+    shiftConditions.push(eq(workSchedules.role, filters.role));
+  }
 
-  // Retrieve tenant staff roster and branches for matrix mapping
-  const [activeStaff, activeBranches, templates] = await Promise.all([
-    db
-      .select({
-        id: users.id,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        role: users.role,
-        defaultBranchId: users.defaultBranchId,
-      })
-      .from(users)
-      .where(and(eq(users.tenantId, tenantId), eq(users.isActive, true)))
-      .orderBy(asc(users.firstName)),
-    db
-      .select({
-        id: branches.id,
-        name: branches.name,
-        code: branches.code,
-      })
-      .from(branches)
-      .where(and(eq(branches.tenantId, tenantId), eq(branches.isActive, true))),
-    db
-      .select()
-      .from(shiftTemplates)
-      .where(eq(shiftTemplates.tenantId, tenantId))
-      .orderBy(asc(shiftTemplates.startTime)),
-  ]);
+  if (filters.effectiveBranchIds !== null) {
+    if (filters.effectiveBranchIds.length === 0) {
+      shiftConditions.push(sql`FALSE`);
+    } else {
+      shiftConditions.push(inArray(workSchedules.branchId, filters.effectiveBranchIds));
+    }
+  }
+
+  // Staff scope: active employees assigned to any branch in effectiveBranchIds
+  const staffConditions: SQL[] = [eq(users.tenantId, tenantId), eq(users.isActive, true)];
+  if (filters.role) {
+    staffConditions.push(eq(users.role, filters.role));
+  }
+  if (filters.effectiveBranchIds !== null) {
+    if (filters.effectiveBranchIds.length === 0) {
+      staffConditions.push(sql`FALSE`);
+    } else {
+      const memberSubquery = db
+        .select({ userId: userBranchMemberships.userId })
+        .from(userBranchMemberships)
+        .where(
+          and(
+            eq(userBranchMemberships.tenantId, tenantId),
+            eq(userBranchMemberships.isActive, true),
+            inArray(userBranchMemberships.branchId, filters.effectiveBranchIds)
+          )
+        );
+      const branchMatch = or(
+        inArray(users.defaultBranchId, filters.effectiveBranchIds),
+        inArray(users.id, memberSubquery)
+      );
+      if (branchMatch) staffConditions.push(branchMatch);
+    }
+  }
+
+  // Authorized branch dropdown (never narrowed by selected branchId)
+  const branchConditions: SQL[] = [eq(branches.tenantId, tenantId), eq(branches.isActive, true)];
+  if (filters.authorizedBranchIds !== null) {
+    if (filters.authorizedBranchIds.length === 0) {
+      branchConditions.push(sql`FALSE`);
+    } else {
+      branchConditions.push(inArray(branches.id, filters.authorizedBranchIds));
+    }
+  }
+
+  // Templates: global (branchId IS NULL) or scoped to authorized branches
+  const templateConditions: SQL[] = [eq(shiftTemplates.tenantId, tenantId)];
+  if (filters.authorizedBranchIds !== null) {
+    if (filters.authorizedBranchIds.length === 0) {
+      templateConditions.push(isNull(shiftTemplates.branchId));
+    } else {
+      const tplBranchMatch = or(
+        isNull(shiftTemplates.branchId),
+        inArray(shiftTemplates.branchId, filters.authorizedBranchIds)
+      );
+      if (tplBranchMatch) templateConditions.push(tplBranchMatch);
+    }
+  }
+
+  const [shifts, activeStaff, activeBranches, templates, tenantRoles, [finSettings]] =
+    await Promise.all([
+      db
+        .select({
+          id: workSchedules.id,
+          shiftDate: workSchedules.shiftDate,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+          breakMinutes: workSchedules.breakMinutes,
+          role: workSchedules.role,
+          status: workSchedules.status,
+          hourlyWage: workSchedules.hourlyWage,
+          notes: workSchedules.notes,
+          templateId: workSchedules.templateId,
+          branchId: workSchedules.branchId,
+          branchName: branches.name,
+          branchCode: branches.code,
+          userId: workSchedules.userId,
+          userFirstName: users.firstName,
+          userLastName: users.lastName,
+          userEmail: users.email,
+        })
+        .from(workSchedules)
+        .innerJoin(users, and(eq(workSchedules.userId, users.id), eq(users.tenantId, tenantId)))
+        .innerJoin(
+          branches,
+          and(eq(workSchedules.branchId, branches.id), eq(branches.tenantId, tenantId))
+        )
+        .where(and(...shiftConditions))
+        .orderBy(asc(workSchedules.shiftDate), asc(workSchedules.startTime)),
+
+      db
+        .select({
+          id: users.id,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          role: users.role,
+          defaultBranchId: users.defaultBranchId,
+        })
+        .from(users)
+        .where(and(...staffConditions))
+        .orderBy(asc(users.firstName), asc(users.lastName)),
+
+      db
+        .select({
+          id: branches.id,
+          name: branches.name,
+          code: branches.code,
+          isMainBranch: branches.isMainBranch,
+        })
+        .from(branches)
+        .where(and(...branchConditions))
+        .orderBy(desc(branches.isMainBranch), asc(branches.name)),
+
+      db
+        .select()
+        .from(shiftTemplates)
+        .where(and(...templateConditions))
+        .orderBy(asc(shiftTemplates.startTime)),
+
+      db
+        .select({
+          id: roles.id,
+          name: roles.name,
+          slug: roles.slug,
+        })
+        .from(roles)
+        .where(
+          or(eq(roles.tenantId, tenantId), and(eq(roles.isSystemRole, true), isNull(roles.tenantId)))
+        )
+        .orderBy(asc(roles.name)),
+
+      db
+        .select({
+          baseCurrency: tenantFinancialSettings.baseCurrency,
+          standardWorkWeekHours: tenantFinancialSettings.standardWorkWeekHours,
+          defaultOvertimeMultiplier: tenantFinancialSettings.defaultOvertimeMultiplier,
+        })
+        .from(tenantFinancialSettings)
+        .where(eq(tenantFinancialSettings.tenantId, tenantId))
+        .limit(1),
+    ]);
 
   return {
     shifts,
     staff: activeStaff,
     branches: activeBranches,
     templates,
+    roles: tenantRoles,
+    laborPolicy: {
+      currency: finSettings?.baseCurrency ?? 'KES',
+      standardWorkWeekHours: finSettings?.standardWorkWeekHours ?? 40,
+      overtimeMultiplier: parseFloat(finSettings?.defaultOvertimeMultiplier ?? '1.50') || 1.5,
+    },
   };
 };
 
-export const createScheduleEntry = async (tenantId: number, input: CreateScheduleInput) => {
-  // Overlap protection check: prevent scheduling the same user on overlapping shifts on the same day
-  const existingShifts = await db
-    .select()
-    .from(workSchedules)
-    .where(
-      and(
-        eq(workSchedules.tenantId, tenantId),
-        eq(workSchedules.userId, input.userId),
-        eq(workSchedules.shiftDate, input.shiftDate),
-        sql`${workSchedules.status} != 'CANCELLED'`
-      )
-    );
-
-  const newStart = input.startTime;
-  const newEnd = input.endTime;
-
-  const hasOverlap = existingShifts.some((s) => {
-    return (newStart < s.endTime && newEnd > s.startTime);
-  });
-
-  if (hasOverlap) {
-    throw new Error('Scheduling conflict: Employee already has an overlapping shift on this date.');
-  }
-
-  const [created] = await db
-    .insert(workSchedules)
-    .values({
-      tenantId,
-      branchId: input.branchId,
-      userId: input.userId,
-      templateId: input.templateId || null,
-      shiftDate: input.shiftDate,
-      startTime: input.startTime,
-      endTime: input.endTime,
-      breakMinutes: input.breakMinutes,
-      role: input.role,
-      hourlyWage: input.hourlyWage ? String(input.hourlyWage) : '0.00',
-      status: 'DRAFT',
-      notes: input.notes || null,
-    })
-    .returning();
-
-  return created;
-};
-
-export const updateScheduleEntry = async (
-  tenantId: number,
-  scheduleId: number,
-  input: UpdateScheduleInput
-) => {
-  const [existing] = await db
+export const findScheduleById = async (tenantId: number, scheduleId: number) => {
+  const [row] = await db
     .select()
     .from(workSchedules)
     .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
     .limit(1);
 
-  if (!existing) {
-    throw new Error('Shift schedule entry not found.');
-  }
-
-  const [updated] = await db
-    .update(workSchedules)
-    .set({
-      ...(input.userId ? { userId: input.userId } : {}),
-      ...(input.branchId ? { branchId: input.branchId } : {}),
-      ...(input.shiftDate ? { shiftDate: input.shiftDate } : {}),
-      ...(input.startTime ? { startTime: input.startTime } : {}),
-      ...(input.endTime ? { endTime: input.endTime } : {}),
-      ...(input.breakMinutes !== undefined ? { breakMinutes: input.breakMinutes } : {}),
-      ...(input.role ? { role: input.role } : {}),
-      ...(input.hourlyWage !== undefined ? { hourlyWage: String(input.hourlyWage) } : {}),
-      ...(input.status ? { status: input.status } : {}),
-      ...(input.notes !== undefined ? { notes: input.notes } : {}),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
-    .returning();
-
-  return updated;
+  return row ?? null;
 };
 
-export const deleteScheduleEntry = async (tenantId: number, scheduleId: number) => {
-  const [deleted] = await db
-    .delete(workSchedules)
-    .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
-    .returning();
+export const createScheduleTransaction = async (
+  tenantId: number,
+  input: CreateScheduleInput,
+  actor: ScheduleAuditActor
+) => {
+  return await db.transaction(async (tx) => {
+    const [[staffRow], [branchRow]] = await Promise.all([
+      tx
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(eq(users.id, input.userId), eq(users.tenantId, tenantId), eq(users.isActive, true))
+        )
+        .limit(1),
+      tx
+        .select({ id: branches.id })
+        .from(branches)
+        .where(
+          and(
+            eq(branches.id, input.branchId),
+            eq(branches.tenantId, tenantId),
+            eq(branches.isActive, true)
+          )
+        )
+        .limit(1),
+    ]);
 
-  if (!deleted) {
-    throw new Error('Shift entry not found.');
-  }
+    if (!staffRow) throw new Error('Selected employee does not exist or is inactive.');
+    if (!branchRow) throw new Error('Selected branch does not exist or is inactive.');
 
-  return deleted;
+    const existingShifts = await tx
+      .select({
+        id: workSchedules.id,
+        startTime: workSchedules.startTime,
+        endTime: workSchedules.endTime,
+      })
+      .from(workSchedules)
+      .where(
+        and(
+          eq(workSchedules.tenantId, tenantId),
+          eq(workSchedules.userId, input.userId),
+          eq(workSchedules.shiftDate, input.shiftDate),
+          ne(workSchedules.status, 'CANCELLED')
+        )
+      );
+
+    const conflict = existingShifts.find((s) =>
+      intervalsOverlap(input.startTime, input.endTime, s.startTime, s.endTime)
+    );
+    if (conflict) {
+      throw new Error(
+        `Scheduling conflict: Employee already has an overlapping shift (${conflict.startTime}–${conflict.endTime}) on ${input.shiftDate}.`
+      );
+    }
+
+    const [created] = await tx
+      .insert(workSchedules)
+      .values({
+        tenantId,
+        branchId: input.branchId,
+        userId: input.userId,
+        templateId: input.templateId ?? null,
+        shiftDate: input.shiftDate,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        breakMinutes: input.breakMinutes,
+        role: input.role,
+        hourlyWage: (input.hourlyWage ?? 0).toFixed(2),
+        status: 'DRAFT',
+        notes: input.notes ?? null,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: created.branchId,
+      userId: actor.userId,
+      action: 'SHIFT_ALLOCATED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'work_schedules',
+      entityId: String(created.id),
+      newValues: {
+        userId: created.userId,
+        branchId: created.branchId,
+        shiftDate: created.shiftDate,
+        startTime: created.startTime,
+        endTime: created.endTime,
+        role: created.role,
+      },
+      ipAddress: actor.ipAddress ?? null,
+    });
+
+    return created;
+  });
 };
 
-export const publishWeek = async (tenantId: number, weekStart: string, branchId?: number) => {
-  const startDate = new Date(weekStart);
-  const endDate = new Date(startDate);
-  endDate.setDate(startDate.getDate() + 6);
+export const updateScheduleTransaction = async (
+  tenantId: number,
+  scheduleId: number,
+  input: UpdateScheduleInput,
+  actor: ScheduleAuditActor
+) => {
+  return await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(workSchedules)
+      .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
+      .limit(1);
 
-  const weekEndStr = endDate.toISOString().split('T')[0];
+    if (!existing) return null;
 
-  const conditions = [
-    eq(workSchedules.tenantId, tenantId),
-    gte(workSchedules.shiftDate, weekStart),
-    lte(workSchedules.shiftDate, weekEndStr),
-    eq(workSchedules.status, 'DRAFT'),
-    ...(branchId ? [eq(workSchedules.branchId, branchId)] : []),
-  ];
+    const nextUserId = input.userId ?? existing.userId;
+    const nextBranchId = input.branchId ?? existing.branchId;
+    const nextDate = input.shiftDate ?? existing.shiftDate;
+    const nextStart = input.startTime ?? existing.startTime;
+    const nextEnd = input.endTime ?? existing.endTime;
+    const nextStatus = input.status ?? existing.status;
 
-  const updated = await db
-    .update(workSchedules)
-    .set({ status: 'PUBLISHED', updatedAt: new Date() })
-    .where(and(...conditions))
-    .returning();
+    if (nextStart === nextEnd) {
+      throw new Error('Start time and end time cannot be identical.');
+    }
 
-  return { publishedCount: updated.length };
+    if (input.userId && input.userId !== existing.userId) {
+      const [staffRow] = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(
+          and(eq(users.id, input.userId), eq(users.tenantId, tenantId), eq(users.isActive, true))
+        )
+        .limit(1);
+      if (!staffRow) throw new Error('Selected employee does not exist or is inactive.');
+    }
+
+    if (input.branchId && input.branchId !== existing.branchId) {
+      const [branchRow] = await tx
+        .select({ id: branches.id })
+        .from(branches)
+        .where(
+          and(
+            eq(branches.id, input.branchId),
+            eq(branches.tenantId, tenantId),
+            eq(branches.isActive, true)
+          )
+        )
+        .limit(1);
+      if (!branchRow) throw new Error('Selected branch does not exist or is inactive.');
+    }
+
+    if (nextStatus !== 'CANCELLED') {
+      const siblingShifts = await tx
+        .select({
+          id: workSchedules.id,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+        })
+        .from(workSchedules)
+        .where(
+          and(
+            eq(workSchedules.tenantId, tenantId),
+            eq(workSchedules.userId, nextUserId),
+            eq(workSchedules.shiftDate, nextDate),
+            ne(workSchedules.id, scheduleId),
+            ne(workSchedules.status, 'CANCELLED')
+          )
+        );
+
+      const conflict = siblingShifts.find((s) =>
+        intervalsOverlap(nextStart, nextEnd, s.startTime, s.endTime)
+      );
+      if (conflict) {
+        throw new Error(
+          `Scheduling conflict: Employee already has an overlapping shift (${conflict.startTime}–${conflict.endTime}) on ${nextDate}.`
+        );
+      }
+    }
+
+    const [updated] = await tx
+      .update(workSchedules)
+      .set({
+        userId: nextUserId,
+        branchId: nextBranchId,
+        shiftDate: nextDate,
+        startTime: nextStart,
+        endTime: nextEnd,
+        breakMinutes: input.breakMinutes ?? existing.breakMinutes,
+        role: input.role ?? existing.role,
+        hourlyWage:
+          input.hourlyWage !== undefined ? input.hourlyWage.toFixed(2) : existing.hourlyWage,
+        status: nextStatus,
+        notes: input.notes !== undefined ? input.notes : existing.notes,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: updated.branchId,
+      userId: actor.userId,
+      action: 'SHIFT_UPDATED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'work_schedules',
+      entityId: String(updated.id),
+      previousValues: {
+        shiftDate: existing.shiftDate,
+        startTime: existing.startTime,
+        endTime: existing.endTime,
+        branchId: existing.branchId,
+        status: existing.status,
+      },
+      newValues: {
+        shiftDate: updated.shiftDate,
+        startTime: updated.startTime,
+        endTime: updated.endTime,
+        branchId: updated.branchId,
+        status: updated.status,
+      },
+      ipAddress: actor.ipAddress ?? null,
+    });
+
+    return updated;
+  });
 };
 
-export const copyWeekRoster = async (
+export const deleteScheduleTransaction = async (
+  tenantId: number,
+  scheduleId: number,
+  actor: ScheduleAuditActor
+) => {
+  return await db.transaction(async (tx) => {
+    const [deleted] = await tx
+      .delete(workSchedules)
+      .where(and(eq(workSchedules.id, scheduleId), eq(workSchedules.tenantId, tenantId)))
+      .returning();
+
+    if (!deleted) return null;
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: deleted.branchId,
+      userId: actor.userId,
+      action: 'SHIFT_DELETED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'work_schedules',
+      entityId: String(deleted.id),
+      previousValues: {
+        userId: deleted.userId,
+        shiftDate: deleted.shiftDate,
+        startTime: deleted.startTime,
+        endTime: deleted.endTime,
+      },
+      ipAddress: actor.ipAddress ?? null,
+    });
+
+    return deleted;
+  });
+};
+
+export const publishWeekTransaction = async (
+  tenantId: number,
+  weekStart: string,
+  effectiveBranchIds: number[] | null,
+  actor: ScheduleAuditActor
+) => {
+  const weekEnd = addDaysToIsoDate(weekStart, 6);
+
+  return await db.transaction(async (tx) => {
+    const conditions: SQL[] = [
+      eq(workSchedules.tenantId, tenantId),
+      gte(workSchedules.shiftDate, weekStart),
+      lte(workSchedules.shiftDate, weekEnd),
+      eq(workSchedules.status, 'DRAFT'),
+    ];
+
+    if (effectiveBranchIds !== null) {
+      if (effectiveBranchIds.length === 0) return { publishedCount: 0 };
+      conditions.push(inArray(workSchedules.branchId, effectiveBranchIds));
+    }
+
+    const updated = await tx
+      .update(workSchedules)
+      .set({ status: 'PUBLISHED', updatedAt: new Date() })
+      .where(and(...conditions))
+      .returning({ id: workSchedules.id, branchId: workSchedules.branchId });
+
+    if (updated.length > 0) {
+      await tx.insert(auditLogs).values({
+        tenantId,
+        branchId: effectiveBranchIds?.length === 1 ? effectiveBranchIds[0] : null,
+        userId: actor.userId,
+        action: 'ROSTER_WEEK_PUBLISHED',
+        module: 'WORKFORCE_HCM',
+        entityType: 'work_schedules',
+        entityId: weekStart,
+        newValues: { weekStart, weekEnd, publishedCount: updated.length },
+        ipAddress: actor.ipAddress ?? null,
+      });
+    }
+
+    return { publishedCount: updated.length };
+  });
+};
+
+export const copyWeekTransaction = async (
   tenantId: number,
   fromWeekStart: string,
   toWeekStart: string,
-  branchId?: number
+  effectiveBranchIds: number[] | null,
+  actor: ScheduleAuditActor
 ) => {
-  const fromStart = new Date(fromWeekStart);
-  const fromEnd = new Date(fromStart);
-  fromEnd.setDate(fromStart.getDate() + 6);
-  const fromEndStr = fromEnd.toISOString().split('T')[0];
+  const fromWeekEnd = addDaysToIsoDate(fromWeekStart, 6);
+  const toWeekEnd = addDaysToIsoDate(toWeekStart, 6);
 
-  const toStart = new Date(toWeekStart);
+  return await db.transaction(async (tx) => {
+    const sourceConditions: SQL[] = [
+      eq(workSchedules.tenantId, tenantId),
+      gte(workSchedules.shiftDate, fromWeekStart),
+      lte(workSchedules.shiftDate, fromWeekEnd),
+      ne(workSchedules.status, 'CANCELLED'),
+    ];
 
-  const sourceShifts = await db
-    .select()
-    .from(workSchedules)
-    .where(
-      and(
-        eq(workSchedules.tenantId, tenantId),
-        gte(workSchedules.shiftDate, fromWeekStart),
-        lte(workSchedules.shiftDate, fromEndStr),
-        ...(branchId ? [eq(workSchedules.branchId, branchId)] : [])
-      )
-    );
+    const targetConditions: SQL[] = [
+      eq(workSchedules.tenantId, tenantId),
+      gte(workSchedules.shiftDate, toWeekStart),
+      lte(workSchedules.shiftDate, toWeekEnd),
+      ne(workSchedules.status, 'CANCELLED'),
+    ];
 
-  if (sourceShifts.length === 0) {
-    throw new Error('No shifts found in the source week to copy.');
-  }
+    if (effectiveBranchIds !== null) {
+      if (effectiveBranchIds.length === 0) {
+        return { copiedCount: 0, skippedConflicts: 0 };
+      }
+      sourceConditions.push(inArray(workSchedules.branchId, effectiveBranchIds));
+      targetConditions.push(inArray(workSchedules.branchId, effectiveBranchIds));
+    }
 
-  const newRecords = sourceShifts.map((shift) => {
-    const shiftDate = new Date(shift.shiftDate);
-    const dayOffset = Math.round((shiftDate.getTime() - fromStart.getTime()) / (1000 * 60 * 60 * 24));
-    
-    const targetDate = new Date(toStart);
-    targetDate.setDate(toStart.getDate() + dayOffset);
-    const targetDateStr = targetDate.toISOString().split('T')[0];
+    const [sourceShifts, existingTargetShifts] = await Promise.all([
+      tx
+        .select()
+        .from(workSchedules)
+        .where(and(...sourceConditions)),
+      tx
+        .select({
+          userId: workSchedules.userId,
+          shiftDate: workSchedules.shiftDate,
+          startTime: workSchedules.startTime,
+          endTime: workSchedules.endTime,
+        })
+        .from(workSchedules)
+        .where(and(...targetConditions)),
+    ]);
 
-    return {
-      tenantId,
-      branchId: shift.branchId,
-      userId: shift.userId,
-      templateId: shift.templateId,
-      shiftDate: targetDateStr,
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      breakMinutes: shift.breakMinutes,
-      role: shift.role,
-      hourlyWage: shift.hourlyWage,
-      status: 'DRAFT',
-      notes: shift.notes,
-    };
+    if (sourceShifts.length === 0) {
+      throw new Error('No active shifts found in the source week to copy.');
+    }
+
+    const fromStartMs = Date.parse(`${fromWeekStart}T00:00:00.000Z`);
+    const toInsert: Array<typeof workSchedules.$inferInsert> = [];
+    let skippedConflicts = 0;
+
+    for (const shift of sourceShifts) {
+      const shiftMs = Date.parse(`${shift.shiftDate}T00:00:00.000Z`);
+      const dayOffset = Math.round((shiftMs - fromStartMs) / (1000 * 60 * 60 * 24));
+      const targetDate = addDaysToIsoDate(toWeekStart, dayOffset);
+
+      const hasConflict = existingTargetShifts.some(
+        (t) =>
+          t.userId === shift.userId &&
+          t.shiftDate === targetDate &&
+          intervalsOverlap(shift.startTime, shift.endTime, t.startTime, t.endTime)
+      );
+
+      if (hasConflict) {
+        skippedConflicts += 1;
+        continue;
+      }
+
+      toInsert.push({
+        tenantId,
+        branchId: shift.branchId,
+        userId: shift.userId,
+        templateId: shift.templateId,
+        shiftDate: targetDate,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        breakMinutes: shift.breakMinutes,
+        role: shift.role,
+        hourlyWage: shift.hourlyWage,
+        status: 'DRAFT',
+        notes: shift.notes,
+      });
+    }
+
+    const inserted =
+      toInsert.length > 0 ? await tx.insert(workSchedules).values(toInsert).returning() : [];
+
+    if (inserted.length > 0) {
+      await tx.insert(auditLogs).values({
+        tenantId,
+        branchId: effectiveBranchIds?.length === 1 ? effectiveBranchIds[0] : null,
+        userId: actor.userId,
+        action: 'ROSTER_WEEK_COPIED',
+        module: 'WORKFORCE_HCM',
+        entityType: 'work_schedules',
+        entityId: toWeekStart,
+        newValues: {
+          fromWeekStart,
+          toWeekStart,
+          copiedCount: inserted.length,
+          skippedConflicts,
+        },
+        ipAddress: actor.ipAddress ?? null,
+      });
+    }
+
+    return { copiedCount: inserted.length, skippedConflicts };
   });
-
-  const inserted = await db.insert(workSchedules).values(newRecords).returning();
-  return { copiedCount: inserted.length };
 };
 
-export const createShiftPreset = async (tenantId: number, input: CreateTemplateInput) => {
-  const [created] = await db
-    .insert(shiftTemplates)
-    .values({
-      tenantId,
-      branchId: input.branchId || null,
-      name: input.name,
-      startTime: input.startTime,
-      endTime: input.endTime,
-      breakMinutes: input.breakMinutes,
-      colorHex: input.colorHex,
-    })
-    .returning();
+export const createShiftTemplateTransaction = async (
+  tenantId: number,
+  input: CreateTemplateInput,
+  actor: ScheduleAuditActor
+) => {
+  return await db.transaction(async (tx) => {
+    if (input.branchId) {
+      const [branchRow] = await tx
+        .select({ id: branches.id })
+        .from(branches)
+        .where(
+          and(
+            eq(branches.id, input.branchId),
+            eq(branches.tenantId, tenantId),
+            eq(branches.isActive, true)
+          )
+        )
+        .limit(1);
+      if (!branchRow) throw new Error('Selected branch does not exist or is inactive.');
+    }
 
-  return created;
+    const [created] = await tx
+      .insert(shiftTemplates)
+      .values({
+        tenantId,
+        branchId: input.branchId ?? null,
+        name: input.name,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        breakMinutes: input.breakMinutes,
+        colorHex: input.colorHex,
+      })
+      .returning();
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: created.branchId,
+      userId: actor.userId,
+      action: 'SHIFT_TEMPLATE_CREATED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'shift_templates',
+      entityId: String(created.id),
+      newValues: {
+        name: created.name,
+        startTime: created.startTime,
+        endTime: created.endTime,
+      },
+      ipAddress: actor.ipAddress ?? null,
+    });
+
+    return created;
+  });
 };
