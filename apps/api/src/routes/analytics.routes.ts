@@ -2,10 +2,15 @@
 import { Router } from 'express';
 import { getDashboardAnalytics } from '../controllers/analytics.controller';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requirePermission } from '../middleware/rbac.middleware';
 
 const router = Router();
 router.use(requireAuth);
 
-router.get('/dashboard', getDashboardAnalytics);
+router.get(
+  '/dashboard',
+  requirePermission(['reports.view', 'settings.view']),
+  getDashboardAnalytics
+);
 
 export default router;
