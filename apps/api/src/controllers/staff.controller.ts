@@ -1,165 +1,198 @@
+// apps/api/src/controllers/staff.controller.ts
 import { Response } from 'express';
+import { ZodError } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
-import * as staffRepo from '../repositories/staff.repository';
+import * as staffService from '../services/staff.service';
 import {
+  listStaffQuerySchema,
   createStaffSchema,
   updateStaffSchema,
   resetPinSchema,
   toggleStaffStatusSchema,
 } from '../validators/staff.validator';
 
+function getActorContext(req: AuthRequest) {
+  const user = req.user;
+  if (!user?.tenantId || !user?.userId) return null;
+  return {
+    tenantId: user.tenantId,
+    userId: user.userId,
+    role: user.role,
+    ipAddress: req.ip || null,
+  };
+}
+
 export const getStaffRoster = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const actor = getActorContext(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    const { search, branchId, role, isActive } = req.query;
+    const filters = listStaffQuerySchema.parse(req.query);
+    const data = await staffService.getStaffRosterDirectory(actor, filters);
 
-    // Safely extract scalar string values from req.query
-    const searchStr = typeof search === 'string' ? search : undefined;
-    const branchIdNum = typeof branchId === 'string' ? parseInt(branchId, 10) : undefined;
-    const roleStr = typeof role === 'string' ? role : undefined;
-    const isActiveBool = typeof isActive === 'string' ? isActive === 'true' : undefined;
-
-    const { staff, roles } = await staffRepo.listStaffByTenant(tenantId, {
-      search: searchStr,
-      branchId: branchIdNum && !isNaN(branchIdNum) ? branchIdNum : undefined,
-      role: roleStr,
-      isActive: isActiveBool,
-    });
-
-    const metrics = {
-      totalStaff: staff.length,
-      activeStaff: staff.filter((s) => s.isActive).length,
-      inactiveStaff: staff.filter((s) => !s.isActive).length,
-      posPinEnrolled: staff.filter((s) => s.hasPin).length,
-      branchCoverage: new Set(staff.map((s) => s.defaultBranchId).filter(Boolean)).size,
-    };
-
-    res.status(200).json({
-      status: 'success',
-      data: {
-        metrics,
-        staff,
-        roles,
-      },
-    });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch staff roster' });
+    res.status(200).json({ status: 'success', data });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid filter parameters',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to fetch staff roster';
+    res.status(500).json({ status: 'error', message });
   }
 };
 
 export const createStaff = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const actor = getActorContext(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
     const payload = createStaffSchema.parse(req.body);
-    const newStaff = await staffRepo.createStaffMember(tenantId, payload);
+    const newStaff = await staffService.provisionEmployee(actor, payload);
 
     res.status(201).json({
       status: 'success',
       data: newStaff,
-      message: 'Employee successfully registered and provisioned',
+      message: 'Employee successfully provisioned.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      res.status(400).json({ status: 'error', errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to register employee' });
+    const message = error instanceof Error ? error.message : 'Failed to register employee';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const updateStaff = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const staffId = parseInt(String(req.params.id), 10);
-
-    if (!tenantId) {
+    const actor = getActorContext(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    if (isNaN(staffId)) {
+    const staffId = Number(req.params.id);
+    if (!Number.isInteger(staffId) || staffId <= 0) {
       res.status(400).json({ status: 'error', message: 'Invalid employee identifier' });
       return;
     }
 
     const payload = updateStaffSchema.parse(req.body);
-    const updated = await staffRepo.updateStaffMember(tenantId, staffId, payload);
+    const updated = await staffService.modifyEmployee(actor, staffId, payload);
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Employee record not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       data: updated,
-      message: 'Employee profile updated successfully',
+      message: 'Employee profile updated successfully.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      res.status(400).json({ status: 'error', errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to update employee' });
+    const message = error instanceof Error ? error.message : 'Failed to update employee';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const toggleStaffStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const staffId = parseInt(String(req.params.id), 10);
-
-    if (!tenantId) {
-      res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    const actor = getActorContext(req);
+    if (!actor) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    if (isNaN(staffId)) {
+    const staffId = Number(req.params.id);
+    if (!Number.isInteger(staffId) || staffId <= 0) {
       res.status(400).json({ status: 'error', message: 'Invalid employee identifier' });
       return;
     }
 
-    const { isActive } = toggleStaffStatusSchema.parse(req.body);
-    const updated = await staffRepo.updateStaffMember(tenantId, staffId, { isActive });
+    const { isActive, reason } = toggleStaffStatusSchema.parse(req.body);
+    const updated = await staffService.setEmployeeStatus(actor, staffId, isActive, reason);
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Employee record not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       data: updated,
-      message: `Employee account ${isActive ? 'activated' : 'deactivated'} successfully`,
+      message: `Employee account ${isActive ? 'activated' : 'suspended'} successfully.`,
     });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to update status';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const resetStaffPin = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const staffId = parseInt(String(req.params.id), 10);
-
-    if (!tenantId) {
-      res.status(401).json({ status: 'error', message: 'Unauthorized' });
+    const actor = getActorContext(req);
+    if (!actor) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    if (isNaN(staffId)) {
+    const staffId = Number(req.params.id);
+    if (!Number.isInteger(staffId) || staffId <= 0) {
       res.status(400).json({ status: 'error', message: 'Invalid employee identifier' });
       return;
     }
 
     const { pin } = resetPinSchema.parse(req.body);
-    const result = await staffRepo.setStaffPin(tenantId, staffId, pin);
+    const result = await staffService.resetEmployeePin(actor, staffId, pin);
+    if (!result) {
+      res.status(404).json({ status: 'error', message: 'Employee record not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
-      message: result.message,
+      message: 'POS Quick PIN updated successfully.',
     });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid PIN format',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to reset PIN';
+    res.status(400).json({ status: 'error', message });
   }
 };

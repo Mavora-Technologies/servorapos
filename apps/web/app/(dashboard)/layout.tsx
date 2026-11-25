@@ -214,19 +214,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setBranches(activeOnly);
           localStorage.setItem('servora_cached_branches', JSON.stringify(activeOnly));
 
+          if (activeOnly.length <= 1) {
+            setIsBranchDropdownOpen(false);
+          }
+
           const savedBranchId = localStorage.getItem('servora_active_branch_id');
-          if (savedBranchId) {
-            const found = activeOnly.find((b: BranchRecord) => String(b.id) === savedBranchId);
-            if (found) {
-              setActiveBranchId(found.id);
-              setActiveBranchName(found.name);
-            } else if (activeOnly.length > 0) {
-              // Saved branch is no longer authorized or active — fall back cleanly
-              setActiveBranchId(activeOnly[0].id);
-              setActiveBranchName(activeOnly[0].name);
-              localStorage.setItem('servora_active_branch_id', String(activeOnly[0].id));
-              localStorage.setItem('servora_active_branch_name', activeOnly[0].name);
-            }
+          const found = savedBranchId
+            ? activeOnly.find((b: BranchRecord) => String(b.id) === savedBranchId)
+            : null;
+
+          if (found) {
+            setActiveBranchId(found.id);
+            setActiveBranchName(found.name);
+          } else if (activeOnly.length > 0) {
+            setActiveBranchId(activeOnly[0].id);
+            setActiveBranchName(activeOnly[0].name);
+            localStorage.setItem('servora_active_branch_id', String(activeOnly[0].id));
+            localStorage.setItem('servora_active_branch_name', activeOnly[0].name);
           }
         }
 
