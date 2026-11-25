@@ -48,6 +48,7 @@ interface StaffOption {
   lastName: string;
   role: string;
   defaultBranchId: number | null;
+  assignedBranchIds: number[];
 }
 
 interface BranchOption {
@@ -255,6 +256,50 @@ export default function StaffSchedulesPage() {
     };
   }, [loadRoster]);
 
+  const authorizedBranches = rosterData?.branches ?? [];
+
+  const getEligibleBranchesForStaff = useCallback(
+    (staff?: StaffOption | null): BranchOption[] => {
+      if (!staff) return authorizedBranches;
+      const allowedSet = new Set(staff.assignedBranchIds ?? []);
+      return authorizedBranches.filter((b) => allowedSet.has(b.id));
+    },
+    [authorizedBranches]
+  );
+
+  const resolveDefaultBranchForStaff = useCallback(
+    (staff?: StaffOption | null): string => {
+      const eligible = getEligibleBranchesForStaff(staff);
+      if (eligible.length === 0) return '';
+
+      // 1. Respect active single-branch rota filter if the employee has clearance there
+      if (selectedBranchId !== 'ALL') {
+        const matchFilter = eligible.find((b) => String(b.id) === selectedBranchId);
+        if (matchFilter) return String(matchFilter.id);
+      }
+
+      // 2. Otherwise default to the employee's Home Branch (defaultBranchId)
+      if (staff?.defaultBranchId) {
+        const matchHome = eligible.find((b) => b.id === staff.defaultBranchId);
+        if (matchHome) return String(matchHome.id);
+      }
+
+      // 3. Fallback to first assigned branch
+      return String(eligible[0].id);
+    },
+    [getEligibleBranchesForStaff, selectedBranchId]
+  );
+
+  const selectedModalStaff = useMemo(
+    () => rosterData?.staff.find((s) => String(s.id) === formData.userId) ?? null,
+    [rosterData?.staff, formData.userId]
+  );
+
+  const modalEligibleBranches = useMemo(
+    () => getEligibleBranchesForStaff(selectedModalStaff),
+    [getEligibleBranchesForStaff, selectedModalStaff]
+  );
+
   const handlePrevWeek = () => {
     const prev = new Date(currentMonday);
     prev.setDate(currentMonday.getDate() - 7);
@@ -275,14 +320,7 @@ export default function StaffSchedulesPage() {
     setFormError(null);
 
     const defaultStaff = rosterData?.staff.find((s) => s.id === userId) || rosterData?.staff[0];
-    const defaultBranch =
-      selectedBranchId !== 'ALL'
-        ? selectedBranchId
-        : defaultStaff?.defaultBranchId
-          ? String(defaultStaff.defaultBranchId)
-          : rosterData?.branches[0]?.id
-            ? String(rosterData.branches[0].id)
-            : '';
+    const defaultBranch = resolveDefaultBranchForStaff(defaultStaff);
 
     setFormData({
       userId: userId ? String(userId) : defaultStaff ? String(defaultStaff.id) : '',
@@ -303,9 +341,16 @@ export default function StaffSchedulesPage() {
     if (!canManageStaff) return;
     setEditingShift(shift);
     setFormError(null);
+
+    const targetStaff = rosterData?.staff.find((s) => s.id === shift.userId) ?? null;
+    const eligible = getEligibleBranchesForStaff(targetStaff);
+    const hasCurrentBranchClearance = eligible.some((b) => b.id === shift.branchId);
+
     setFormData({
       userId: String(shift.userId),
-      branchId: String(shift.branchId),
+      branchId: hasCurrentBranchClearance
+        ? String(shift.branchId)
+        : resolveDefaultBranchForStaff(targetStaff),
       shiftDate: shift.shiftDate,
       startTime: shift.startTime,
       endTime: shift.endTime,
@@ -316,6 +361,17 @@ export default function StaffSchedulesPage() {
       notes: shift.notes || '',
     });
     setIsShiftModalOpen(true);
+  };
+
+  const handleModalStaffChange = (nextUserId: string) => {
+    const chosen = rosterData?.staff.find((s) => String(s.id) === nextUserId) ?? null;
+    const nextBranchId = resolveDefaultBranchForStaff(chosen);
+    setFormData((prev) => ({
+      ...prev,
+      userId: nextUserId,
+      branchId: nextBranchId,
+      role: chosen?.role || prev.role,
+    }));
   };
 
   const handleApplyTemplate = (template: ShiftTemplateOption) => {
@@ -513,8 +569,6 @@ export default function StaffSchedulesPage() {
         .length,
     };
   }, [rosterData?.shifts, staffRosterMatrix]);
-
-  const authorizedBranches = rosterData?.branches ?? [];
 
   return (
     <div className="space-y-6 pb-12 font-sans">
@@ -938,7 +992,7 @@ export default function StaffSchedulesPage() {
                   {editingShift ? 'Edit Shift Allocation' : 'Allocate New Shift'}
                 </h3>
                 <p className="text-[11px] text-gray-400">
-                  Configure timing, outlet, role clearance, and hourly rate
+                  Scoped strictly to outlets cleared on the employee&apos;s profile
                 </p>
               </div>
               <button
@@ -987,15 +1041,7 @@ export default function StaffSchedulesPage() {
                 <select
                   required
                   value={formData.userId}
-                  onChange={(e) => {
-                    const nextId = e.target.value;
-                    const chosen = rosterData?.staff.find((s) => String(s.id) === nextId);
-                    setFormData((prev) => ({
-                      ...prev,
-                      userId: nextId,
-                      role: chosen?.role || prev.role,
-                    }));
-                  }}
+                  onChange={(e) => handleModalStaffChange(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-bold focus:outline-none focus:border-servora-core cursor-pointer"
                 >
                   <option value="">Select Employee...</option>
@@ -1016,14 +1062,21 @@ export default function StaffSchedulesPage() {
                     required
                     value={formData.branchId}
                     onChange={(e) => setFormData({ ...formData, branchId: e.target.value })}
-                    className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-bold focus:outline-none focus:border-servora-core cursor-pointer"
+                    disabled={modalEligibleBranches.length === 0}
+                    className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-bold focus:outline-none focus:border-servora-core cursor-pointer disabled:opacity-60"
                   >
-                    <option value="">Select Location...</option>
-                    {authorizedBranches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.code})
-                      </option>
-                    ))}
+                    {modalEligibleBranches.length === 0 ? (
+                      <option value="">No cleared outlets</option>
+                    ) : (
+                      modalEligibleBranches.map((b) => {
+                        const isHome = selectedModalStaff?.defaultBranchId === b.id;
+                        return (
+                          <option key={b.id} value={b.id}>
+                            {b.name} ({b.code}){isHome ? ' • Home' : ''}
+                          </option>
+                        );
+                      })
+                    )}
                   </select>
                 </div>
                 <div>
@@ -1039,6 +1092,17 @@ export default function StaffSchedulesPage() {
                   />
                 </div>
               </div>
+
+              {selectedModalStaff && modalEligibleBranches.length === 0 && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-[11px] font-medium">
+                  <strong>{selectedModalStaff.firstName}</strong> has no assigned outlet clearances
+                  in your scope. Assign a branch in the{' '}
+                  <Link href="/staff" className="underline font-bold text-servora-core">
+                    Employee Directory
+                  </Link>{' '}
+                  first.
+                </div>
+              )}
 
               <div className="grid grid-cols-3 gap-2.5">
                 <div>
@@ -1148,7 +1212,7 @@ export default function StaffSchedulesPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || modalEligibleBranches.length === 0 || !formData.branchId}
                   className="flex-1 py-2.5 bg-servora-core text-white font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Saving...' : 'Save Shift'}
@@ -1311,7 +1375,7 @@ export default function StaffSchedulesPage() {
               {confirmAction === 'PUBLISH'
                 ? 'All unpublished draft shifts in this view will become live and visible to assigned staff.'
                 : confirmAction === 'COPY'
-                  ? 'Active shifts from the previous week will be replicated as Drafts into this week. Existing conflicting shifts will be skipped automatically.'
+                  ? 'Active shifts from the previous week will be replicated as Drafts into this week. Conflicting or un-cleared shifts will be skipped automatically.'
                   : 'This shift allocation will be permanently removed from the weekly rota.'}
             </p>
             <div className="flex gap-2 pt-2">
