@@ -1,7 +1,7 @@
 // apps/web/components/auth/LoginClient.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { fetchApi } from '@/lib/api';
+import { resolveSafeRedirectPath } from '@/lib/rbac';
 
 const loginSchema = z.object({
   email: z.string().trim().email('Please enter a valid email address'),
@@ -17,10 +18,31 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
+interface AuthenticatedUserPayload {
+  id: number;
+  firstName: string;
+  lastName: string;
+  fullName?: string;
+  email: string;
+  role: string;
+  permissions?: string[];
+}
+
+interface WorkspacePayload {
+  user: AuthenticatedUserPayload;
+  business: { id: number; name: string };
+  branch?: { id: number; name: string; code: string } | null;
+}
+
 interface LoginApiResponse {
   data?: {
     token?: string;
+    user?: AuthenticatedUserPayload;
   };
+}
+
+interface AuthMeApiResponse {
+  data?: WorkspacePayload;
 }
 
 const CAPABILITY_PILLS = [
@@ -34,6 +56,7 @@ function getFriendlyErrorMessage(error: unknown): string {
     const lower = error.message.toLowerCase();
     if (
       lower.includes('failed to fetch') ||
+      lower.includes('unable to connect') ||
       lower.includes('network') ||
       lower.includes('timeout')
     ) {
@@ -53,10 +76,19 @@ function getFriendlyErrorMessage(error: unknown): string {
   return "We couldn't sign you in right now. Please try again.";
 }
 
+function clearPreviousTerminalSession(): void {
+  localStorage.removeItem('servora_token');
+  localStorage.removeItem('servora_active_branch_id');
+  localStorage.removeItem('servora_active_branch_name');
+  localStorage.removeItem('servora_cached_workspace');
+  localStorage.removeItem('servora_cached_branches');
+}
+
 export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isNewlyRegistered = searchParams.get('registered') === 'true';
+  const requestedRedirect = searchParams.get('next') || searchParams.get('redirect');
 
   const [serverError, setServerError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,12 +103,48 @@ export default function LoginClient() {
     mode: 'onBlur',
   });
 
+  // If an operator is already signed in, route them directly to their authorized workspace
+  useEffect(() => {
+    const existingToken = localStorage.getItem('servora_token');
+    if (!existingToken) return;
+
+    let cancelled = false;
+
+    const resumeSession = async () => {
+      try {
+        const meRes = (await fetchApi('/api/v1/auth/me')) as AuthMeApiResponse;
+        if (cancelled) return;
+
+        if (meRes?.data?.user) {
+          localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
+          const destination = resolveSafeRedirectPath(
+            requestedRedirect,
+            meRes.data.user.permissions,
+            meRes.data.user.role
+          );
+          router.replace(destination);
+        }
+      } catch {
+        // Stale or revoked token — clear silently and keep login form visible
+        clearPreviousTerminalSession();
+      }
+    };
+
+    void resumeSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [router, requestedRedirect]);
+
   const onSubmit = async (data: LoginFormValues) => {
     if (isLoading) return;
     setIsLoading(true);
     setServerError(null);
 
     try {
+      // Clear any previous operator's cached workspace/branch context on shared POS terminals
+      clearPreviousTerminalSession();
+
       const result = (await fetchApi('/api/v1/auth/login', {
         method: 'POST',
         body: JSON.stringify({
@@ -91,8 +159,36 @@ export default function LoginClient() {
       }
 
       localStorage.setItem('servora_token', token);
-      router.push('/dashboard');
+
+      // Hydrate authoritative live RBAC permissions & default branch before routing
+      let userRole = result.data?.user?.role;
+      let userPermissions = result.data?.user?.permissions;
+
+      try {
+        const meRes = (await fetchApi('/api/v1/auth/me')) as AuthMeApiResponse;
+        if (meRes?.data?.user) {
+          userRole = meRes.data.user.role;
+          userPermissions = meRes.data.user.permissions;
+          localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
+
+          if (meRes.data.branch?.id) {
+            localStorage.setItem('servora_active_branch_id', String(meRes.data.branch.id));
+            localStorage.setItem('servora_active_branch_name', meRes.data.branch.name);
+          }
+        }
+      } catch {
+        // Fallback to login payload role/permissions if /me temporarily fails
+      }
+
+      const targetRoute = resolveSafeRedirectPath(
+        requestedRedirect,
+        userPermissions,
+        userRole
+      );
+
+      router.replace(targetRoute);
     } catch (error: unknown) {
+      clearPreviousTerminalSession();
       setServerError(getFriendlyErrorMessage(error));
     } finally {
       setIsLoading(false);
@@ -225,7 +321,7 @@ export default function LoginClient() {
               Welcome Back
             </h2>
             <p className="text-xs sm:text-sm text-servora-deepTeal mt-1.5 leading-relaxed">
-              Sign in to access your hospitality management dashboard.
+              Sign in to open your role-authorized Servora workspace.
             </p>
           </div>
 
@@ -247,7 +343,7 @@ export default function LoginClient() {
               <div>
                 <p className="font-bold">Workspace created successfully.</p>
                 <p className="mt-0.5 text-emerald-800">
-                  Sign in with your business email and password to open your dashboard.
+                  Sign in with your business email and password to open your workspace.
                 </p>
               </div>
             </div>

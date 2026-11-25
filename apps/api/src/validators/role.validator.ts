@@ -1,3 +1,4 @@
+// apps/api/src/validators/role.validator.ts
 import { z } from 'zod';
 
 export interface PermissionDefinition {
@@ -52,21 +53,48 @@ export const ENTERPRISE_PERMISSIONS_CATALOG: PermissionDefinition[] = [
   { id: 'settings.manage', label: 'Modify Company Architecture', description: 'Can alter tax settings, eTIMS, and hardware integrations', domain: 'SYSTEM', isSensitive: true },
 ];
 
+const VALID_PERMISSION_IDS = new Set<string>(ENTERPRISE_PERMISSIONS_CATALOG.map((p) => p.id));
+
+const permissionsArraySchema = z
+  .array(z.string().trim().min(1))
+  .transform((arr) => Array.from(new Set(arr)))
+  .refine(
+    (arr) => arr.every((p) => VALID_PERMISSION_IDS.has(p)),
+    'One or more permission identifiers are not in the enterprise permissions catalog.'
+  );
+
 export const createRoleSchema = z.object({
-  name: z.string().trim().min(2, 'Role name must be at least 2 characters'),
+  name: z.string().trim().min(2, 'Role name must be at least 2 characters').max(100),
   slug: z
     .string()
     .trim()
     .min(2)
-    .regex(/^[A-Z0-9_]+$/, 'Slug must be uppercase alphanumeric with underscores (e.g. SHIFT_SUPERVISOR)'),
-  description: z.string().trim().optional().nullable(),
-  permissions: z.array(z.string()).default([]),
+    .max(100)
+    .transform((s) => s.toUpperCase())
+    .refine(
+      (s) => /^[A-Z0-9_]+$/.test(s),
+      'Slug must be uppercase alphanumeric with underscores (e.g. SHIFT_SUPERVISOR)'
+    ),
+  description: z
+    .string()
+    .trim()
+    .max(500)
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  permissions: permissionsArraySchema.default([]),
 });
 
 export const updateRoleSchema = z.object({
-  name: z.string().trim().min(2).optional(),
-  description: z.string().trim().optional().nullable(),
-  permissions: z.array(z.string()).optional(),
+  name: z.string().trim().min(2).max(100).optional(),
+  description: z
+    .string()
+    .trim()
+    .max(500)
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  permissions: permissionsArraySchema.optional(),
 });
 
 export type CreateRoleInput = z.infer<typeof createRoleSchema>;

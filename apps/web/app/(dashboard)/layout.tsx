@@ -23,6 +23,12 @@ import {
 } from 'lucide-react';
 import Sidebar from './Sidebar';
 import { fetchApi, ApiError } from '@/lib/api';
+import {
+  canAccessRoute,
+  getRequiredPermissionsForPath,
+  getDefaultLandingRoute,
+  getLandingRouteLabel,
+} from '@/lib/rbac';
 
 interface UserProfile {
   id: number;
@@ -65,144 +71,12 @@ interface BranchSwitchedDetail {
   branchCode?: string;
 }
 
-// Comprehensive Route-to-Permission Mapping (Sorted automatically from most specific to least specific)
-const ROUTE_PERMISSIONS: Record<string, string> = {
-  // Mission Control & Terminals
-  '/dashboard': 'dashboard.view',
-  '/pos': 'pos.access',
-
-  // Front-of-House & Guest Service
-  '/orders/open': 'orders.view',
-  '/orders/takeaway': 'orders.view',
-  '/orders/delivery': 'delivery.view',
-  '/orders': 'orders.view',
-  '/online-orders': 'orders.view',
-  '/tables': 'tables.view',
-  '/reservations/waitlist': 'reservations.view',
-  '/reservations': 'reservations.view',
-
-  // Kitchen Operations (KDS)
-  '/kitchen/stations': 'kitchen.manage',
-  '/kitchen/history': 'kitchen.view',
-  '/kitchen/performance': 'reports.view',
-  '/kitchen': 'kitchen.view',
-
-  // Menu & Recipe Engineering
-  '/menu/categories': 'menu.manage',
-  '/menu/items': 'menu.view',
-  '/menu/modifiers': 'menu.manage',
-  '/menu/combos': 'menu.manage',
-  '/menu/pricing': 'menu.manage',
-  '/menu/availability': 'menu.manage',
-  '/menu/recipes/costing': 'recipes.view',
-  '/menu/recipes/units': 'inventory.manage',
-  '/menu/recipes': 'recipes.view',
-  '/menu': 'menu.view',
-
-  // Inventory & Logistics
-  '/inventory/items': 'inventory.view',
-  '/inventory/movements': 'inventory.view',
-  '/inventory/counts': 'inventory.manage',
-  '/inventory/transfers/fleet': 'inventory.manage',
-  '/inventory/transfers': 'inventory.manage',
-  '/inventory/locations': 'inventory.manage',
-  '/inventory/batches': 'inventory.view',
-  '/inventory/reorder': 'inventory.view',
-  '/inventory/waste': 'inventory.manage',
-  '/inventory': 'inventory.view',
-
-  // Procurement & Vendors
-  '/suppliers': 'suppliers.view',
-  '/purchasing/requests': 'purchasing.view',
-  '/purchasing/orders': 'purchasing.view',
-  '/purchasing/receiving': 'purchasing.receive',
-  '/purchasing/invoices': 'purchasing.view',
-  '/purchasing/returns': 'purchasing.manage',
-
-  // Treasury, Finance & Cash
-  '/payments/mpesa': 'payments.view',
-  '/payments/reconciliation': 'payments.reconcile',
-  '/payments/refunds': 'refunds.view',
-  '/payments': 'payments.view',
-  '/cash-management/drawers': 'cash.view',
-  '/cash-management/shifts': 'cash.view',
-  '/cash-management/reconciliation': 'cash.reconcile',
-  '/finance/expenses': 'finance.view',
-  '/finance/payables': 'finance.view',
-  '/finance/taxes': 'finance.manage',
-  '/finance/adjustments': 'finance.adjust',
-
-  // Guests & Loyalty
-  '/customers/feedback': 'customers.view',
-  '/customers': 'customers.view',
-  '/loyalty/transactions': 'loyalty.view',
-  '/loyalty/rewards': 'loyalty.manage',
-  '/loyalty': 'loyalty.view',
-  '/marketing/campaigns': 'marketing.manage',
-
-  // Executive Analytics & BI
-  '/reports/builder': 'reports.custom',
-  '/reports/exports': 'reports.export',
-  '/reports': 'reports.view',
-
-  // Servora Intelligence AI & Automations
-  '/ai-assistant': 'ai.use',
-  '/automations/runs': 'automations.view',
-  '/automations': 'automations.manage',
-  '/notifications': 'notifications.view',
-
-  // Staff & Shift Management
-  '/staff/roles': 'staff.manage',
-  '/staff/schedules': 'staff.view',
-  '/staff/attendance': 'staff.view',
-  '/staff/handover': 'staff.view',
-  '/staff/cashier-assignments': 'staff.manage',
-  '/staff/performance': 'reports.view',
-  '/staff/incidents': 'staff.manage',
-  '/staff': 'staff.view',
-
-  // Organization & Settings
-  '/settings/business': 'settings.view',
-  '/settings/branches': 'branches.view',
-  '/settings/financial': 'settings.manage',
-  '/settings/service-models': 'settings.manage',
-  '/settings/receipts': 'settings.manage',
-  '/settings/printers': 'settings.manage',
-  '/settings/kitchen': 'settings.manage',
-  '/settings/integrations': 'integrations.manage',
-  '/settings/notifications': 'settings.manage',
-  '/settings/audit-logs': 'audit.view',
-  '/settings/offline': 'settings.manage',
-  '/settings/devices': 'settings.manage',
-  '/settings/billing': 'billing.view',
-  '/settings/security': 'settings.security',
-  '/help': 'help.view',
-};
-
-function getRequiredPermissionForPath(pathname: string): string | null {
-  if (!pathname) return null;
-  const sortedRoutes = Object.keys(ROUTE_PERMISSIONS).sort((a, b) => b.length - a.length);
-  const matchedRoute = sortedRoutes.find(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
-  );
-  return matchedRoute ? ROUTE_PERMISSIONS[matchedRoute] : null;
-}
-
-function checkRouteAccess(pathname: string, permissions?: string[], role?: string): boolean {
-  if (
-    role === 'ADMIN' ||
-    role === 'SUPER_ADMIN' ||
-    (permissions && permissions.includes('*'))
-  ) {
-    return true;
-  }
-
-  if (!permissions) return true;
-
-  const requiredPerm = getRequiredPermissionForPath(pathname);
-  if (!requiredPerm) return true;
-
-  return permissions.includes(requiredPerm);
+function clearSessionStorage(): void {
+  localStorage.removeItem('servora_token');
+  localStorage.removeItem('servora_active_branch_id');
+  localStorage.removeItem('servora_active_branch_name');
+  localStorage.removeItem('servora_cached_workspace');
+  localStorage.removeItem('servora_cached_branches');
 }
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -251,7 +125,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Listen for branch changes from sidebar or shell
+  // Listen for branch changes from sidebar or child terminals (e.g. POS)
   useEffect(() => {
     const handleBranchSwitched = (e: Event) => {
       const detail = (e as CustomEvent<BranchSwitchedDetail>).detail;
@@ -269,7 +143,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   useEffect(() => {
     const token = localStorage.getItem('servora_token');
     if (!token) {
-      router.push('/login');
+      const currentPath =
+        typeof window !== 'undefined' ? window.location.pathname + window.location.search : '';
+      const nextParam =
+        currentPath && currentPath !== '/' ? `?next=${encodeURIComponent(currentPath)}` : '';
+      router.replace(`/login${nextParam}`);
       return;
     }
 
@@ -313,19 +191,41 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (meRes?.data) {
           setWorkspace(meRes.data);
           localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
-          setActiveBranchName(meRes.data.branch?.name || 'Main Branch');
-          setActiveBranchId(meRes.data.branch?.id || null);
+          if (!localStorage.getItem('servora_active_branch_id') && meRes.data.branch?.id) {
+            localStorage.setItem('servora_active_branch_id', String(meRes.data.branch.id));
+            localStorage.setItem('servora_active_branch_name', meRes.data.branch.name);
+            setActiveBranchId(meRes.data.branch.id);
+            setActiveBranchName(meRes.data.branch.name);
+          } else {
+            setActiveBranchName(
+              localStorage.getItem('servora_active_branch_name') ||
+                meRes.data.branch?.name ||
+                'Main Branch'
+            );
+            const storedId = localStorage.getItem('servora_active_branch_id');
+            setActiveBranchId(storedId ? Number(storedId) : meRes.data.branch?.id || null);
+          }
         }
 
         if (branchRes?.data && Array.isArray(branchRes.data)) {
-          setBranches(branchRes.data);
-          localStorage.setItem('servora_cached_branches', JSON.stringify(branchRes.data));
+          const activeOnly = branchRes.data.filter(
+            (b: BranchRecord) => b.isActive !== false
+          );
+          setBranches(activeOnly);
+          localStorage.setItem('servora_cached_branches', JSON.stringify(activeOnly));
+
           const savedBranchId = localStorage.getItem('servora_active_branch_id');
           if (savedBranchId) {
-            const found = branchRes.data.find((b: BranchRecord) => String(b.id) === savedBranchId);
+            const found = activeOnly.find((b: BranchRecord) => String(b.id) === savedBranchId);
             if (found) {
               setActiveBranchId(found.id);
               setActiveBranchName(found.name);
+            } else if (activeOnly.length > 0) {
+              // Saved branch is no longer authorized or active — fall back cleanly
+              setActiveBranchId(activeOnly[0].id);
+              setActiveBranchName(activeOnly[0].name);
+              localStorage.setItem('servora_active_branch_id', String(activeOnly[0].id));
+              localStorage.setItem('servora_active_branch_name', activeOnly[0].name);
             }
           }
         }
@@ -336,10 +236,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       } catch (error: unknown) {
         // Force logout only on a genuine 401 unauthorized response
         if (error instanceof ApiError && error.status === 401) {
-          localStorage.removeItem('servora_token');
-          localStorage.removeItem('servora_cached_workspace');
-          localStorage.removeItem('servora_cached_branches');
-          router.push('/login');
+          clearSessionStorage();
+          const currentPath =
+            typeof window !== 'undefined' ? window.location.pathname + window.location.search : '';
+          const nextParam =
+            currentPath && currentPath !== '/' ? `?next=${encodeURIComponent(currentPath)}` : '';
+          router.replace(`/login${nextParam}`);
           return;
         }
 
@@ -369,12 +271,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (!isAuthorized) return null;
 
   const handleLogout = () => {
-    localStorage.removeItem('servora_token');
-    localStorage.removeItem('servora_active_branch_id');
-    localStorage.removeItem('servora_active_branch_name');
-    localStorage.removeItem('servora_cached_workspace');
-    localStorage.removeItem('servora_cached_branches');
-    router.push('/login');
+    clearSessionStorage();
+    router.replace('/login');
   };
 
   const handleSelectBranchNode = (b: BranchRecord) => {
@@ -409,7 +307,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const toggleSidebarCollapse = () => setIsSidebarCollapsed((prev) => !prev);
 
   const getUserInitials = () => {
-    if (!workspace?.user) return 'JD';
+    if (!workspace?.user) return 'U';
     const first = workspace.user.firstName?.[0] || '';
     const last = workspace.user.lastName?.[0] || '';
     return `${first}${last}`.toUpperCase() || 'U';
@@ -426,8 +324,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname === '/menu') return 'Menu Catalog Master';
     if (pathname === '/menu/categories') return 'Category Architecture';
     if (pathname === '/menu/items') return 'Menu Items & Variations';
+    if (pathname === '/menu/modifiers') return 'Modifiers & Add-Ons';
+    if (pathname === '/menu/combos') return 'Combos & Meal Bundles';
+    if (pathname === '/menu/pricing') return 'Menu Pricing & Tariff Rules';
+    if (pathname === '/menu/availability') return 'Item Availability & Stock Controls';
     if (pathname === '/menu/recipes') return 'Standard Recipes & Bill of Materials';
     if (pathname === '/menu/recipes/costing') return 'Food Cost & Margin Matrix';
+    if (pathname === '/menu/recipes/units') return 'Measurement Units & Conversions';
     if (pathname === '/inventory') return 'Stock Valuation Ledger';
     if (pathname === '/inventory/items') return 'Raw Materials & Master SKUs';
     if (pathname === '/inventory/movements') return 'Stock Movement Ledger';
@@ -470,12 +373,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  const isPageAuthorized = checkRouteAccess(
-    pathname,
-    workspace?.user.permissions,
-    workspace?.user.role
-  );
-  const requiredPermission = getRequiredPermissionForPath(pathname);
+  const userPerms = workspace?.user.permissions;
+  const userRole = workspace?.user.role;
+
+  const requiredPermissions = getRequiredPermissionsForPath(pathname);
+  const isWorkspaceHydrated = workspace !== null;
+  const isPageAuthorized = isWorkspaceHydrated
+    ? canAccessRoute(pathname, userPerms, userRole)
+    : requiredPermissions.length === 0;
+
+  const defaultHomeRoute = getDefaultLandingRoute(userPerms, userRole);
+  const defaultHomeLabel = getLandingRouteLabel(defaultHomeRoute);
+
+  const canSwitchBranches = branches.length > 1;
+  const canManageBranches = canAccessRoute('/settings/branches', userPerms, userRole);
+  const canViewTransfers = canAccessRoute('/inventory/transfers', userPerms, userRole);
+  const canViewBusiness = canAccessRoute('/settings/business', userPerms, userRole);
 
   return (
     <div className="h-screen w-full flex bg-servora-pale text-servora-navy font-sans text-sm overflow-hidden">
@@ -483,12 +396,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         isMobileMenuOpen={isMobileMenuOpen}
         closeMobileMenu={closeMobileMenu}
         handleLogout={handleLogout}
-        allowedPermissions={workspace?.user.permissions}
+        allowedPermissions={userPerms}
         isCollapsed={isSidebarCollapsed}
         toggleCollapse={toggleSidebarCollapse}
         businessName={workspace?.business.name}
         activeBranch={activeBranchName}
-        userRole={workspace?.user.role}
+        userRole={userRole}
       />
 
       <div className="flex-1 flex flex-col min-w-0 h-full">
@@ -522,92 +435,102 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
 
-          {/* Right section: Action Buttons, Branch Switcher, Alerts, Profile */}
+          {/* Right section: Action Buttons, Branch Context, Alerts, Profile */}
           <div className="flex items-center gap-2 lg:gap-3 shrink-0">
-            {pathname !== '/pos' &&
-              checkRouteAccess('/pos', workspace?.user.permissions, workspace?.user.role) && (
-                <Link
-                  href="/pos"
-                  className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-servora-core text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition-colors"
-                >
-                  <ShoppingBag size={14} />
-                  <span>Open POS</span>
-                </Link>
-              )}
-
-            {/* Operating Branch Dropdown */}
-            <div ref={branchRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-bold text-servora-navy transition-colors cursor-pointer"
+            {pathname !== '/pos' && canAccessRoute('/pos', userPerms, userRole) && (
+              <Link
+                href="/pos"
+                className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-servora-core text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition-colors"
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
-                <Store size={13} className="text-servora-core shrink-0" />
-                <span className="truncate max-w-[140px]">{activeBranchName}</span>
-                <ChevronDown size={13} className="text-gray-400 shrink-0" />
-              </button>
+                <ShoppingBag size={14} />
+                <span>Open POS</span>
+              </Link>
+            )}
 
-              {isBranchDropdownOpen && (
-                <div className="absolute right-0 top-11 w-68 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 z-30 animate-in fade-in zoom-in-95">
-                  <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                      Switch Active Location
-                    </span>
-                    <Link
-                      href="/settings/branches"
-                      onClick={() => setIsBranchDropdownOpen(false)}
-                      className="text-[10px] font-bold text-servora-core hover:underline flex items-center gap-0.5"
-                    >
-                      <span>Manage</span>
-                      <ExternalLink size={10} />
-                    </Link>
-                  </div>
+            {/* Active Operating Branch Context (Interactive Switcher for Multi-Branch, Read-Only Badge for Single-Branch) */}
+            <div ref={branchRef} className="relative">
+              {canSwitchBranches ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-bold text-servora-navy transition-colors cursor-pointer"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+                    <Store size={13} className="text-servora-core shrink-0" />
+                    <span className="truncate max-w-[140px]">{activeBranchName}</span>
+                    <ChevronDown size={13} className="text-gray-400 shrink-0" />
+                  </button>
 
-                  <div className="max-h-56 overflow-y-auto space-y-0.5 custom-scrollbar">
-                    {branches.length > 0 ? (
-                      branches.map((b) => {
-                        const isSelected = activeBranchId === b.id || activeBranchName === b.name;
-                        return (
-                          <button
-                            key={b.id}
-                            type="button"
-                            onClick={() => handleSelectBranchNode(b)}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${
-                              isSelected
-                                ? 'bg-servora-pale text-servora-core font-bold'
-                                : 'text-servora-navy hover:bg-gray-50'
-                            }`}
+                  {isBranchDropdownOpen && (
+                    <div className="absolute right-0 top-11 w-68 bg-white border border-gray-100 rounded-2xl shadow-xl p-2 z-30 animate-in fade-in zoom-in-95">
+                      <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          Switch Active Location
+                        </span>
+                        {canManageBranches && (
+                          <Link
+                            href="/settings/branches"
+                            onClick={() => setIsBranchDropdownOpen(false)}
+                            className="text-[10px] font-bold text-servora-core hover:underline flex items-center gap-0.5"
                           >
-                            <div className="min-w-0 flex-1">
-                              <span className="truncate block">{b.name}</span>
-                              <span className="text-[10px] text-gray-400 font-mono">
-                                {b.code} {b.isMainBranch ? '• Primary Hub' : ''}
-                              </span>
-                            </div>
-                            {isSelected && (
-                              <Check size={14} className="text-servora-core shrink-0 ml-2" />
-                            )}
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="px-3 py-2 text-xs text-gray-500">
-                        {activeBranchName} (Single Location)
+                            <span>Manage</span>
+                            <ExternalLink size={10} />
+                          </Link>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <div className="pt-1.5 mt-1 border-t border-gray-100">
-                    <Link
-                      href="/inventory/transfers"
-                      onClick={() => setIsBranchDropdownOpen(false)}
-                      className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-servora-deepTeal hover:text-servora-core hover:bg-gray-50 rounded-lg transition-colors"
-                    >
-                      <Truck size={13} />
-                      <span>Inter-Branch Stock Transfers</span>
-                    </Link>
-                  </div>
+                      <div className="max-h-56 overflow-y-auto space-y-0.5 custom-scrollbar">
+                        {branches.map((b) => {
+                          const isSelected = activeBranchId === b.id || activeBranchName === b.name;
+                          return (
+                            <button
+                              key={b.id}
+                              type="button"
+                              onClick={() => handleSelectBranchNode(b)}
+                              className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${
+                                isSelected
+                                  ? 'bg-servora-pale text-servora-core font-bold'
+                                  : 'text-servora-navy hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <span className="truncate block">{b.name}</span>
+                                <span className="text-[10px] text-gray-400 font-mono">
+                                  {b.code} {b.isMainBranch ? '• Primary Hub' : ''}
+                                </span>
+                              </div>
+                              {isSelected && (
+                                <Check size={14} className="text-servora-core shrink-0 ml-2" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {canViewTransfers && (
+                        <div className="pt-1.5 mt-1 border-t border-gray-100">
+                          <Link
+                            href="/inventory/transfers"
+                            onClick={() => setIsBranchDropdownOpen(false)}
+                            className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-servora-deepTeal hover:text-servora-core hover:bg-gray-50 rounded-lg transition-colors"
+                          >
+                            <Truck size={13} />
+                            <span>Inter-Branch Stock Transfers</span>
+                          </Link>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div
+                  title="Assigned operating branch"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy select-none"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                  <Store size={13} className="text-servora-core shrink-0" />
+                  <span className="truncate max-w-[140px]">{activeBranchName}</span>
                 </div>
               )}
             </div>
@@ -704,10 +627,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </div>
                 <div className="hidden lg:flex flex-col">
                   <span className="text-xs font-bold text-servora-navy leading-none">
-                    {workspace?.user.firstName || 'Manager'}
+                    {workspace?.user.firstName || 'User'}
                   </span>
                   <span className="text-[10px] text-gray-400 uppercase font-bold mt-0.5">
-                    {workspace?.user.role || 'Admin'}
+                    {workspace?.user.role || 'Staff'}
                   </span>
                 </div>
                 <ChevronDown size={13} className="text-gray-400 hidden lg:block" />
@@ -725,23 +648,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </span>
                   </div>
 
-                  <Link
-                    href="/settings/business"
-                    onClick={() => setIsUserMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
-                  >
-                    <Building2 size={14} className="text-gray-400" />
-                    <span>Business Profile</span>
-                  </Link>
+                  {canViewBusiness && (
+                    <Link
+                      href="/settings/business"
+                      onClick={() => setIsUserMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
+                    >
+                      <Building2 size={14} className="text-gray-400" />
+                      <span>Business Profile</span>
+                    </Link>
+                  )}
 
-                  <Link
-                    href="/settings/branches"
-                    onClick={() => setIsUserMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
-                  >
-                    <Store size={14} className="text-gray-400" />
-                    <span>Locations &amp; Outlets</span>
-                  </Link>
+                  {canManageBranches && (
+                    <Link
+                      href="/settings/branches"
+                      onClick={() => setIsUserMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
+                    >
+                      <Store size={14} className="text-gray-400" />
+                      <span>Locations &amp; Outlets</span>
+                    </Link>
+                  )}
 
                   <Link
                     href="/help"
@@ -768,10 +695,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Content Viewport with Dynamic RBAC Interception */}
+        {/* Content Viewport with Fail-Closed RBAC Interception & Clean Branch Remount */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-servora-pale">
-          {isPageAuthorized ? (
-            <div className="w-full space-y-6">{children}</div>
+          {!isWorkspaceHydrated && requiredPermissions.length > 0 ? (
+            <div className="min-h-[65vh] flex items-center justify-center text-xs font-semibold text-servora-deepTeal animate-pulse">
+              Verifying workspace security clearance...
+            </div>
+          ) : isPageAuthorized ? (
+            <div key={activeBranchId ?? 'default'} className="w-full space-y-6">
+              {children}
+            </div>
           ) : (
             <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 bg-white rounded-2xl border border-gray-200 shadow-xs text-center space-y-4">
               <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
@@ -796,10 +729,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 </p>
               </div>
 
-              {requiredPermission && (
+              {requiredPermissions.length > 0 && (
                 <div className="px-3.5 py-2 bg-slate-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-600">
                   Required Authority:{' '}
-                  <strong className="text-servora-navy">{requiredPermission}</strong>
+                  <strong className="text-servora-navy">
+                    {requiredPermissions.join(' or ')}
+                  </strong>
                 </div>
               )}
 
@@ -812,10 +747,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   &larr; Go Back
                 </button>
                 <Link
-                  href="/dashboard"
+                  href={defaultHomeRoute}
                   className="px-4 py-2 bg-servora-core text-white hover:bg-blue-700 rounded-xl text-xs font-bold transition-colors shadow-xs"
                 >
-                  Return to Overview
+                  Open {defaultHomeLabel}
                 </Link>
               </div>
             </div>
