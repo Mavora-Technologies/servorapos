@@ -1,135 +1,185 @@
+// apps/api/src/controllers/performance.controller.ts
 import { Response } from 'express';
+import { ZodError } from 'zod';
 import { AuthRequest } from '../middleware/auth.middleware';
-import * as perfRepo from '../repositories/performance.repository';
+import * as perfService from '../services/performance.service';
 import {
+  listReviewsQuerySchema,
+  telemetryQuerySchema,
   createReviewSchema,
   updateReviewSchema,
   acknowledgeReviewSchema,
 } from '../validators/performance.validator';
 
+function getActor(req: AuthRequest) {
+  const user = req.user;
+  if (!user?.tenantId || !user?.userId) return null;
+  return {
+    tenantId: user.tenantId,
+    userId: user.userId,
+    role: user.role,
+    ipAddress: req.ip || null,
+  };
+}
+
 export const getReviews = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const actor = getActor(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    const { cycle, userId, status, startDate, endDate } = req.query;
-
-    const userIdNum = typeof userId === 'string' && userId !== 'ALL' ? parseInt(userId, 10) : undefined;
-
-    const reviews = await perfRepo.listPerformanceReviews(tenantId, {
-      cycle: typeof cycle === 'string' ? cycle : undefined,
-      userId: userIdNum && !isNaN(userIdNum) ? userIdNum : undefined,
-      status: typeof status === 'string' ? status : undefined,
-      startDate: typeof startDate === 'string' ? startDate : undefined,
-      endDate: typeof endDate === 'string' ? endDate : undefined,
-    });
+    const query = listReviewsQuerySchema.parse(req.query);
+    const reviews = await perfService.fetchPerformanceReviews(actor, query);
 
     res.status(200).json({ status: 'success', data: reviews });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch performance reviews' });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid filter parameters',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message =
+      error instanceof Error ? error.message : 'Failed to fetch performance reviews';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const getTelemetry = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const actor = getActor(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    const telemetry = await perfRepo.getLiveStaffTelemetry(tenantId);
-    res.status(200).json({ status: 'success', data: telemetry });
-  } catch (error: any) {
-    res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch live telemetry' });
+    const query = telemetryQuerySchema.parse(req.query);
+    const payload = await perfService.fetchLiveTelemetry(actor, query);
+
+    res.status(200).json({ status: 'success', data: payload });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid telemetry parameters',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to fetch live telemetry';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const postReview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const reviewerId = req.user?.userId;
-
-    if (!tenantId || !reviewerId) {
+    const actor = getActor(req);
+    if (!actor) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
     const input = createReviewSchema.parse(req.body);
-    const review = await perfRepo.createReview(tenantId, reviewerId, input);
+    const review = await perfService.submitAppraisal(actor, input);
 
     res.status(201).json({
       status: 'success',
       data: review,
-      message: 'Staff performance appraisal successfully submitted.',
+      message: 'Staff performance appraisal submitted successfully.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      const detailedMessage = error.errors
-        .map((e: any) => `${e.path.join('.')}: ${e.message}`)
-        .join(', ');
-
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
       res.status(400).json({
         status: 'error',
-        message: detailedMessage,
-        errors: error.errors,
+        message: error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join(', '),
+        errors: error.issues,
       });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to create review' });
+    const message = error instanceof Error ? error.message : 'Failed to create review';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const putReview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const reviewId = parseInt(String(req.params.id), 10);
+    const actor = getActor(req);
+    if (!actor) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
 
-    if (!tenantId || isNaN(reviewId)) {
+    const reviewId = Number(req.params.id);
+    if (!Number.isInteger(reviewId) || reviewId <= 0) {
       res.status(400).json({ status: 'error', message: 'Invalid review identifier' });
       return;
     }
 
     const input = updateReviewSchema.parse(req.body);
-    const updated = await perfRepo.updateReview(tenantId, reviewId, input);
+    const updated = await perfService.modifyAppraisal(actor, reviewId, input);
+    if (!updated) {
+      res.status(404).json({ status: 'error', message: 'Performance appraisal not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       data: updated,
-      message: 'Performance review updated successfully.',
+      message:
+        input.status === 'FINALIZED'
+          ? 'Appraisal finalized and locked to employee file.'
+          : 'Performance review updated successfully.',
     });
-  } catch (error: any) {
-    if (error.name === 'ZodError') {
-      res.status(400).json({ status: 'error', errors: error.errors });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Validation failed',
+        errors: error.issues,
+      });
       return;
     }
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to update review' });
+    const message = error instanceof Error ? error.message : 'Failed to update review';
+    res.status(400).json({ status: 'error', message });
   }
 };
 
 export const postAcknowledge = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const tenantId = req.user?.tenantId;
-    const userId = req.user?.userId;
-    const reviewId = parseInt(String(req.params.id), 10);
-
-    if (!tenantId || !userId || isNaN(reviewId)) {
-      res.status(400).json({ status: 'error', message: 'Invalid request or session' });
+    const actor = getActor(req);
+    if (!actor) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
 
-    const { employeeFeedback } = acknowledgeReviewSchema.parse(req.body);
-    const acknowledged = await perfRepo.acknowledgeReview(tenantId, reviewId, userId, employeeFeedback);
+    const reviewId = Number(req.params.id);
+    if (!Number.isInteger(reviewId) || reviewId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid review identifier' });
+      return;
+    }
+
+    const { employeeFeedback } = acknowledgeReviewSchema.parse(req.body || {});
+    const acknowledged = await perfService.acknowledgeAppraisal(
+      actor,
+      reviewId,
+      employeeFeedback
+    );
+    if (!acknowledged) {
+      res.status(404).json({ status: 'error', message: 'Review record not found' });
+      return;
+    }
 
     res.status(200).json({
       status: 'success',
       data: acknowledged,
       message: 'Appraisal acknowledged and archived to employee file.',
     });
-  } catch (error: any) {
-    res.status(400).json({ status: 'error', message: error.message || 'Failed to acknowledge review' });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to acknowledge review';
+    res.status(400).json({ status: 'error', message });
   }
 };

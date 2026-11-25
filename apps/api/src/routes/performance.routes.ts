@@ -1,5 +1,7 @@
+// apps/api/src/routes/performance.routes.ts
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
+import { requirePermission } from '../middleware/rbac.middleware';
 import {
   getReviews,
   getTelemetry,
@@ -11,10 +13,12 @@ import {
 const router = Router();
 router.use(requireAuth);
 
-router.get('/', getReviews);
-router.get('/telemetry', getTelemetry);
-router.post('/', postReview);
-router.put('/:id', putReview);
+router.get('/', requirePermission(['reports.view', 'staff.manage', 'staff.view']), getReviews);
+router.get('/telemetry', requirePermission(['reports.view', 'staff.manage', 'staff.view']), getTelemetry);
+router.post('/', requirePermission(['staff.manage', 'reports.view']), postReview);
+router.put('/:id', requirePermission(['staff.manage', 'reports.view']), putReview);
+
+// Any authenticated employee can acknowledge their own appraisal (ownership enforced in repository)
 router.post('/:id/acknowledge', postAcknowledge);
 
 export default router;
