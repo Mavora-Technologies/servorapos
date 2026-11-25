@@ -2183,11 +2183,24 @@ export const shiftHandovers = pgTable(
     branchId: integer('branch_id')
       .references(() => branches.id, { onDelete: 'cascade' })
       .notNull(),
+    // Chain-of-custody relational anchors
+    handoverScope: varchar('handover_scope', { length: 30 }).default('BRANCH_WIDE').notNull(), // BRANCH_WIDE | TILL_CUSTODY
+    cashierShiftId: integer('cashier_shift_id').references(() => cashierShifts.id, {
+      onDelete: 'set null',
+    }),
+    cashDrawerId: integer('cash_drawer_id').references(() => cashDrawers.id, {
+      onDelete: 'set null',
+    }),
+    linkedAdjustmentId: integer('linked_adjustment_id').references(
+      (): AnyPgColumn => financialAdjustments.id,
+      { onDelete: 'set null' }
+    ),
     outgoingManagerId: integer('outgoing_manager_id')
       .references(() => users.id, { onDelete: 'cascade' })
       .notNull(),
-    incomingManagerId: integer('incoming_manager_id')
-      .references(() => users.id, { onDelete: 'set null' }),
+    incomingManagerId: integer('incoming_manager_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
     shiftType: varchar('shift_type', { length: 50 }).notNull(), // MORNING | MIDDAY | EVENING | NIGHT_CLOSING
     handoverDate: date('handover_date').notNull(), // YYYY-MM-DD
     cashStatus: varchar('cash_status', { length: 50 }).default('BALANCED').notNull(), // BALANCED | DISCREPANCY_SHORT | DISCREPANCY_OVER
@@ -2202,9 +2215,14 @@ export const shiftHandovers = pgTable(
       .$type<{ id: string; text: string; completed: boolean }[]>()
       .default([])
       .notNull(),
-    status: varchar('status', { length: 50 }).default('SUBMITTED').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | DISPUTED
+    status: varchar('status', { length: 50 }).default('SUBMITTED').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | DISPUTED | RESOLVED
     outgoingSignedAt: timestamp('outgoing_signed_at', { withTimezone: true }).defaultNow().notNull(),
     incomingSignedAt: timestamp('incoming_signed_at', { withTimezone: true }),
+    resolutionNotes: text('resolution_notes'),
+    resolvedByUserId: integer('resolved_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -2216,6 +2234,8 @@ export const shiftHandovers = pgTable(
     index('shift_handovers_tenant_date_idx').on(t.tenantId, t.handoverDate),
     index('shift_handovers_tenant_branch_idx').on(t.tenantId, t.branchId),
     index('shift_handovers_status_idx').on(t.tenantId, t.status),
+    index('shift_handovers_shift_idx').on(t.cashierShiftId),
+    index('shift_handovers_drawer_idx').on(t.cashDrawerId),
   ]
 );
 
