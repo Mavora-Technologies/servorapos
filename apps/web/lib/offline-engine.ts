@@ -1,5 +1,5 @@
 // apps/web/lib/offline-engine.ts
-import { fetchApi } from '@/lib/api';
+import { fetchApi, ApiError } from '@/lib/api';
 
 const DB_NAME = 'servora_offline_v1';
 const DB_VERSION = 1;
@@ -313,12 +313,20 @@ function getTerminalIdentifier(): string {
  */
 export function isOfflineOrNetworkError(error: unknown): boolean {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return true;
+  if (error instanceof ApiError) {
+    if (error.isNetworkError || error.status === 0 || error.status >= 500) {
+      return true;
+    }
+  }
   if (error instanceof TypeError) return true;
 
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
     return (
       msg.includes('failed to fetch') ||
+      msg.includes('unable to connect to backend server') ||
+      msg.includes('terminal is currently offline') ||
+      msg.includes('internal server error') ||
       msg.includes('networkerror') ||
       msg.includes('network request failed') ||
       msg.includes('load failed') ||
@@ -327,10 +335,7 @@ export function isOfflineOrNetworkError(error: unknown): boolean {
       msg.includes('enotfound') ||
       msg.includes('fetch failed') ||
       msg.includes('failed query:') ||
-      msg.includes('connection terminated') ||
-      msg.includes('502') ||
-      msg.includes('503') ||
-      msg.includes('504')
+      msg.includes('connection terminated')
     );
   }
 

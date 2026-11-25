@@ -1,3 +1,4 @@
+// apps/web/app/(dashboard)/layout.tsx
 'use client';
 
 import { useEffect, useState, useRef, useTransition } from 'react';
@@ -14,23 +15,14 @@ import {
   ChevronDown,
   ShoppingBag,
   ExternalLink,
-  ShieldCheck,
   ShieldAlert,
-  Settings,
   LogOut,
   HelpCircle,
   Truck,
-  Boxes,
-  CircleDot,
-  Radio,
-  Search,
-  ChefHat,
-  Receipt,
-  AlertCircle,
-  Lock
+  Lock,
 } from 'lucide-react';
 import Sidebar from './Sidebar';
-import { fetchApi } from '@/lib/api';
+import { fetchApi, ApiError } from '@/lib/api';
 
 interface UserProfile {
   id: number;
@@ -65,6 +57,12 @@ interface HeaderNotification {
   actionUrl?: string;
   isRead: boolean;
   createdAt: string;
+}
+
+interface BranchSwitchedDetail {
+  branchId: number;
+  branchName: string;
+  branchCode?: string;
 }
 
 // Comprehensive Route-to-Permission Mapping (Sorted automatically from most specific to least specific)
@@ -183,7 +181,6 @@ const ROUTE_PERMISSIONS: Record<string, string> = {
 
 function getRequiredPermissionForPath(pathname: string): string | null {
   if (!pathname) return null;
-  // Sort keys by length descending so deeper routes match before parent routes
   const sortedRoutes = Object.keys(ROUTE_PERMISSIONS).sort((a, b) => b.length - a.length);
   const matchedRoute = sortedRoutes.find(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
@@ -192,7 +189,6 @@ function getRequiredPermissionForPath(pathname: string): string | null {
 }
 
 function checkRouteAccess(pathname: string, permissions?: string[], role?: string): boolean {
-  // Full administrative bypass for ADMIN and SUPER_ADMIN
   if (
     role === 'ADMIN' ||
     role === 'SUPER_ADMIN' ||
@@ -257,10 +253,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   // Listen for branch changes from sidebar or shell
   useEffect(() => {
-    const handleBranchSwitched = (e: any) => {
-      if (e.detail?.branchId) {
-        setActiveBranchId(e.detail.branchId);
-        setActiveBranchName(e.detail.branchName);
+    const handleBranchSwitched = (e: Event) => {
+      const detail = (e as CustomEvent<BranchSwitchedDetail>).detail;
+      if (detail?.branchId) {
+        setActiveBranchId(detail.branchId);
+        setActiveBranchName(detail.branchName);
       }
     };
 
@@ -268,6 +265,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => window.removeEventListener('servora:branch-switched', handleBranchSwitched);
   }, []);
 
+  // Offline-resilient session & branch bootstrap with reconnect listener
   useEffect(() => {
     const token = localStorage.getItem('servora_token');
     if (!token) {
@@ -277,7 +275,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
     setIsAuthorized(true);
 
+    // 1. Hydrate immediately from cached workspace so offline reloads keep RBAC & branch context
+    try {
+      const cachedWorkspace = localStorage.getItem('servora_cached_workspace');
+      if (cachedWorkspace) {
+        const parsed: WorkspaceInfo = JSON.parse(cachedWorkspace);
+        setWorkspace(parsed);
+        const savedBranchName = localStorage.getItem('servora_active_branch_name');
+        const savedBranchId = localStorage.getItem('servora_active_branch_id');
+        setActiveBranchName(savedBranchName || parsed.branch?.name || 'Main Branch');
+        setActiveBranchId(savedBranchId ? Number(savedBranchId) : parsed.branch?.id || null);
+      }
+      const cachedBranches = localStorage.getItem('servora_cached_branches');
+      if (cachedBranches) {
+        const parsedBranches = JSON.parse(cachedBranches);
+        if (Array.isArray(parsedBranches)) {
+          setBranches(parsedBranches);
+        }
+      }
+    } catch {
+      // Ignore malformed cache entries
+    }
+
     const loadSessionAndBranches = async () => {
+      // Pause background polling while disconnected
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        return;
+      }
+
       try {
         const [meRes, branchRes, notifRes] = await Promise.all([
           fetchApi('/api/v1/auth/me'),
@@ -287,12 +312,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         if (meRes?.data) {
           setWorkspace(meRes.data);
+          localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
           setActiveBranchName(meRes.data.branch?.name || 'Main Branch');
           setActiveBranchId(meRes.data.branch?.id || null);
         }
 
         if (branchRes?.data && Array.isArray(branchRes.data)) {
           setBranches(branchRes.data);
+          localStorage.setItem('servora_cached_branches', JSON.stringify(branchRes.data));
           const savedBranchId = localStorage.getItem('servora_active_branch_id');
           if (savedBranchId) {
             const found = branchRes.data.find((b: BranchRecord) => String(b.id) === savedBranchId);
@@ -306,14 +333,37 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (notifRes?.data?.notifications) {
           setNotifications(notifRes.data.notifications);
         }
-      } catch (error) {
-        console.error('Failed to load session profile or branches:', error);
+      } catch (error: unknown) {
+        // Force logout only on a genuine 401 unauthorized response
+        if (error instanceof ApiError && error.status === 401) {
+          localStorage.removeItem('servora_token');
+          localStorage.removeItem('servora_cached_workspace');
+          localStorage.removeItem('servora_cached_branches');
+          router.push('/login');
+          return;
+        }
+
+        // Suppress Next.js dev error overlay during Wi-Fi drops or upstream DB outages
+        if (
+          error instanceof ApiError &&
+          (error.isNetworkError || error.status === 0 || error.status >= 500)
+        ) {
+          console.warn('Offline/degraded mode: using cached session profile.');
+          return;
+        }
+
+        console.warn('Session refresh skipped:', error);
       }
     };
 
     loadSessionAndBranches();
     const pollInterval = setInterval(loadSessionAndBranches, 30000);
-    return () => clearInterval(pollInterval);
+    window.addEventListener('online', loadSessionAndBranches);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('online', loadSessionAndBranches);
+    };
   }, [router]);
 
   if (!isAuthorized) return null;
@@ -322,6 +372,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     localStorage.removeItem('servora_token');
     localStorage.removeItem('servora_active_branch_id');
     localStorage.removeItem('servora_active_branch_name');
+    localStorage.removeItem('servora_cached_workspace');
+    localStorage.removeItem('servora_cached_branches');
     router.push('/login');
   };
 
@@ -333,7 +385,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     setIsBranchDropdownOpen(false);
 
     window.dispatchEvent(
-      new CustomEvent('servora:branch-switched', {
+      new CustomEvent<BranchSwitchedDetail>('servora:branch-switched', {
         detail: { branchId: b.id, branchName: b.name, branchCode: b.code },
       })
     );
@@ -344,11 +396,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const handleMarkAllRead = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       await fetchApi('/api/v1/notifications/read-all', { method: 'PATCH' });
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
     } catch (err) {
-      console.error('Failed to mark all notifications read:', err);
+      console.warn('Failed to mark all notifications read:', err);
     }
   };
 
@@ -362,7 +415,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return `${first}${last}`.toUpperCase() || 'U';
   };
 
-  // Modern, clean, professional title generator
   const getHeaderTitle = () => {
     if (!pathname) return 'Dashboard';
     if (pathname === '/' || pathname === '/dashboard') return 'Overview Dashboard';
@@ -400,6 +452,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname === '/staff/roles') return 'Role Clearances & Access Authority Matrix';
     if (pathname === '/settings/branches') return 'Multi-Branch Topology';
     if (pathname === '/settings/business') return 'Business Entity Profile';
+    if (pathname === '/settings/offline') return 'Offline Survivability & Sync Engine';
+    if (pathname === '/settings/audit-logs') return 'Audit Logs & Compliance Ledger';
+    if (pathname === '/settings/billing') return 'Billing & Headcount Licensing';
     if (pathname === '/finance/taxes') return 'Tax Compliance & eTIMS Ledger';
     if (pathname === '/notifications') return 'System Alert Center';
     if (pathname === '/help') return 'Servora Helpdesk & Documentation';
@@ -415,7 +470,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
-  // Evaluate route security clearance
   const isPageAuthorized = checkRouteAccess(
     pathname,
     workspace?.user.permissions,
@@ -443,6 +497,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           {/* Left section: Mobile Toggle, Desktop Collapse, Dynamic Title */}
           <div className="flex items-center gap-3 min-w-0">
             <button
+              type="button"
               onClick={() => setIsMobileMenuOpen(true)}
               className="lg:hidden p-2 -ml-2 text-servora-navy hover:bg-gray-100 rounded-lg cursor-pointer"
               aria-label="Open mobile menu"
@@ -451,6 +506,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
 
             <button
+              type="button"
               onClick={toggleSidebarCollapse}
               title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
               className="hidden lg:flex items-center justify-center p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
@@ -459,7 +515,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </button>
 
             <div className="min-w-0 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-servora-core animate-pulse"></span>
+              <span className="w-2 h-2 rounded-full bg-servora-core animate-pulse" />
               <h2 className="text-sm lg:text-base font-bold text-servora-navy tracking-tight truncate">
                 {getHeaderTitle()}
               </h2>
@@ -468,16 +524,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* Right section: Action Buttons, Branch Switcher, Alerts, Profile */}
           <div className="flex items-center gap-2 lg:gap-3 shrink-0">
-            {/* Direct POS Link (Only shown if user has pos.access or wildcard) */}
-            {pathname !== '/pos' && checkRouteAccess('/pos', workspace?.user.permissions, workspace?.user.role) && (
-              <Link
-                href="/pos"
-                className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-servora-core text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition-colors"
-              >
-                <ShoppingBag size={14} />
-                <span>Open POS</span>
-              </Link>
-            )}
+            {pathname !== '/pos' &&
+              checkRouteAccess('/pos', workspace?.user.permissions, workspace?.user.role) && (
+                <Link
+                  href="/pos"
+                  className="hidden md:inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-servora-core text-white rounded-xl text-xs font-bold shadow-xs hover:bg-blue-700 transition-colors"
+                >
+                  <ShoppingBag size={14} />
+                  <span>Open POS</span>
+                </Link>
+              )}
 
             {/* Operating Branch Dropdown */}
             <div ref={branchRef} className="relative">
@@ -486,7 +542,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-bold text-servora-navy transition-colors cursor-pointer"
               >
-                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse"></span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
                 <Store size={13} className="text-servora-core shrink-0" />
                 <span className="truncate max-w-[140px]">{activeBranchName}</span>
                 <ChevronDown size={13} className="text-gray-400 shrink-0" />
@@ -517,10 +573,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                             key={b.id}
                             type="button"
                             onClick={() => handleSelectBranchNode(b)}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${isSelected
-                              ? 'bg-servora-pale text-servora-core font-bold'
-                              : 'text-servora-navy hover:bg-gray-50'
-                              }`}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs transition-colors text-left cursor-pointer ${
+                              isSelected
+                                ? 'bg-servora-pale text-servora-core font-bold'
+                                : 'text-servora-navy hover:bg-gray-50'
+                            }`}
                           >
                             <div className="min-w-0 flex-1">
                               <span className="truncate block">{b.name}</span>
@@ -528,7 +585,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                                 {b.code} {b.isMainBranch ? '• Primary Hub' : ''}
                               </span>
                             </div>
-                            {isSelected && <Check size={14} className="text-servora-core shrink-0 ml-2" />}
+                            {isSelected && (
+                              <Check size={14} className="text-servora-core shrink-0 ml-2" />
+                            )}
                           </button>
                         );
                       })
@@ -563,7 +622,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               >
                 <Bell size={17} />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white"></span>
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
                 )}
               </button>
 
@@ -571,12 +630,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <div className="absolute right-0 top-11 w-80 bg-white border border-gray-100 rounded-2xl shadow-xl p-3 z-30 animate-in fade-in zoom-in-95">
                   <div className="flex items-center justify-between pb-2 border-b border-gray-100 mb-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-servora-navy">Operational Alerts</span>
+                      <span className="text-xs font-bold text-servora-navy">
+                        Operational Alerts
+                      </span>
                       <span className="px-1.5 py-0.2 bg-servora-pale text-servora-core text-[10px] font-bold rounded-full">
                         {unreadCount}
                       </span>
                     </div>
                     <button
+                      type="button"
                       onClick={handleMarkAllRead}
                       className="text-[10px] font-semibold text-gray-400 hover:text-servora-navy cursor-pointer"
                     >
@@ -593,13 +655,19 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                       notifications.map((notif) => (
                         <div
                           key={notif.id}
-                          className={`p-2.5 rounded-xl border text-xs transition-colors ${notif.isRead ? 'bg-white border-gray-100' : 'bg-slate-50 border-gray-200'
-                            }`}
+                          className={`p-2.5 rounded-xl border text-xs transition-colors ${
+                            notif.isRead
+                              ? 'bg-white border-gray-100'
+                              : 'bg-slate-50 border-gray-200'
+                          }`}
                         >
                           <div className="flex items-center justify-between mb-0.5">
                             <span className="font-bold text-servora-navy">{notif.title}</span>
                             <span className="text-[10px] text-gray-400 font-mono">
-                              {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {new Date(notif.createdAt).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
                             </span>
                           </div>
                           <p className="text-[11px] text-gray-600 leading-snug">{notif.detail}</p>
@@ -672,7 +740,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
                   >
                     <Store size={14} className="text-gray-400" />
-                    <span>Locations & Outlets</span>
+                    <span>Locations &amp; Outlets</span>
                   </Link>
 
                   <Link
@@ -681,7 +749,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
                   >
                     <HelpCircle size={14} className="text-gray-400" />
-                    <span>Documentation & Support</span>
+                    <span>Documentation &amp; Support</span>
                   </Link>
 
                   <div className="pt-1 border-t border-gray-100">
@@ -703,9 +771,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Content Viewport with Dynamic RBAC Interception */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-servora-pale">
           {isPageAuthorized ? (
-            <div className="w-full space-y-6">
-              {children}
-            </div>
+            <div className="w-full space-y-6">{children}</div>
           ) : (
             <div className="min-h-[75vh] flex flex-col items-center justify-center p-6 bg-white rounded-2xl border border-gray-200 shadow-xs text-center space-y-4">
               <div className="w-14 h-14 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shadow-xs">
@@ -720,13 +786,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   Security Clearance Required
                 </h2>
                 <p className="text-xs text-gray-500 leading-relaxed">
-                  Your current operational profile (<strong>{workspace?.user.role || 'Staff'}</strong>) does not include the required security permission to view or operate <code className="font-mono font-bold text-servora-core bg-slate-100 px-1.5 py-0.5 rounded">{pathname}</code>.
+                  Your current operational profile (
+                  <strong>{workspace?.user.role || 'Staff'}</strong>) does not include the required
+                  security permission to view or operate{' '}
+                  <code className="font-mono font-bold text-servora-core bg-slate-100 px-1.5 py-0.5 rounded">
+                    {pathname}
+                  </code>
+                  .
                 </p>
               </div>
 
               {requiredPermission && (
                 <div className="px-3.5 py-2 bg-slate-50 border border-gray-200 rounded-xl text-[11px] font-mono text-gray-600">
-                  Required Authority: <strong className="text-servora-navy">{requiredPermission}</strong>
+                  Required Authority:{' '}
+                  <strong className="text-servora-navy">{requiredPermission}</strong>
                 </div>
               )}
 
