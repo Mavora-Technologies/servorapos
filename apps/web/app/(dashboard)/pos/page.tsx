@@ -16,6 +16,7 @@ import {
   Utensils,
   Printer,
   CheckCircle,
+  CheckCircle2,
   X,
   Layers,
   ShoppingCart,
@@ -40,8 +41,21 @@ import {
   ChefHat,
   ArrowRight,
   SlidersHorizontal,
+  Wifi,
+  WifiOff,
+  UploadCloud,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
+import {
+  cacheOfflinePolicy,
+  cachePosSnapshot,
+  getCachedPosSnapshot,
+  enqueueOfflineOrder,
+  getQueuedOfflineOrders,
+  syncQueuedTransactions,
+  isOfflineOrNetworkError,
+  type CachedPosSnapshot,
+} from '@/lib/offline-engine';
 
 interface UserProfile {
   id: number;
@@ -368,6 +382,13 @@ export default function POSPage() {
   const [draftSelections, setDraftSelections] = useState<Record<number, number[]>>({});
   const [modifierModalError, setModifierModalError] = useState<string | null>(null);
 
+  // Offline Survivability & Queue States
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingOfflineCount, setPendingOfflineCount] = useState(0);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
+  const [offlineSyncBanner, setOfflineSyncBanner] = useState<string | null>(null);
+  const [offlineMpesaRef, setOfflineMpesaRef] = useState('');
+
   // Inline Stock & Checkout Alert Banners
   const [stockAlert, setStockAlert] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -422,10 +443,53 @@ export default function POSPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
+  const hydrateFromSnapshot = useCallback((cached: CachedPosSnapshot) => {
+    setBusiness((cached.business as BusinessProfile | null) ?? null);
+    setCurrentUser((cached.currentUser as UserProfile | null) ?? null);
+    setBranches((cached.branches as BranchProfile[]) || []);
+    setActiveBranch((cached.activeBranch as BranchProfile | null) ?? null);
+    setDrawers((cached.drawers as CashDrawerOption[]) || []);
+    setActiveShift((cached.activeShift as ActiveCashierShift | null) ?? null);
+    setCustodianGuardrails((cached.custodianGuardrails as CustodianGuardrails | null) ?? null);
+    setLoyaltyRewards((cached.loyaltyRewards as LoyaltyRewardOption[]) || []);
+    setKitchenStations((cached.kitchenStations as KitchenStationOption[]) || []);
+    setItemStationMap((cached.itemStationMap as Record<number, ItemStationMapping>) || {});
+    setItemModifierGroupsMap(
+      (cached.itemModifierGroupsMap as Record<number, PosModifierGroup[]>) || {}
+    );
+    setAvailabilityMap((cached.availabilityMap as Record<number, ItemAvailabilityFlag>) || {});
+    setMenuItems((cached.menuItems as MenuItem[]) || []);
+    setCategories(cached.categories?.length ? cached.categories : ['All']);
+    setTables((cached.tables as RestaurantTable[]) || []);
+
+    const cachedModels = (cached.serviceModels as ServiceModel[]) || [];
+    setServiceModels(cachedModels);
+    const defaultModel =
+      cachedModels.find((m) => m.type === 'DINE_IN') || cachedModels[0] || null;
+    if (defaultModel) setActiveServiceModel((prev) => prev ?? defaultModel);
+
+    setFinancialSettings((cached.financialSettings as FinancialSettings | null) ?? null);
+    setReceiptTemplate((cached.receiptTemplate as ReceiptTemplate | null) ?? null);
+  }, []);
+
   const loadInitialData = useCallback(
     async (overrideBranchId?: number) => {
       try {
         setIsLoading(true);
+        const queued = await getQueuedOfflineOrders();
+        setPendingOfflineCount(queued.length);
+
+        // If browser is offline, hydrate directly from local IndexedDB snapshot
+        if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          setIsOnline(false);
+          const cached = await getCachedPosSnapshot();
+          if (cached) {
+            hydrateFromSnapshot(cached);
+          }
+          setIsLoading(false);
+          return;
+        }
+
         const savedBranchId =
           overrideBranchId ||
           (typeof window !== 'undefined'
@@ -443,6 +507,7 @@ export default function POSPage() {
           serviceModelsRes,
           finRes,
           receiptRes,
+          offlineSettingsRes,
         ] = await Promise.all([
           fetchApi('/api/v1/auth/me').catch(() => null),
           fetchApi(`/api/v1/pos/context${branchParam}`).catch(() => null),
@@ -454,43 +519,97 @@ export default function POSPage() {
           fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
           fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
           fetchApi('/api/v1/settings/receipts').catch(() => ({ data: [] })),
+          fetchApi('/api/v1/settings/offline').catch(() => null),
         ]);
 
+        // If upstream API/DB is unreachable, fall back to cached local snapshot
+        if (!authRes && !posContextRes && !(menuRes?.data?.items?.length > 0)) {
+          const cached = await getCachedPosSnapshot();
+          if (cached) {
+            hydrateFromSnapshot(cached);
+            setIsLoading(false);
+            return;
+          }
+        }
+
+        if (offlineSettingsRes?.data?.settings) {
+          const s = offlineSettingsRes.data.settings;
+          void cacheOfflinePolicy({
+            allowOfflineSales: s.allowOfflineSales,
+            maxOfflineHours: s.maxOfflineHours,
+            maxOfflineTicketTotal: parseFloat(s.maxOfflineTicketTotal) || 0,
+            maxOfflineCumulativeBalance: parseFloat(s.maxOfflineCumulativeBalance) || 0,
+            autoSyncOnReconnect: s.autoSyncOnReconnect,
+            syncBatchSize: s.syncBatchSize,
+            syncIntervalSeconds: s.syncIntervalSeconds,
+            allowOfflineCash: s.allowOfflineCash,
+            allowOfflineCard: s.allowOfflineCard,
+            allowOfflineMpesaReference: s.allowOfflineMpesaReference,
+            allowOfflineGiftCards: s.allowOfflineGiftCards,
+            allowOfflineCreditTabs: s.allowOfflineCreditTabs,
+          }).catch(() => {});
+        }
+
+        let resolvedBusiness: BusinessProfile | null = null;
+        let resolvedUser: UserProfile | null = null;
+        let resolvedBranches: BranchProfile[] = [];
+        let resolvedActiveBranch: BranchProfile | null = null;
+        let resolvedDrawers: CashDrawerOption[] = [];
+        let resolvedActiveShift: ActiveCashierShift | null = null;
+        let resolvedGuardrails: CustodianGuardrails | null = null;
+        let resolvedRewards: LoyaltyRewardOption[] = [];
+        let resolvedStations: KitchenStationOption[] = [];
+        let resolvedStationMap: Record<number, ItemStationMapping> = {};
+        let resolvedModifierMap: Record<number, PosModifierGroup[]> = {};
+        const availLookup: Record<number, ItemAvailabilityFlag> = {};
+
         if (authRes?.data) {
-          setBusiness(authRes.data.business);
-          if (authRes.data.user) setCurrentUser(authRes.data.user);
+          resolvedBusiness = authRes.data.business ?? null;
+          resolvedUser = authRes.data.user ?? null;
+          setBusiness(resolvedBusiness);
+          if (resolvedUser) setCurrentUser(resolvedUser);
         }
 
         if (posContextRes?.data) {
           const ctx = posContextRes.data;
-          setBranches(ctx.branches || []);
-          setActiveBranch(ctx.activeBranch || authRes?.data?.branch || null);
-          if (ctx.activeBranch && typeof window !== 'undefined') {
-            localStorage.setItem('servora_active_branch_id', String(ctx.activeBranch.id));
+          resolvedBranches = ctx.branches || [];
+          resolvedActiveBranch = ctx.activeBranch || authRes?.data?.branch || null;
+          resolvedDrawers = ctx.drawers || [];
+          resolvedActiveShift = ctx.activeShift || null;
+          resolvedGuardrails = ctx.custodianGuardrails || null;
+          resolvedRewards = ctx.loyaltyRewards || [];
+          resolvedStations = ctx.kitchenStations || [];
+          resolvedStationMap = ctx.itemStationMap || {};
+          resolvedModifierMap = ctx.itemModifierGroupsMap || {};
+
+          setBranches(resolvedBranches);
+          setActiveBranch(resolvedActiveBranch);
+          if (resolvedActiveBranch && typeof window !== 'undefined') {
+            localStorage.setItem('servora_active_branch_id', String(resolvedActiveBranch.id));
           }
 
-          setDrawers(ctx.drawers || []);
-          setActiveShift(ctx.activeShift || null);
-          setCustodianGuardrails(ctx.custodianGuardrails || null);
-          setLoyaltyRewards(ctx.loyaltyRewards || []);
-          setKitchenStations(ctx.kitchenStations || []);
-          setItemStationMap(ctx.itemStationMap || {});
-          setItemModifierGroupsMap(ctx.itemModifierGroupsMap || {});
+          setDrawers(resolvedDrawers);
+          setActiveShift(resolvedActiveShift);
+          setCustodianGuardrails(resolvedGuardrails);
+          setLoyaltyRewards(resolvedRewards);
+          setKitchenStations(resolvedStations);
+          setItemStationMap(resolvedStationMap);
+          setItemModifierGroupsMap(resolvedModifierMap);
 
-          if (ctx.custodianGuardrails?.cashDrawerId) {
-            setSelectedDrawerId(String(ctx.custodianGuardrails.cashDrawerId));
-          } else if (ctx.drawers?.length > 0 && !selectedDrawerId) {
-            const openDrawer = ctx.drawers.find((d: CashDrawerOption) => d.status === 'OPEN');
-            setSelectedDrawerId(String((openDrawer || ctx.drawers[0]).id));
+          if (resolvedGuardrails?.cashDrawerId) {
+            setSelectedDrawerId(String(resolvedGuardrails.cashDrawerId));
+          } else if (resolvedDrawers.length > 0 && !selectedDrawerId) {
+            const openDrawer = resolvedDrawers.find((d) => d.status === 'OPEN');
+            setSelectedDrawerId(String((openDrawer || resolvedDrawers[0]).id));
           }
 
-          const availLookup: Record<number, ItemAvailabilityFlag> = {};
           for (const flag of ctx.itemAvailability || []) {
             availLookup[flag.menuItemId] = flag;
           }
           setAvailabilityMap(availLookup);
         } else if (authRes?.data?.branch) {
-          setActiveBranch(authRes.data.branch);
+          resolvedActiveBranch = authRes.data.branch;
+          setActiveBranch(resolvedActiveBranch);
         }
 
         // 1. Base Menu Items
@@ -567,6 +686,7 @@ export default function POSPage() {
             })
           );
 
+        const mergedItems = [...comboMenuItems, ...baseItems];
         const mergedCategories = Array.from(
           new Set([
             'All',
@@ -575,47 +695,124 @@ export default function POSPage() {
           ])
         );
 
-        setMenuItems([...comboMenuItems, ...baseItems]);
+        setMenuItems(mergedItems);
         setCategories(mergedCategories);
 
-        if (tablesRes?.data) {
-          setTables(tablesRes.data);
+        const resolvedTables: RestaurantTable[] = Array.isArray(tablesRes?.data)
+          ? tablesRes.data
+          : [];
+        setTables(resolvedTables);
+
+        const resolvedModels: ServiceModel[] = Array.isArray(serviceModelsRes?.data)
+          ? serviceModelsRes.data.filter((m: ServiceModel) => m.isActive)
+          : [];
+        setServiceModels(resolvedModels);
+        const defaultModel =
+          resolvedModels.find((m) => m.type === 'DINE_IN') || resolvedModels[0] || null;
+        if (defaultModel) setActiveServiceModel(defaultModel);
+
+        const resolvedFinancial: FinancialSettings | null = finRes?.data?.settings ?? null;
+        if (resolvedFinancial) {
+          setFinancialSettings(resolvedFinancial);
         }
 
-        if (serviceModelsRes?.data && Array.isArray(serviceModelsRes.data)) {
-          const activeOnly = serviceModelsRes.data.filter((m: ServiceModel) => m.isActive);
-          setServiceModels(activeOnly);
-          const defaultModel =
-            activeOnly.find((m: ServiceModel) => m.type === 'DINE_IN') || activeOnly[0];
-          if (defaultModel) setActiveServiceModel(defaultModel);
-        }
-
-        if (finRes?.data?.settings) {
-          setFinancialSettings(finRes.data.settings);
-        }
-
+        let resolvedTemplate: ReceiptTemplate | null = null;
         if (receiptRes?.data && Array.isArray(receiptRes.data)) {
-          const defaultTpl =
+          resolvedTemplate =
             receiptRes.data.find((t: ReceiptTemplate & { isDefault?: boolean }) => t.isDefault) ||
-            receiptRes.data[0];
-          if (defaultTpl) setReceiptTemplate(defaultTpl);
+            receiptRes.data[0] ||
+            null;
+          if (resolvedTemplate) setReceiptTemplate(resolvedTemplate);
+        }
+
+        // Persist complete POS snapshot to IndexedDB for offline survivability
+        if (mergedItems.length > 0) {
+          void cachePosSnapshot({
+            branchId: resolvedActiveBranch?.id,
+            business: resolvedBusiness,
+            currentUser: resolvedUser,
+            branches: resolvedBranches,
+            activeBranch: resolvedActiveBranch,
+            drawers: resolvedDrawers,
+            activeShift: resolvedActiveShift,
+            custodianGuardrails: resolvedGuardrails,
+            loyaltyRewards: resolvedRewards,
+            kitchenStations: resolvedStations,
+            itemStationMap: resolvedStationMap,
+            itemModifierGroupsMap: resolvedModifierMap,
+            availabilityMap: availLookup,
+            menuItems: mergedItems,
+            categories: mergedCategories,
+            tables: resolvedTables,
+            serviceModels: resolvedModels,
+            financialSettings: resolvedFinancial,
+            receiptTemplate: resolvedTemplate,
+            cachedAt: new Date().toISOString(),
+          }).catch(() => {});
         }
       } catch (error) {
-        console.warn('POS: Initializing terminal state.', error);
+        console.warn('POS: Initializing terminal state from cache if available.', error);
+        const cached = await getCachedPosSnapshot();
+        if (cached) hydrateFromSnapshot(cached);
       } finally {
         setIsLoading(false);
       }
     },
-    [selectedDrawerId]
+    [selectedDrawerId, hydrateFromSnapshot]
   );
 
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
 
-  // Debounced CRM & Loyalty Member Search
+  // Manual & Automatic Reconnect Reconciliation for Offline Queued Orders
+  const handleSyncOfflineQueue = useCallback(async () => {
+    if (isSyncingOffline) return;
+    try {
+      setIsSyncingOffline(true);
+      const res = await syncQueuedTransactions();
+      setPendingOfflineCount(res.remainingCount);
+      if (res.syncedCount > 0 || res.conflictCount > 0) {
+        setOfflineSyncBanner(res.message);
+        await loadInitialData(activeBranch?.id);
+      }
+    } catch (err: unknown) {
+      setStockAlert(getErrorMessage(err, 'Failed to sync queued offline transactions.'));
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  }, [isSyncingOffline, loadInitialData, activeBranch?.id]);
+
   useEffect(() => {
-    if (!customerSearchQuery.trim() || customerSearchQuery.trim().length < 2) {
+    if (typeof window === 'undefined') return;
+    setIsOnline(navigator.onLine);
+
+    const onOnline = async () => {
+      setIsOnline(true);
+      const queued = await getQueuedOfflineOrders();
+      setPendingOfflineCount(queued.length);
+      if (queued.length > 0) {
+        await handleSyncOfflineQueue();
+      } else {
+        await loadInitialData(activeBranch?.id);
+      }
+    };
+
+    const onOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [handleSyncOfflineQueue, loadInitialData, activeBranch?.id]);
+
+  // Debounced CRM & Loyalty Member Search (disabled when offline)
+  useEffect(() => {
+    if (!isOnline || !customerSearchQuery.trim() || customerSearchQuery.trim().length < 2) {
       setCustomerMatches([]);
       return;
     }
@@ -632,7 +829,7 @@ export default function POSPage() {
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [customerSearchQuery]);
+  }, [customerSearchQuery, isOnline]);
 
   // Aggregate total units of each menuItemId currently in cart (both standalone & inside combos)
   const cartMenuItemQuantities = useMemo(() => {
@@ -822,6 +1019,10 @@ export default function POSPage() {
 
   const handleApplyPromoCode = async () => {
     if (!promoCodeInput.trim()) return;
+    if (!isOnline) {
+      setPromoError('Promo code validation requires an active network connection.');
+      return;
+    }
     try {
       setIsValidatingPromo(true);
       setPromoError(null);
@@ -858,7 +1059,12 @@ export default function POSPage() {
   }, [kitchenStations, itemStationMap]);
 
   const getEffectiveItemStation = useCallback(
-    (item: { id: string; targetStation?: string; isCombo?: boolean; comboItems?: ComboComponentItem[] }) => {
+    (item: {
+      id: string;
+      targetStation?: string;
+      isCombo?: boolean;
+      comboItems?: ComboComponentItem[];
+    }) => {
       if (orderTargetStation !== 'AUTO') {
         return {
           stationName: orderTargetStation,
@@ -953,7 +1159,6 @@ export default function POSPage() {
       return;
     }
 
-    // If item has attached modifier groups, prompt cashier to confirm/pick options
     const attachedGroups = !item.isCombo ? itemModifierGroupsMap[Number(item.id)] : undefined;
     if (attachedGroups && attachedGroups.length > 0) {
       setStockAlert(null);
@@ -987,7 +1192,6 @@ export default function POSPage() {
     });
   };
 
-  // Live preview of customized unit price inside modifier modal
   const draftCustomizedUnitPrice = useMemo(() => {
     if (!customizingItem) return 0;
     const groups = itemModifierGroupsMap[Number(customizingItem.id)] || [];
@@ -1373,6 +1577,7 @@ export default function POSPage() {
     }
     setCheckoutError(null);
     setStockAlert(null);
+    setOfflineMpesaRef('');
     setCashTendered(calculations.grandTotal.toFixed(2));
     setMpesaPhone(customerPhone || '');
     setSplitCashAmount((calculations.grandTotal / 2).toFixed(2));
@@ -1385,9 +1590,107 @@ export default function POSPage() {
     setIsCheckingOut(true);
     setCheckoutError(null);
 
+    const tableObj = tables.find((t) => String(t.id) === selectedTableId);
+    const expandedItems = expandCartForOrderApi(cart);
+
+    const processOfflineFallback = async () => {
+      const queued = await enqueueOfflineOrder({
+        branchId: activeBranch?.id ?? null,
+        tableId: selectedTableId ? parseInt(selectedTableId, 10) : null,
+        tableName: tableObj ? tableObj.tableLabel : activeServiceModel?.name || 'Walk-in',
+        customerId: selectedCustomer?.id ?? null,
+        orderType: activeServiceModel?.name || 'Dine-In',
+        customerName: customerName.trim() || null,
+        customerPhone: customerPhone.trim() || null,
+        buyerKraPin: buyerKraPin.trim() || null,
+        subtotal: calculations.netAmount,
+        tax: calculations.vatAmount,
+        cateringLevy: calculations.levyAmount,
+        serviceCharge: calculations.serviceChargeAmount,
+        discountTotal: calculations.discountAmount,
+        total: calculations.grandTotal,
+        paymentMethod,
+        mpesaReference: offlineMpesaRef.trim() || null,
+        notes: orderTargetStation !== 'AUTO' ? `Station: ${orderTargetStation}` : null,
+        items: expandedItems.map((i) => ({
+          menuItemId: i.menuItemId,
+          name: i.name,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice,
+          modifiersPrice: i.modifiersPrice ?? 0,
+          totalPrice: i.totalPrice,
+          selectedModifiers: i.selectedModifiers ?? [],
+          notes: i.notes ?? null,
+        })),
+      });
+
+      const updatedQueue = await getQueuedOfflineOrders();
+      setPendingOfflineCount(updatedQueue.length);
+
+      const dispatchedStations = Array.from(
+        new Set(stationRoutingPreview.map((s) => s.stationName))
+      );
+
+      setCompletedOrder({
+        orderNumber: `${queued.idempotencyKey.slice(0, 14)} (OFFLINE)`,
+        isOfflineQueued: true,
+        items: cart.map((item) => ({
+          ...item,
+          resolvedStation: getEffectiveItemStation(item).stationName,
+        })),
+        dispatchedStations,
+        ...calculations,
+        paymentMethod,
+        cashTendered:
+          paymentMethod === 'Cash'
+            ? parseFloat(cashTendered)
+            : paymentMethod === 'Split'
+              ? parseFloat(splitCashAmount)
+              : calculations.grandTotal,
+        cashChangeDue,
+        tableName: tableObj ? tableObj.tableLabel : activeServiceModel?.name || 'Walk-in',
+        customerName: customerName || 'Walk-in Guest',
+        customerPhone: customerPhone || null,
+        buyerKraPin: buyerKraPin || null,
+        servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
+        drawerName: selectedDrawerObj?.name || 'Main Till',
+        timestamp: new Date().toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' }),
+        businessName: receiptTemplate?.headerTitle || business?.name || 'Restaurant Workspace',
+        headerSubtitle: receiptTemplate?.headerSubtitle || '',
+        branchName: activeBranch?.name || '',
+        branchAddress: activeBranch?.address || '',
+        branchPhone: activeBranch?.phone || business?.phone || '',
+        kraPin: financialSettings?.taxPin || activeBranch?.kraPin || business?.kraPin || '',
+        etimsDeviceSerial:
+          activeBranch?.etimsDeviceSerial ||
+          (financialSettings as (FinancialSettings & { etimsDeviceSerial?: string }) | null)
+            ?.etimsDeviceSerial ||
+          'PENDING-SYNC',
+        footerMessage:
+          'OFFLINE RECEIPT — Queued for automatic cloud sync & KRA eTIMS fiscalization.',
+        returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
+        wifiDetails: receiptTemplate?.wifiDetails || null,
+      });
+
+      setCart([]);
+      setOfflineMpesaRef('');
+      setOrderTargetStation('AUTO');
+      setAppliedPromo(null);
+      setSelectedReward(null);
+      setOrderDiscountPercent(0);
+      setIsPaymentModalOpen(false);
+      setMobileTab('menu');
+      setOfflineSyncBanner(
+        `Order queued locally (${updatedQueue.length} pending). Will auto-sync to PostgreSQL once online.`
+      );
+    };
+
     try {
-      const tableObj = tables.find((t) => String(t.id) === selectedTableId);
-      const expandedItems = expandCartForOrderApi(cart);
+      // Fast-path directly to local IndexedDB queue when browser is offline
+      if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+        await processOfflineFallback();
+        return;
+      }
 
       // 0. Authoritative live database stock verification before taking payment
       await fetchApi('/api/v1/pos/validate-stock', {
@@ -1475,7 +1778,7 @@ export default function POSPage() {
               result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
             notes: `POS Tender for ${customerName || 'Guest'}`,
           }),
-        }).catch(() => { });
+        }).catch(() => {});
       }
 
       const dispatchedStations = Array.from(
@@ -1508,8 +1811,8 @@ export default function POSPage() {
         loyaltyTier: selectedCustomer?.tierName || null,
         loyaltyPointsBalance: selectedCustomer
           ? selectedCustomer.currentPoints -
-          (selectedReward?.pointsCost || 0) +
-          calculations.estimatedPointsEarned
+            (selectedReward?.pointsCost || 0) +
+            calculations.estimatedPointsEarned
           : null,
         servedBy: currentUser?.fullName || currentUser?.firstName || 'POS Cashier',
         drawerName: selectedDrawerObj?.name || 'Main Till',
@@ -1540,6 +1843,25 @@ export default function POSPage() {
       setMobileTab('menu');
       loadInitialData(activeBranch?.id);
     } catch (error: unknown) {
+      // Automatic failover to IndexedDB queue on WAN drop or upstream DB outage
+      if (isOfflineOrNetworkError(error)) {
+        try {
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            setIsOnline(false);
+          }
+          await processOfflineFallback();
+          return;
+        } catch (offlinePolicyErr: unknown) {
+          setCheckoutError(
+            getErrorMessage(
+              offlinePolicyErr,
+              'Network is offline and order could not be queued under offline policy.'
+            )
+          );
+          return;
+        }
+      }
+
       setCheckoutError(
         getErrorMessage(error, 'POS Checkout transaction encountered an error.')
       );
@@ -1644,7 +1966,7 @@ export default function POSPage() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] gap-3 font-sans">
-      {/* 1. ENTERPRISE TERMINAL HEADER: BRANCH, DRAWER & SHIFT TELEMETRY */}
+      {/* 1. ENTERPRISE TERMINAL HEADER: BRANCH, DRAWER, SHIFT & OFFLINE TELEMETRY */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
         <div className="flex flex-wrap items-center gap-3">
           {/* Branch Outlet Switcher */}
@@ -1658,7 +1980,8 @@ export default function POSPage() {
                 <select
                   value={activeBranch?.id || ''}
                   onChange={(e) => handleBranchSwitch(e.target.value)}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+                  disabled={!isOnline}
+                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-60"
                 >
                   {branches.map((b) => (
                     <option key={b.id} value={b.id}>
@@ -1705,8 +2028,33 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* Right Side: Shift Status, Safe Drop Alert & Sync */}
+        {/* Right Side: Network Pill, Offline Queue Sync, Shift Status & Refresh */}
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
+              isOnline
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
+            }`}
+          >
+            {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+            <span>{isOnline ? 'Online' : 'Offline Mode'}</span>
+          </span>
+
+          {pendingOfflineCount > 0 && (
+            <button
+              type="button"
+              onClick={handleSyncOfflineQueue}
+              disabled={!isOnline || isSyncingOffline}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 cursor-pointer"
+            >
+              <UploadCloud size={13} />
+              <span>
+                {isSyncingOffline ? 'Syncing...' : `Sync Queue (${pendingOfflineCount})`}
+              </span>
+            </button>
+          )}
+
           {isSafeDropWarning && (
             <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold animate-pulse">
               <AlertTriangle size={13} className="text-amber-600" />
@@ -1743,6 +2091,27 @@ export default function POSPage() {
         </div>
       </div>
 
+      {/* OFFLINE QUEUE / RECONCILIATION STATUS BANNER */}
+      {offlineSyncBanner && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-2 rounded-xl text-xs font-semibold shrink-0"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
+            <span>{offlineSyncBanner}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOfflineSyncBanner(null)}
+            aria-label="Dismiss sync notification"
+            className="text-emerald-700 hover:text-emerald-950"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       {/* INLINE STOCK GUARDRAIL ALERT BANNER */}
       {stockAlert && (
         <div
@@ -1769,20 +2138,22 @@ export default function POSPage() {
         <button
           type="button"
           onClick={() => setMobileTab('menu')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${mobileTab === 'menu'
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
+            mobileTab === 'menu'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
-            }`}
+          }`}
         >
           <Layers size={15} /> Catalog ({filteredItems.length})
         </button>
         <button
           type="button"
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${mobileTab === 'cart'
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
+            mobileTab === 'cart'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
-            }`}
+          }`}
         >
           <ShoppingCart size={15} /> Current Order
           {totalItemsCount > 0 && (
@@ -1797,8 +2168,9 @@ export default function POSPage() {
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
         {/* LEFT COLUMN: ITEM CATALOG & STATION LOOKUP */}
         <div
-          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
-            }`}
+          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
+            mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
+          }`}
         >
           <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
             <div className="flex flex-wrap items-center gap-2">
@@ -1869,12 +2241,13 @@ export default function POSPage() {
                   key={cat}
                   type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${selectedCategory === cat
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${
+                    selectedCategory === cat
                       ? 'bg-servora-navy text-white shadow-xs'
                       : cat === COMBOS_CATEGORY_LABEL
                         ? 'bg-blue-50 text-servora-core border border-blue-200 hover:bg-blue-100'
                         : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
-                    }`}
+                  }`}
                 >
                   {cat === COMBOS_CATEGORY_LABEL && <ShoppingBasket size={12} />}
                   {cat}
@@ -1912,20 +2285,22 @@ export default function POSPage() {
                       type="button"
                       onClick={() => addToCart(item)}
                       disabled={isOutOfStock}
-                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${isOutOfStock
+                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
+                        isOutOfStock
                           ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
                           : item.isCombo
                             ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-97 cursor-pointer'
                             : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
-                        }`}
+                      }`}
                     >
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-1">
                           <span
-                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${item.isCombo
+                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${
+                              item.isCombo
                                 ? 'bg-servora-core text-white'
                                 : 'text-servora-deepTeal bg-slate-100'
-                              }`}
+                            }`}
                           >
                             {item.isCombo ? (
                               <>
@@ -2010,8 +2385,9 @@ export default function POSPage() {
 
         {/* RIGHT COLUMN: ACTIVE CHECK, STATION ROUTING, CRM LOYALTY & FISCAL LEDGER */}
         <div
-          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
-            }`}
+          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
+            mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
+          }`}
         >
           {/* Dynamic Service Model Revenue Center Selectors */}
           <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
@@ -2024,10 +2400,11 @@ export default function POSPage() {
                     key={model.id}
                     type="button"
                     onClick={() => setActiveServiceModel(model)}
-                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${isSelected
+                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                      isSelected
                         ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
                         : 'text-gray-500 hover:text-servora-navy'
-                      }`}
+                    }`}
                   >
                     <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
                     <span className="truncate">{model.name}</span>
@@ -2084,10 +2461,15 @@ export default function POSPage() {
                 />
                 <input
                   type="text"
-                  placeholder="Lookup CRM / Loyalty Member by phone, name, or PIN..."
+                  disabled={!isOnline}
+                  placeholder={
+                    isOnline
+                      ? 'Lookup CRM / Loyalty Member by phone, name, or PIN...'
+                      : 'CRM Lookup unavailable in offline mode'
+                  }
                   value={customerSearchQuery}
                   onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-amber-50/40 border border-amber-200/80 rounded-xl focus:outline-none focus:border-amber-400 text-xs"
+                  className="w-full pl-8 pr-3 py-1.5 bg-amber-50/40 border border-amber-200/80 rounded-xl focus:outline-none focus:border-amber-400 text-xs disabled:opacity-60"
                 />
                 {customerMatches.length > 0 && (
                   <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 max-h-48 overflow-y-auto divide-y divide-gray-100">
@@ -2255,7 +2637,7 @@ export default function POSPage() {
                   <button
                     type="button"
                     onClick={handleApplyPromoCode}
-                    disabled={!promoCodeInput.trim() || cart.length === 0 || isValidatingPromo}
+                    disabled={!promoCodeInput.trim() || cart.length === 0 || isValidatingPromo || !isOnline}
                     className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-servora-navy font-bold rounded-lg text-[11px] disabled:opacity-40 cursor-pointer"
                   >
                     {isValidatingPromo ? '...' : 'Apply'}
@@ -2332,9 +2714,7 @@ export default function POSPage() {
                                 key={`${m.groupName}-${m.modifierId}`}
                                 className="flex items-center justify-between text-[10px] text-purple-800 bg-purple-50/70 px-1.5 py-0.5 rounded"
                               >
-                                <span className="truncate">
-                                  + {m.name}
-                                </span>
+                                <span className="truncate">+ {m.name}</span>
                                 {m.price > 0 && (
                                   <span className="font-mono font-semibold shrink-0 ml-2">
                                     +{currencySymbol} {m.price.toFixed(0)}
@@ -2391,10 +2771,11 @@ export default function POSPage() {
                           );
                         }}
                         title="Redirect this item to a specific kitchen/bar station"
-                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${resolvedSt.isRedirected
+                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${
+                          resolvedSt.isRedirected
                             ? 'bg-amber-50 border-amber-300 text-amber-800'
                             : 'bg-white border-gray-200 text-servora-navy'
-                          }`}
+                        }`}
                       >
                         <option value="">Default ({resolvedSt.stationName})</option>
                         {kitchenStations
@@ -2600,10 +2981,11 @@ export default function POSPage() {
                         )}
                       </div>
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${group.isRequired
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0 ${
+                          group.isRequired
                             ? 'bg-amber-50 text-amber-700 border border-amber-200'
                             : 'bg-gray-100 text-gray-600'
-                          }`}
+                        }`}
                       >
                         {group.isRequired ? 'Required' : 'Optional'} &bull;{' '}
                         {isSingle ? 'Pick 1' : `Up to ${group.maxSelections}`}
@@ -2637,17 +3019,19 @@ export default function POSPage() {
                                 return { ...prev, [group.id]: [...cur, opt.id] };
                               });
                             }}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${active
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${
+                              active
                                 ? 'bg-blue-50 border-servora-core text-servora-navy font-bold'
                                 : 'bg-slate-50 border-gray-200 text-gray-700 hover:bg-gray-100'
-                              }`}
+                            }`}
                           >
                             <span className="flex items-center gap-2">
                               <span
-                                className={`w-3.5 h-3.5 rounded-${isSingle ? 'full' : 'sm'} border flex items-center justify-center ${active
+                                className={`w-3.5 h-3.5 rounded-${isSingle ? 'full' : 'sm'} border flex items-center justify-center ${
+                                  active
                                     ? 'border-servora-core bg-servora-core text-white'
                                     : 'border-gray-300 bg-white'
-                                  }`}
+                                }`}
                               >
                                 {active && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
                               </span>
@@ -2717,6 +3101,15 @@ export default function POSPage() {
               </button>
             </div>
 
+            {!isOnline && (
+              <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold flex items-center gap-2">
+                <WifiOff size={14} className="text-amber-700 shrink-0" />
+                <span>
+                  Offline Survivability Active — Order will be queued locally and reconciled automatically on reconnect.
+                </span>
+              </div>
+            )}
+
             {checkoutError && (
               <div
                 role="alert"
@@ -2749,10 +3142,11 @@ export default function POSPage() {
                   {stationRoutingPreview.map((st) => (
                     <span
                       key={st.stationName}
-                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-mono font-bold border inline-flex items-center gap-1 ${st.isRedirected || st.isFailover
+                      className={`px-2 py-0.5 rounded-lg text-[10.5px] font-mono font-bold border inline-flex items-center gap-1 ${
+                        st.isRedirected || st.isFailover
                           ? 'bg-amber-50 text-amber-800 border-amber-200'
                           : 'bg-white text-servora-navy border-gray-200'
-                        }`}
+                      }`}
                     >
                       <ArrowRight size={10} className="text-servora-core" />
                       {st.stationName}: {st.unitsCount} item(s)
@@ -2769,10 +3163,11 @@ export default function POSPage() {
                   key={method}
                   type="button"
                   onClick={() => setPaymentMethod(method)}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${paymentMethod === method
+                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                    paymentMethod === method
                       ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                    }`}
+                  }`}
                 >
                   {method}
                 </button>
@@ -2807,15 +3202,28 @@ export default function POSPage() {
             {paymentMethod === 'M-Pesa' && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2 text-xs">
                 <span className="font-bold text-emerald-800 flex items-center gap-1.5">
-                  <Smartphone size={13} /> Instant Daraja STK Push Validation
+                  <Smartphone size={13} />
+                  {isOnline
+                    ? 'Instant Daraja STK Push Validation'
+                    : 'Offline M-Pesa Confirmation Reference'}
                 </span>
-                <input
-                  type="text"
-                  placeholder="2547XXXXXXXX or 07XXXXXXXX"
-                  value={mpesaPhone}
-                  onChange={(e) => setMpesaPhone(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono font-bold text-xs focus:outline-none"
-                />
+                {isOnline ? (
+                  <input
+                    type="text"
+                    placeholder="2547XXXXXXXX or 07XXXXXXXX"
+                    value={mpesaPhone}
+                    onChange={(e) => setMpesaPhone(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono font-bold text-xs focus:outline-none"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="Enter M-Pesa Code (e.g. UK8912KL99)"
+                    value={offlineMpesaRef}
+                    onChange={(e) => setOfflineMpesaRef(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono uppercase font-bold text-xs focus:outline-none"
+                  />
+                )}
               </div>
             )}
 
@@ -2848,13 +3256,23 @@ export default function POSPage() {
                     />
                   </div>
                 </div>
-                <input
-                  type="text"
-                  placeholder="M-Pesa Mobile Number"
-                  value={mpesaPhone}
-                  onChange={(e) => setMpesaPhone(e.target.value)}
-                  className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg font-mono text-xs focus:outline-none"
-                />
+                {isOnline ? (
+                  <input
+                    type="text"
+                    placeholder="M-Pesa Mobile Number"
+                    value={mpesaPhone}
+                    onChange={(e) => setMpesaPhone(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg font-mono text-xs focus:outline-none"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="Offline M-Pesa Reference Code"
+                    value={offlineMpesaRef}
+                    onChange={(e) => setOfflineMpesaRef(e.target.value.toUpperCase())}
+                    className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg font-mono uppercase text-xs focus:outline-none"
+                  />
+                )}
               </div>
             )}
 
@@ -2872,7 +3290,9 @@ export default function POSPage() {
               ) : (
                 <>
                   <CheckCircle size={15} />
-                  Authorize Transaction &amp; Route to KDS
+                  {isOnline
+                    ? 'Authorize Transaction & Route to KDS'
+                    : 'Queue Offline Order & Print Receipt'}
                 </>
               )}
             </button>
@@ -2885,8 +3305,9 @@ export default function POSPage() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
           <div
             id="thermal-receipt-printable"
-            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
-              }`}
+            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
+              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
+            }`}
           >
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
               <div className="text-center space-y-0.5">
@@ -2977,7 +3398,10 @@ export default function POSPage() {
                       i.selectedModifiers.length > 0 && (
                         <div className="pl-2 space-y-0.5">
                           {i.selectedModifiers.map((m) => (
-                            <p key={`${m.groupName}-${m.modifierId}`} className="text-[9px] text-gray-700">
+                            <p
+                              key={`${m.groupName}-${m.modifierId}`}
+                              className="text-[9px] text-gray-700"
+                            >
                               + {m.name}
                               {m.price > 0 ? ` (+${currencySymbol} ${m.price.toFixed(0)})` : ''}
                             </p>
@@ -3117,7 +3541,11 @@ export default function POSPage() {
                   <div className="w-16 h-16 mx-auto bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
                     <QrCode size={48} className="text-black" />
                   </div>
-                  <p className="text-[9px] font-bold">KRA eTIMS FISCAL INVOICE</p>
+                  <p className="text-[9px] font-bold">
+                    {completedOrder.isOfflineQueued
+                      ? 'PENDING KRA eTIMS SYNC'
+                      : 'KRA eTIMS FISCAL INVOICE'}
+                  </p>
                   {completedOrder.etimsDeviceSerial && (
                     <p className="text-[8px] text-gray-700">
                       SCU: {completedOrder.etimsDeviceSerial}
