@@ -291,6 +291,7 @@ const navigationGroups: NavGroup[] = [
       { label: 'Manager Shift Handover Notes', href: '/staff/handover', icon: ClipboardList, keywords: ['logbook', 'closing'] },
       { label: 'Cash Drawer Custodians', href: '/staff/cashier-assignments', icon: Wallet, keywords: ['till assignment', 'register'] },
       { label: 'Server Performance & Tip Pool', href: '/staff/performance', icon: ChartNoAxesCombined, keywords: ['waiter kpis', 'gratuity'] },
+      { label: 'Sales Commissions & Incentives', href: '/staff/commissions', icon: BadgePercent, keywords: ['commission', 'bonus', 'incentives', 'payout'] },
     ],
   },
   {

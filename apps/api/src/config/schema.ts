@@ -2347,6 +2347,157 @@ export const staffPerformanceReviews = pgTable(
 );
 
 // ============================================================================
+// WORKFORCE COMMISSIONS, INCENTIVE PLANS & PAYOUT LEDGER (HCM / FIN)
+// ============================================================================
+
+export interface CommissionTierRule {
+  minAmount: number;
+  maxAmount: number | null; // null = unbounded top tier
+  ratePercent: number;
+}
+
+export const commissionPlans = pgTable(
+  'commission_plans',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'cascade' }), // Nullable = tenant-wide plan
+    name: varchar('name', { length: 150 }).notNull(), // e.g. "Beverage Upsell 5%", "Senior Waiter Tiered Plan"
+    description: text('description'),
+
+    // Eligibility Scope
+    targetRole: varchar('target_role', { length: 100 }), // Nullable = all roles (or e.g. "WAITER", "CASHIER")
+    targetUserId: integer('target_user_id').references(() => users.id, { onDelete: 'cascade' }), // Optional individual override
+    attributionMode: varchar('attribution_mode', { length: 40 })
+      .default('COALESCE_WAITER_CASHIER')
+      .notNull(), // WAITER_ONLY | CASHIER_ONLY | COALESCE_WAITER_CASHIER
+
+    // Product & Calculation Basis
+    productScope: varchar('product_scope', { length: 30 }).default('ALL_ITEMS').notNull(), // ALL_ITEMS | CATEGORY | MENU_ITEM
+    menuCategoryId: integer('menu_category_id').references(() => menuCategories.id, {
+      onDelete: 'set null',
+    }),
+    menuItemId: integer('menu_item_id').references(() => menuItems.id, { onDelete: 'set null' }),
+    basisType: varchar('basis_type', { length: 30 }).default('NET_SALES').notNull(), // NET_SALES | GROSS_SALES | GROSS_MARGIN | ITEM_QUANTITY
+    rateType: varchar('rate_type', { length: 30 }).default('FLAT_PERCENTAGE').notNull(), // FLAT_PERCENTAGE | FLAT_PER_UNIT | TIERED_ACCELERATOR
+
+    // Rates, Hurdles & Caps
+    flatRate: numeric('flat_rate', { precision: 10, scale: 4 }).default('0.0000').notNull(), // % or fixed KES per unit
+    tiers: jsonb('tiers').$type<CommissionTierRule[]>().default([]).notNull(),
+    minQualifyingSales: numeric('min_qualifying_sales', { precision: 12, scale: 2 })
+      .default('0.00')
+      .notNull(), // Minimum quota hurdle before commission activates
+    maxPayoutCap: numeric('max_payout_cap', { precision: 12, scale: 2 }), // Optional ceiling per period
+
+    // Governance & Validity
+    clawbackOnRefund: boolean('clawback_on_refund').default(true).notNull(),
+    effectiveFrom: date('effective_from').notNull(),
+    effectiveTo: date('effective_to'),
+    isActive: boolean('is_active').default(true).notNull(),
+    createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    index('comm_plans_tenant_idx').on(t.tenantId),
+    index('comm_plans_branch_idx').on(t.tenantId, t.branchId),
+    index('comm_plans_active_idx').on(t.tenantId, t.isActive),
+  ]
+);
+
+export const commissionPayoutRuns = pgTable(
+  'commission_payout_runs',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }), // Nullable = multi-branch run
+    runNumber: varchar('run_number', { length: 50 }).notNull(), // e.g. "COM-202611-001"
+    periodStart: date('period_start').notNull(),
+    periodEnd: date('period_end').notNull(),
+    currency: varchar('currency', { length: 10 }).default('KES').notNull(),
+
+    // Financial Totals
+    employeeCount: integer('employee_count').default(0).notNull(),
+    totalQualifyingSales: numeric('total_qualifying_sales', { precision: 14, scale: 2 })
+      .default('0.00')
+      .notNull(),
+    totalGrossCommission: numeric('total_gross_commission', { precision: 14, scale: 2 })
+      .default('0.00')
+      .notNull(),
+    totalClawbacks: numeric('total_clawbacks', { precision: 14, scale: 2 })
+      .default('0.00')
+      .notNull(),
+    netPayableAmount: numeric('net_payable_amount', { precision: 14, scale: 2 })
+      .default('0.00')
+      .notNull(),
+
+    // Maker-Checker Lifecycle & Settlement
+    status: varchar('status', { length: 30 }).default('DRAFT').notNull(), // DRAFT | APPROVED | PAID | VOIDED
+    createdById: integer('created_by_id').references(() => users.id, { onDelete: 'set null' }),
+    approvedByUserId: integer('approved_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    paymentMethod: varchar('payment_method', { length: 50 }), // MPESA_B2C | BANK_TRANSFER | PAYROLL_CONSOLIDATION | CASH_DRAWER
+    paymentReference: varchar('payment_reference', { length: 120 }),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (t) => [
+    uniqueIndex('comm_runs_tenant_num_idx').on(t.tenantId, t.runNumber),
+    index('comm_runs_tenant_idx').on(t.tenantId),
+    index('comm_runs_status_idx').on(t.tenantId, t.status),
+  ]
+);
+
+export const commissionLedgerEntries = pgTable(
+  'commission_ledger_entries',
+  {
+    id: serial('id').primaryKey(),
+    tenantId: integer('tenant_id')
+      .references(() => tenants.id, { onDelete: 'cascade' })
+      .notNull(),
+    payoutRunId: integer('payout_run_id')
+      .references(() => commissionPayoutRuns.id, { onDelete: 'cascade' })
+      .notNull(),
+    branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
+    userId: integer('user_id')
+      .references(() => users.id, { onDelete: 'cascade' })
+      .notNull(),
+    planId: integer('plan_id')
+      .references(() => commissionPlans.id, { onDelete: 'set null' }),
+    planNameSnapshot: varchar('plan_name_snapshot', { length: 150 }).notNull(),
+
+    ordersCount: integer('orders_count').default(0).notNull(),
+    qualifyingUnits: numeric('qualifying_units', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    qualifyingSales: numeric('qualifying_sales', { precision: 14, scale: 2 }).default('0.00').notNull(),
+    effectiveRateLabel: varchar('effective_rate_label', { length: 60 }).notNull(), // e.g. "3.5% Tier 2" or "KES 50/unit"
+    grossCommission: numeric('gross_commission', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    clawbackAmount: numeric('clawback_amount', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    netCommission: numeric('net_commission', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    status: varchar('status', { length: 30 }).default('ACCRUED').notNull(), // ACCRUED | APPROVED | PAID | VOIDED
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('comm_entries_run_user_plan_idx').on(t.payoutRunId, t.userId, t.planId),
+    index('comm_entries_tenant_user_idx').on(t.tenantId, t.userId),
+    index('comm_entries_run_idx').on(t.payoutRunId),
+  ]
+);
+
+// ============================================================================
 // FINANCIAL SETTINGS, STATUTORY TAX CODES & FISCAL DEVICES (FIN / HCM)
 // ============================================================================
 

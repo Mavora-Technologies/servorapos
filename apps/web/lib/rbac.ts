@@ -97,6 +97,7 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/staff/attendance': ['staff.view', 'staff.manage'],
   '/staff/handover': ['staff.view', 'cash.reconcile'],
   '/staff': ['staff.view', 'staff.manage'],
+  '/staff/commissions': ['staff.manage', 'reports.view'],
 
   // Organization & System Settings
   '/settings/business': ['settings.view', 'settings.manage'],

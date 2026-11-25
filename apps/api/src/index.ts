@@ -74,6 +74,7 @@ import attendanceRoutes from './routes/attendance.routes';
 import handoverRoutes from './routes/handover.routes';
 import cashierAssignmentRoutes from './routes/cashier-assignment.routes';
 import performanceRoutes from './routes/performance.routes';
+import commissionRoutes from './routes/commission.routes';
 import financialRoutes from './routes/financial.routes';
 import serviceModelRoutes from './routes/service-model.routes';
 import receiptRoutes from './routes/receipt.routes';
@@ -239,6 +240,7 @@ app.use('/api/v1/staff/attendance', attendanceRoutes);
 app.use('/api/v1/staff/handover', handoverRoutes);
 app.use('/api/v1/staff/cashier-assignments', cashierAssignmentRoutes);
 app.use('/api/v1/staff/performance', performanceRoutes);
+app.use('/api/v1/staff/commissions', commissionRoutes);
 
 // 10 . Settings, Financials & Service Models, Receipts & Printers, Kitchen Configurations
 app.use('/api/v1/settings/financial', financialRoutes);

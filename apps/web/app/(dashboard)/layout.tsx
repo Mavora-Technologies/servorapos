@@ -365,6 +365,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname === '/finance/taxes') return 'Tax Compliance & eTIMS Ledger';
     if (pathname === '/notifications') return 'System Alert Center';
     if (pathname === '/help') return 'Servora Helpdesk & Documentation';
+    if (pathname === '/staff/commissions') return 'Sales Commissions & Incentives';
 
     const segments = pathname.split('/').filter(Boolean);
     if (segments.length > 0) {
