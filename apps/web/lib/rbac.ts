@@ -66,6 +66,8 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/finance/adjustments': ['cash.reconcile', 'payments.reconcile'],
   '/finance/expenses': ['payments.view', 'reports.view'],
   '/finance/payables': ['purchasing.view', 'payments.view'],
+  '/finance': ['payments.view', 'reports.view'],
+  '/marketing': ['pos.discount', 'reports.view'],
 
   // Guests, Loyalty & Marketing
   '/customers/feedback': ['orders.view', 'reports.view'],

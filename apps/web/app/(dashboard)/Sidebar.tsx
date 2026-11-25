@@ -1,10 +1,12 @@
+// apps/web/app/(dashboard)/Sidebar.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { fetchApi } from '@/lib/api';
+import { canAccessRoute, getDefaultLandingRoute } from '@/lib/rbac';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -61,8 +63,8 @@ import {
   ChevronsDownUp,
   ChevronsUpDown as ExpandAllIcon,
   Megaphone,
-  Target,
   FileCode,
+  WifiOff,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -72,6 +74,12 @@ interface BranchNode {
   code: string;
   isMainBranch?: boolean;
   isActive?: boolean;
+}
+
+interface BranchSwitchedDetail {
+  branchId: number;
+  branchName: string;
+  branchCode?: string;
 }
 
 interface SidebarProps {
@@ -90,7 +98,6 @@ interface NavItem {
   label: string;
   href: string;
   icon: LucideIcon;
-  permission?: string;
   badge?: string;
   badgeType?: 'live' | 'warning' | 'info' | 'count';
   keywords?: string[];
@@ -115,14 +122,12 @@ const standaloneItems: NavItem[] = [
     label: 'Overview Dashboard',
     href: '/dashboard',
     icon: LayoutDashboard,
-    permission: 'dashboard.view',
     keywords: ['metrics', 'summary', 'analytics', 'home'],
   },
   {
     label: 'Point of Sale Terminal',
     href: '/pos',
     icon: ShoppingCart,
-    permission: 'pos.access',
     badge: 'Live',
     badgeType: 'live',
     keywords: ['register', 'checkout', 'billing', 'cashier'],
@@ -135,14 +140,14 @@ const navigationGroups: NavGroup[] = [
     domain: 'OPERATIONS',
     icon: Store,
     items: [
-      { label: 'Orders Ledger', href: '/orders', icon: FileText, permission: 'orders.view', keywords: ['sales', 'receipts'] },
-      { label: 'Dining Checks', href: '/orders/open', icon: ClipboardList, permission: 'orders.view', keywords: ['active', 'tables'] },
-      { label: 'Takeaway & Express', href: '/orders/takeaway', icon: ShoppingBasket, permission: 'orders.view', keywords: ['to-go', 'pickup'] },
-      { label: 'Dispatch Tracking', href: '/orders/delivery', icon: Truck, permission: 'delivery.view', keywords: ['courier', 'rider'] },
-      { label: 'Online Orders', href: '/orders/online-orders', icon: Monitor, permission: 'orders.view', keywords: ['web', 'menu'] },
-      { label: 'Floor Layout', href: '/tables', icon: UtensilsCrossed, permission: 'tables.view', keywords: ['seating', 'map'] },
-      { label: 'Table Reservations', href: '/reservations', icon: CalendarDays, permission: 'reservations.view', keywords: ['booking', 'calendar'] },
-      { label: 'Guest Waitlist', href: '/reservations/waitlist', icon: Clock, permission: 'reservations.view', keywords: ['walkin', 'line'] },
+      { label: 'Orders Ledger', href: '/orders', icon: FileText, keywords: ['sales', 'receipts'] },
+      { label: 'Dining Checks', href: '/orders/open', icon: ClipboardList, keywords: ['active', 'tables'] },
+      { label: 'Takeaway & Express', href: '/orders/takeaway', icon: ShoppingBasket, keywords: ['to-go', 'pickup'] },
+      { label: 'Dispatch Tracking', href: '/orders/delivery', icon: Truck, keywords: ['courier', 'rider'] },
+      { label: 'Online Orders', href: '/orders/online-orders', icon: Monitor, keywords: ['web', 'menu'] },
+      { label: 'Floor Layout', href: '/tables', icon: UtensilsCrossed, keywords: ['seating', 'map'] },
+      { label: 'Table Reservations', href: '/reservations', icon: CalendarDays, keywords: ['booking', 'calendar'] },
+      { label: 'Guest Waitlist', href: '/reservations/waitlist', icon: Clock, keywords: ['walkin', 'line'] },
     ],
   },
   {
@@ -150,10 +155,10 @@ const navigationGroups: NavGroup[] = [
     domain: 'OPERATIONS',
     icon: ChefHat,
     items: [
-      { label: 'Kitchen Display', href: '/kitchen', icon: CookingPot, permission: 'kitchen.view', keywords: ['kds', 'line', 'prep'] },
-      { label: 'Kitchen Stations', href: '/kitchen/stations', icon: Boxes, permission: 'kitchen.manage', keywords: ['grill', 'bar', 'cold'] },
-      { label: 'Ticket History', href: '/kitchen/history', icon: History, permission: 'kitchen.view', keywords: ['served', 'orders'] },
-      { label: 'Culinary SLA', href: '/kitchen/performance', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['time', 'cook'] },
+      { label: 'Kitchen Display', href: '/kitchen', icon: CookingPot, keywords: ['kds', 'line', 'prep'] },
+      { label: 'Kitchen Stations', href: '/kitchen/stations', icon: Boxes, keywords: ['grill', 'bar', 'cold'] },
+      { label: 'Ticket History', href: '/kitchen/history', icon: History, keywords: ['served', 'orders'] },
+      { label: 'Culinary SLA', href: '/kitchen/performance', icon: ChartNoAxesCombined, keywords: ['time', 'cook'] },
     ],
   },
   {
@@ -161,15 +166,15 @@ const navigationGroups: NavGroup[] = [
     domain: 'OPERATIONS',
     icon: UtensilsCrossed,
     items: [
-      { label: 'Menu Master', href: '/menu', icon: BookOpen, permission: 'menu.view', keywords: ['dishes', 'beverages'] },
-      { label: 'Category', href: '/menu/categories', icon: Tags, permission: 'menu.manage', keywords: ['groups', 'sections'] },
-      { label: 'Item Modifiers', href: '/menu/modifiers', icon: SlidersHorizontal, permission: 'menu.manage', keywords: ['options', 'addons'] },
-      { label: 'Combos & Bundles', href: '/menu/combos', icon: ShoppingBasket, permission: 'menu.manage', keywords: ['sets', 'deals'] },
-      { label: 'Price Schedules', href: '/menu/pricing', icon: BadgePercent, permission: 'menu.manage', keywords: ['happy hour', 'promotions'] },
-      { label: 'Item Availability', href: '/menu/availability', icon: Clock, permission: 'menu.manage', keywords: ['out of stock', 'sold out'] },
-      { label: 'Recipe Formulas & BOM', href: '/menu/recipes', icon: CookingPot, permission: 'recipes.view', keywords: ['ingredients', 'portions'] },
-      { label: 'Food Cost & Margin', href: '/menu/recipes/costing', icon: FileChartColumn, permission: 'recipes.view', keywords: ['profit', 'cogs'] },
-      { label: 'Unit of Measure', href: '/menu/recipes/units', icon: RefreshCw, permission: 'inventory.manage', keywords: ['kg', 'litres', 'grams'] },
+      { label: 'Menu Master', href: '/menu', icon: BookOpen, keywords: ['dishes', 'beverages'] },
+      { label: 'Category', href: '/menu/categories', icon: Tags, keywords: ['groups', 'sections'] },
+      { label: 'Item Modifiers', href: '/menu/modifiers', icon: SlidersHorizontal, keywords: ['options', 'addons'] },
+      { label: 'Combos & Bundles', href: '/menu/combos', icon: ShoppingBasket, keywords: ['sets', 'deals'] },
+      { label: 'Price Schedules', href: '/menu/pricing', icon: BadgePercent, keywords: ['happy hour', 'promotions'] },
+      { label: 'Item Availability', href: '/menu/availability', icon: Clock, keywords: ['out of stock', 'sold out'] },
+      { label: 'Recipe Formulas & BOM', href: '/menu/recipes', icon: CookingPot, keywords: ['ingredients', 'portions'] },
+      { label: 'Food Cost & Margin', href: '/menu/recipes/costing', icon: FileChartColumn, keywords: ['profit', 'cogs'] },
+      { label: 'Unit of Measure', href: '/menu/recipes/units', icon: RefreshCw, keywords: ['kg', 'litres', 'grams'] },
     ],
   },
   {
@@ -177,16 +182,16 @@ const navigationGroups: NavGroup[] = [
     domain: 'SUPPLY_CHAIN',
     icon: Package,
     items: [
-      { label: 'Inventory Ledger', href: '/inventory', icon: Boxes, permission: 'inventory.view', keywords: ['stock', 'on-hand'] },
-      { label: 'Raw Materials', href: '/inventory/items', icon: Package, permission: 'inventory.view', keywords: ['ingredients', 'products'] },
-      { label: 'Stock Movements', href: '/inventory/movements', icon: History, permission: 'inventory.view', keywords: ['inward', 'outward', 'adjustments'] },
-      { label: 'Stock Audits', href: '/inventory/counts', icon: ClipboardList, permission: 'inventory.manage', keywords: ['stocktake', 'variance'] },
-      { label: 'Branch Transfers', href: '/inventory/transfers', icon: Truck, permission: 'inventory.manage', keywords: ['depot', 'internal movement'] },
-      { label: 'Logistics & Dispatch', href: '/inventory/transfers/fleet', icon: Truck, permission: 'inventory.manage', keywords: ['vans', 'vehicles', 'reefer', 'driver'] },
-      { label: 'Storage Bins', href: '/inventory/locations', icon: Warehouse, permission: 'inventory.manage', keywords: ['zones', 'racks', 'shelves', 'chiller'] },
-      { label: 'Batches', href: '/inventory/batches', icon: CalendarDays, permission: 'inventory.view', keywords: ['fifo', 'shelf life'] },
-      { label: 'Reorder Engine', href: '/inventory/reorder', icon: ShoppingBasket, permission: 'inventory.view', keywords: ['par levels', 'low stock'] },
-      { label: 'Waste & Spoilage', href: '/inventory/waste', icon: Package, permission: 'inventory.manage', keywords: ['scrap', 'loss', 'damage'] },
+      { label: 'Inventory Ledger', href: '/inventory', icon: Boxes, keywords: ['stock', 'on-hand'] },
+      { label: 'Raw Materials', href: '/inventory/items', icon: Package, keywords: ['ingredients', 'products'] },
+      { label: 'Stock Movements', href: '/inventory/movements', icon: History, keywords: ['inward', 'outward', 'adjustments'] },
+      { label: 'Stock Audits', href: '/inventory/counts', icon: ClipboardList, keywords: ['stocktake', 'variance'] },
+      { label: 'Branch Transfers', href: '/inventory/transfers', icon: Truck, keywords: ['depot', 'internal movement'] },
+      { label: 'Logistics & Dispatch', href: '/inventory/transfers/fleet', icon: Truck, keywords: ['vans', 'vehicles', 'reefer', 'driver'] },
+      { label: 'Storage Bins', href: '/inventory/locations', icon: Warehouse, keywords: ['zones', 'racks', 'shelves', 'chiller'] },
+      { label: 'Batches', href: '/inventory/batches', icon: CalendarDays, keywords: ['fifo', 'shelf life'] },
+      { label: 'Reorder Engine', href: '/inventory/reorder', icon: ShoppingBasket, keywords: ['par levels', 'low stock'] },
+      { label: 'Waste & Spoilage', href: '/inventory/waste', icon: Package, keywords: ['scrap', 'loss', 'damage'] },
     ],
   },
   {
@@ -194,12 +199,12 @@ const navigationGroups: NavGroup[] = [
     domain: 'SUPPLY_CHAIN',
     icon: Warehouse,
     items: [
-      { label: 'Supplier Directory', href: '/suppliers', icon: ContactRound, permission: 'suppliers.view', keywords: ['vendors', 'contacts'] },
-      { label: 'Purchase Requisitions', href: '/purchasing/requests', icon: ClipboardList, permission: 'purchasing.view', keywords: ['requests', 'approvals'] },
-      { label: 'Purchase Orders (PO)', href: '/purchasing/orders', icon: FileText, permission: 'purchasing.view', keywords: ['orders', 'supply'] },
-      { label: 'Goods Received (GRN)', href: '/purchasing/receiving', icon: Warehouse, permission: 'purchasing.receive', keywords: ['inbound', 'delivery'] },
-      { label: 'Supplier Invoices', href: '/purchasing/invoices', icon: Receipt, permission: 'purchasing.view', keywords: ['bills', 'verification'] },
-      { label: 'Vendor Returns', href: '/purchasing/returns', icon: RefreshCw, permission: 'purchasing.manage', keywords: ['rejection', 'refund'] },
+      { label: 'Supplier Directory', href: '/suppliers', icon: ContactRound, keywords: ['vendors', 'contacts'] },
+      { label: 'Purchase Requisitions', href: '/purchasing/requests', icon: ClipboardList, keywords: ['requests', 'approvals'] },
+      { label: 'Purchase Orders (PO)', href: '/purchasing/orders', icon: FileText, keywords: ['orders', 'supply'] },
+      { label: 'Goods Received (GRN)', href: '/purchasing/receiving', icon: Warehouse, keywords: ['inbound', 'delivery'] },
+      { label: 'Supplier Invoices', href: '/purchasing/invoices', icon: Receipt, keywords: ['bills', 'verification'] },
+      { label: 'Vendor Returns', href: '/purchasing/returns', icon: RefreshCw, keywords: ['rejection', 'refund'] },
     ],
   },
   {
@@ -207,18 +212,18 @@ const navigationGroups: NavGroup[] = [
     domain: 'FINANCE_GROWTH',
     icon: Wallet,
     items: [
-      { label: 'Tender Settlement', href: '/payments', icon: CreditCard, permission: 'payments.view', keywords: ['receipts', 'methods'] },
-      { label: 'M-Pesa Express', href: '/payments/mpesa', icon: Smartphone, permission: 'payments.view', badge: 'M-Pesa', badgeType: 'live', keywords: ['daraja', 'mobile money', 'stk'] },
-      { label: 'Bank Reconciliation', href: '/payments/reconciliation', icon: RefreshCw, permission: 'payments.reconcile', keywords: ['clearing', 'audit'] },
-      { label: 'Refunds Approvals', href: '/payments/refunds', icon: HandCoins, permission: 'refunds.view', keywords: ['reversals', 'credit'] },
-      { label: 'Cash Drawer', href: '/cash-management/drawers', icon: Wallet, permission: 'cash.view', keywords: ['till', 'float'] },
-      { label: 'Cashier Till', href: '/cash-management/shifts', icon: Clock, permission: 'cash.view', keywords: ['opening float', 'handover'] },
-      { label: 'Z-Report Reconciliation', href: '/cash-management/reconciliation', icon: ClipboardList, permission: 'cash.reconcile', keywords: ['z-out', 'closeout'] },
-      { label: 'Financial Control', href: '/finance', icon: Landmark, permission: 'finance.view', keywords: ['treasury', 'overview', 'margins', 'p&l', 'cockpit'] },
-      { label: 'Operational Ledger', href: '/finance/expenses', icon: Receipt, permission: 'finance.view', keywords: ['petty cash', 'overhead'] },
-      { label: 'Accounts Payable (AP)', href: '/finance/payables', icon: HandCoins, permission: 'finance.view', keywords: ['due dates', 'vendor pay'] },
-      { label: 'Tax Compliance Ledger', href: '/finance/taxes', icon: FileText, permission: 'finance.manage', keywords: ['kra', 'vat'] },
-      { label: 'General Journal', href: '/finance/adjustments', icon: SlidersHorizontal, permission: 'finance.adjust', keywords: ['accruals', 'entries'] },
+      { label: 'Tender Settlement', href: '/payments', icon: CreditCard, keywords: ['receipts', 'methods'] },
+      { label: 'M-Pesa Express', href: '/payments/mpesa', icon: Smartphone, badge: 'M-Pesa', badgeType: 'live', keywords: ['daraja', 'mobile money', 'stk'] },
+      { label: 'Bank Reconciliation', href: '/payments/reconciliation', icon: RefreshCw, keywords: ['clearing', 'audit'] },
+      { label: 'Refunds Approvals', href: '/payments/refunds', icon: HandCoins, keywords: ['reversals', 'credit'] },
+      { label: 'Cash Drawer', href: '/cash-management/drawers', icon: Wallet, keywords: ['till', 'float'] },
+      { label: 'Cashier Till', href: '/cash-management/shifts', icon: Clock, keywords: ['opening float', 'handover'] },
+      { label: 'Z-Report Reconciliation', href: '/cash-management/reconciliation', icon: ClipboardList, keywords: ['z-out', 'closeout'] },
+      { label: 'Financial Control', href: '/finance', icon: Landmark, keywords: ['treasury', 'overview', 'margins', 'p&l', 'cockpit'] },
+      { label: 'Operational Ledger', href: '/finance/expenses', icon: Receipt, keywords: ['petty cash', 'overhead'] },
+      { label: 'Accounts Payable (AP)', href: '/finance/payables', icon: HandCoins, keywords: ['due dates', 'vendor pay'] },
+      { label: 'Tax Compliance Ledger', href: '/finance/taxes', icon: FileText, keywords: ['kra', 'vat'] },
+      { label: 'General Journal', href: '/finance/adjustments', icon: SlidersHorizontal, keywords: ['accruals', 'entries'] },
     ],
   },
   {
@@ -226,11 +231,11 @@ const navigationGroups: NavGroup[] = [
     domain: 'FINANCE_GROWTH',
     icon: Users,
     items: [
-      { label: 'Guest Directory', href: '/customers', icon: Users, permission: 'customers.view', keywords: ['crm', 'clients'] },
-      { label: 'Loyalty & Membership', href: '/loyalty', icon: Sparkles, permission: 'loyalty.view', keywords: ['rewards', 'points'] },
-      { label: 'Point Accrual Transactions', href: '/loyalty/transactions', icon: History, permission: 'loyalty.view', keywords: ['redemption', 'balance'] },
-      { label: 'Vouchers & Gift Cards', href: '/loyalty/rewards', icon: BadgePercent, permission: 'loyalty.manage', keywords: ['coupons', 'discounts'] },
-      { label: 'Guest Feedback & Reviews', href: '/customers/feedback', icon: ContactRound, permission: 'customers.view', keywords: ['csat', 'ratings'] },
+      { label: 'Guest Directory', href: '/customers', icon: Users, keywords: ['crm', 'clients'] },
+      { label: 'Loyalty & Membership', href: '/loyalty', icon: Sparkles, keywords: ['rewards', 'points'] },
+      { label: 'Point Accrual Transactions', href: '/loyalty/transactions', icon: History, keywords: ['redemption', 'balance'] },
+      { label: 'Vouchers & Gift Cards', href: '/loyalty/rewards', icon: BadgePercent, keywords: ['coupons', 'discounts'] },
+      { label: 'Guest Feedback & Reviews', href: '/customers/feedback', icon: ContactRound, keywords: ['csat', 'ratings'] },
     ],
   },
   {
@@ -238,10 +243,10 @@ const navigationGroups: NavGroup[] = [
     domain: 'FINANCE_GROWTH',
     icon: Megaphone,
     items: [
-      { label: 'Marketing Control Center', href: '/marketing', icon: Megaphone, permission: 'marketing.view', badge: 'HQ', badgeType: 'info', keywords: ['growth', 'overview', 'roas', 'attribution'] },
-      { label: 'Campaigns & Broadcasts', href: '/marketing/campaigns', icon: Bell, permission: 'marketing.manage', badge: 'Live', badgeType: 'live', keywords: ['sms', 'email', 'broadcast', 'push'] },
-      { label: 'Message Copy Templates', href: '/marketing/templates', icon: FileCode, permission: 'marketing.manage', keywords: ['templates', 'merge tags', 'copy'] },
-      { label: 'Promo Codes & Vouchers', href: '/marketing/promotions', icon: Tags, permission: 'marketing.manage', keywords: ['discounts', 'coupons', 'codes'] },
+      { label: 'Marketing Control Center', href: '/marketing', icon: Megaphone, badge: 'HQ', badgeType: 'info', keywords: ['growth', 'overview', 'roas', 'attribution'] },
+      { label: 'Campaigns & Broadcasts', href: '/marketing/campaigns', icon: Bell, badge: 'Live', badgeType: 'live', keywords: ['sms', 'email', 'broadcast', 'push'] },
+      { label: 'Message Copy Templates', href: '/marketing/templates', icon: FileCode, keywords: ['templates', 'merge tags', 'copy'] },
+      { label: 'Promo Codes & Vouchers', href: '/marketing/promotions', icon: Tags, keywords: ['discounts', 'coupons', 'codes'] },
     ],
   },
   {
@@ -249,16 +254,16 @@ const navigationGroups: NavGroup[] = [
     domain: 'FINANCE_GROWTH',
     icon: ChartNoAxesCombined,
     items: [
-      { label: 'Analytics Tower', href: '/reports', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['charts', 'overview'] },
-      { label: 'Sales & Revenue Trends', href: '/reports/sales', icon: FileChartColumn, permission: 'reports.view', keywords: ['turnover', 'gross'] },
-      { label: 'Product Margin Analysis', href: '/reports/products', icon: Tags, permission: 'reports.view', keywords: ['top sellers', 'abc'] },
-      { label: 'Tender Distribution Breakdown', href: '/reports/payments', icon: CreditCard, permission: 'reports.view', keywords: ['cash vs card', 'mpesa'] },
-      { label: 'Inventory Cost & Stock Valuation', href: '/reports/inventory', icon: Package, permission: 'reports.view', keywords: ['holding value', 'fifo'] },
-      { label: 'Theoretical vs Actual Food Cost', href: '/reports/food-costing', icon: CookingPot, permission: 'reports.view', keywords: ['variance', 'spoilage'] },
-      { label: 'Kitchen & Preparation Efficiency', href: '/reports/performance', icon: Clock, permission: 'reports.view', keywords: ['ticket time', 'speed'] },
-      { label: 'Custom Report Builder', href: '/reports/builder', icon: SlidersHorizontal, permission: 'reports.custom', keywords: ['adhoc', 'queries'] },
-      { label: 'Scheduled Report Deliveries', href: '/reports/saved', icon: BookOpen, permission: 'reports.view', keywords: ['automated', 'emails'] },
-      { label: 'Data Warehouse Export Center', href: '/reports/exports', icon: FileText, permission: 'reports.export', keywords: ['csv', 'excel', 'backup'] },
+      { label: 'Analytics Tower', href: '/reports', icon: ChartNoAxesCombined, keywords: ['charts', 'overview'] },
+      { label: 'Sales & Revenue Trends', href: '/reports/sales', icon: FileChartColumn, keywords: ['turnover', 'gross'] },
+      { label: 'Product Margin Analysis', href: '/reports/products', icon: Tags, keywords: ['top sellers', 'abc'] },
+      { label: 'Tender Distribution Breakdown', href: '/reports/payments', icon: CreditCard, keywords: ['cash vs card', 'mpesa'] },
+      { label: 'Inventory Cost & Stock Valuation', href: '/reports/inventory', icon: Package, keywords: ['holding value', 'fifo'] },
+      { label: 'Theoretical vs Actual Food Cost', href: '/reports/food-costing', icon: CookingPot, keywords: ['variance', 'spoilage'] },
+      { label: 'Kitchen & Preparation Efficiency', href: '/reports/performance', icon: Clock, keywords: ['ticket time', 'speed'] },
+      { label: 'Custom Report Builder', href: '/reports/builder', icon: SlidersHorizontal, keywords: ['adhoc', 'queries'] },
+      { label: 'Scheduled Report Deliveries', href: '/reports/saved', icon: BookOpen, keywords: ['automated', 'emails'] },
+      { label: 'Data Warehouse Export Center', href: '/reports/exports', icon: FileText, keywords: ['csv', 'excel', 'backup'] },
     ],
   },
   {
@@ -266,12 +271,12 @@ const navigationGroups: NavGroup[] = [
     domain: 'FINANCE_GROWTH',
     icon: BrainCircuit,
     items: [
-      { label: 'Copilot Assistant Console', href: '/ai-assistant', icon: BrainCircuit, permission: 'ai.use', badge: 'AI', badgeType: 'info', keywords: ['chat', 'copilot', 'advisor'] },
-      { label: 'Demand & Cover Forecasting', href: '/ai-assistant/forecasting', icon: Activity, permission: 'ai.use', keywords: ['footfall', 'covers', 'predictions'] },
-      { label: 'Predictive Purchasing Engine', href: '/ai-assistant/inventory', icon: Package, permission: 'ai.use', keywords: ['auto replenishment', 'smart po'] },
-      { label: 'Menu Engineering Matrix', href: '/ai-assistant/menu-analysis', icon: Sparkles, permission: 'ai.use', keywords: ['boston matrix', 'stars', 'dogs'] },
-      { label: 'Workflow Automations Engine', href: '/automations', icon: Puzzle, permission: 'automations.manage', keywords: ['triggers', 'rules'] },
-      { label: 'System Notifications Log', href: '/notifications', icon: Bell, permission: 'notifications.view', keywords: ['alerts', 'events'] },
+      { label: 'Copilot Assistant Console', href: '/ai-assistant', icon: BrainCircuit, badge: 'AI', badgeType: 'info', keywords: ['chat', 'copilot', 'advisor'] },
+      { label: 'Demand & Cover Forecasting', href: '/ai-assistant/forecasting', icon: Activity, keywords: ['footfall', 'covers', 'predictions'] },
+      { label: 'Predictive Purchasing Engine', href: '/ai-assistant/inventory', icon: Package, keywords: ['auto replenishment', 'smart po'] },
+      { label: 'Menu Engineering Matrix', href: '/ai-assistant/menu-analysis', icon: Sparkles, keywords: ['boston matrix', 'stars', 'dogs'] },
+      { label: 'Workflow Automations Engine', href: '/automations', icon: Puzzle, keywords: ['triggers', 'rules'] },
+      { label: 'System Notifications Log', href: '/notifications', icon: Bell, keywords: ['alerts', 'events'] },
     ],
   },
   {
@@ -279,13 +284,13 @@ const navigationGroups: NavGroup[] = [
     domain: 'ADMINISTRATION',
     icon: UserRound,
     items: [
-      { label: 'Employee Directory & Roster', href: '/staff', icon: Users, permission: 'staff.view', keywords: ['team', 'workers'] },
-      { label: 'Role-Based Access Control (RBAC)', href: '/staff/roles', icon: ShieldCheck, permission: 'staff.manage', keywords: ['permissions', 'security'] },
-      { label: 'Weekly Shift Schedule Planner', href: '/staff/schedules', icon: CalendarDays, permission: 'staff.view', keywords: ['rota', 'planning'] },
-      { label: 'Biometric Clock-In / Attendance', href: '/staff/attendance', icon: Clock, permission: 'staff.view', keywords: ['timesheet', 'hours'] },
-      { label: 'Manager Shift Handover Notes', href: '/staff/handover', icon: ClipboardList, permission: 'staff.view', keywords: ['logbook', 'closing'] },
-      { label: 'Cash Drawer Custodians', href: '/staff/cashier-assignments', icon: Wallet, permission: 'staff.manage', keywords: ['till assignment', 'register'] },
-      { label: 'Server Performance & Tip Pool', href: '/staff/performance', icon: ChartNoAxesCombined, permission: 'reports.view', keywords: ['waiter kpis', 'gratuity'] },
+      { label: 'Employee Directory & Roster', href: '/staff', icon: Users, keywords: ['team', 'workers'] },
+      { label: 'Role-Based Access Control (RBAC)', href: '/staff/roles', icon: ShieldCheck, keywords: ['permissions', 'security'] },
+      { label: 'Weekly Shift Schedule Planner', href: '/staff/schedules', icon: CalendarDays, keywords: ['rota', 'planning'] },
+      { label: 'Biometric Clock-In / Attendance', href: '/staff/attendance', icon: Clock, keywords: ['timesheet', 'hours'] },
+      { label: 'Manager Shift Handover Notes', href: '/staff/handover', icon: ClipboardList, keywords: ['logbook', 'closing'] },
+      { label: 'Cash Drawer Custodians', href: '/staff/cashier-assignments', icon: Wallet, keywords: ['till assignment', 'register'] },
+      { label: 'Server Performance & Tip Pool', href: '/staff/performance', icon: ChartNoAxesCombined, keywords: ['waiter kpis', 'gratuity'] },
     ],
   },
   {
@@ -293,39 +298,24 @@ const navigationGroups: NavGroup[] = [
     domain: 'ADMINISTRATION',
     icon: Settings,
     items: [
-      { label: 'Business Profile & Legal Entity', href: '/settings/business', icon: Building2, permission: 'settings.view', keywords: ['kra pin', 'company'] },
-      { label: 'Multi-Location Branch Topology', href: '/settings/branches', icon: Store, permission: 'branches.view', keywords: ['outlets', 'depots'] },
-      { label: 'Tax Configurations & Fiscal Devices', href: '/settings/financial', icon: Wallet, permission: 'settings.manage', keywords: ['etims', 'oscu', 'vat'] },
-      { label: 'Hospitality Service Models', href: '/settings/service-models', icon: UtensilsCrossed, permission: 'settings.manage', keywords: ['dine-in', 'bar', 'counter'] },
-      { label: 'Receipt & Invoice Customizer', href: '/settings/receipts', icon: Receipt, permission: 'settings.manage', keywords: ['footer', 'logo'] },
-      { label: 'Network Hardware & POS Printers', href: '/settings/printers', icon: Monitor, permission: 'settings.manage', keywords: ['lan', 'thermal', 'kitchen printer'] },
-      { label: 'KDS Order Routing Rules', href: '/settings/kitchen', icon: ChefHat, permission: 'settings.manage', keywords: ['prep routing', 'split'] },
-      { label: 'Payment Gateway Integrations', href: '/settings/integrations/payments', icon: CreditCard, permission: 'integrations.manage', keywords: ['pesapal', 'stripe'] },
-      { label: 'Communication Gateways', href: '/settings/integrations/messaging', icon: Bell, permission: 'integrations.manage', keywords: ['sms api', 'infobip'] },
-      { label: 'Aggregator Webhooks (Uber / Glovo)', href: '/settings/integrations/orders', icon: ShoppingCart, permission: 'integrations.manage', keywords: ['api', 'delivery sync'] },
-      { label: 'Audit Trail & Immutable Logs', href: '/settings/audit-logs', icon: ShieldCheck, permission: 'audit.view', keywords: ['security log', 'compliance'] },
-      { label: 'Offline Edge Sync Queue', href: '/settings/offline', icon: RefreshCw, permission: 'settings.manage', keywords: ['local storage', 'sync'] },
-      { label: 'Registered POS Terminals', href: '/settings/devices', icon: Monitor, permission: 'settings.manage', keywords: ['android', 'hardware'] },
-      { label: 'Subscription Plan & Billing', href: '/settings/billing', icon: Receipt, permission: 'billing.view', keywords: ['saas', 'invoices'] },
-      { label: 'Security & Two-Factor Authentication', href: '/settings/security', icon: ShieldCheck, permission: 'settings.security', keywords: ['2fa', 'passwords'] },
+      { label: 'Business Profile & Legal Entity', href: '/settings/business', icon: Building2, keywords: ['kra pin', 'company'] },
+      { label: 'Multi-Location Branch Topology', href: '/settings/branches', icon: Store, keywords: ['outlets', 'depots'] },
+      { label: 'Tax Configurations & Fiscal Devices', href: '/settings/financial', icon: Wallet, keywords: ['etims', 'oscu', 'vat'] },
+      { label: 'Hospitality Service Models', href: '/settings/service-models', icon: UtensilsCrossed, keywords: ['dine-in', 'bar', 'counter'] },
+      { label: 'Receipt & Invoice Customizer', href: '/settings/receipts', icon: Receipt, keywords: ['footer', 'logo'] },
+      { label: 'Network Hardware & POS Printers', href: '/settings/printers', icon: Monitor, keywords: ['lan', 'thermal', 'kitchen printer'] },
+      { label: 'KDS Order Routing Rules', href: '/settings/kitchen', icon: ChefHat, keywords: ['prep routing', 'split'] },
+      { label: 'Payment Gateway Integrations', href: '/settings/integrations/payments', icon: CreditCard, keywords: ['pesapal', 'stripe'] },
+      { label: 'Communication Gateways', href: '/settings/integrations/messaging', icon: Bell, keywords: ['sms api', 'infobip'] },
+      { label: 'Aggregator Webhooks (Uber / Glovo)', href: '/settings/integrations/orders', icon: ShoppingCart, keywords: ['api', 'delivery sync'] },
+      { label: 'Audit Trail & Immutable Logs', href: '/settings/audit-logs', icon: ShieldCheck, keywords: ['security log', 'compliance'] },
+      { label: 'Offline Edge Sync Queue', href: '/settings/offline', icon: RefreshCw, keywords: ['local storage', 'sync'] },
+      { label: 'Registered POS Terminals', href: '/settings/devices', icon: Monitor, keywords: ['android', 'hardware'] },
+      { label: 'Subscription Plan & Billing', href: '/settings/billing', icon: Receipt, keywords: ['saas', 'invoices'] },
+      { label: 'Security & Two-Factor Authentication', href: '/settings/security', icon: ShieldCheck, keywords: ['2fa', 'passwords'] },
     ],
   },
 ];
-
-function routeIsActive(pathname: string, href: string) {
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function groupIsActive(pathname: string, group: NavGroup) {
-  return group.items.some((item) => routeIsActive(pathname, item.href));
-}
-
-function hasPermission(item: NavItem, permissions?: string[], userRole?: string) {
-  if (userRole === 'ADMIN' || userRole === 'SUPER_ADMIN') return true;
-  if (!permissions) return true;
-  if (permissions.includes('*')) return true;
-  return item.permission ? permissions.includes(item.permission) : true;
-}
 
 export default function Sidebar({
   isMobileMenuOpen,
@@ -346,6 +336,7 @@ export default function Sidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   // Enterprise Pinned Favorites & Recent History
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>(['/pos', '/orders/open', '/kitchen']);
@@ -357,7 +348,7 @@ export default function Sidebar({
     lowStock: number;
   }>({ kitchenQueue: 0, lowStock: 0 });
 
-  // Dynamic Branches State
+  // Dynamic Branches State (synchronized with Header & localStorage)
   const [branchNodes, setBranchNodes] = useState<BranchNode[]>([]);
   const [currentBranchName, setCurrentBranchName] = useState<string>(activeBranch);
   const [currentBranchId, setCurrentBranchId] = useState<number | null>(null);
@@ -365,6 +356,31 @@ export default function Sidebar({
   // System latency state
   const [latency, setLatency] = useState<number | null>(null);
 
+  // Keep prop-driven branch name in sync
+  useEffect(() => {
+    if (activeBranch && activeBranch !== 'Loading Branch...') {
+      setCurrentBranchName(activeBranch);
+    }
+  }, [activeBranch]);
+
+  // Track live browser connectivity
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setIsOnline(navigator.onLine);
+    const onOnline = () => setIsOnline(true);
+    const onOffline = () => {
+      setIsOnline(false);
+      setLatency(null);
+    };
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  // Load persisted pins, recents & cached branches
   useEffect(() => {
     try {
       const savedPins = localStorage.getItem('servora_pinned_nav');
@@ -372,18 +388,46 @@ export default function Sidebar({
 
       const savedRecents = localStorage.getItem('servora_recent_nav');
       if (savedRecents) setRecentHrefs(JSON.parse(savedRecents));
+
+      const cachedBranches = localStorage.getItem('servora_cached_branches');
+      if (cachedBranches) {
+        const parsed = JSON.parse(cachedBranches);
+        if (Array.isArray(parsed)) setBranchNodes(parsed);
+      }
+
+      const savedBranchId = localStorage.getItem('servora_active_branch_id');
+      const savedBranchName = localStorage.getItem('servora_active_branch_name');
+      if (savedBranchId) setCurrentBranchId(Number(savedBranchId));
+      if (savedBranchName) setCurrentBranchName(savedBranchName);
     } catch {
       // Ignore storage errors
     }
   }, []);
 
+  // Listen for branch switches triggered from Header or POS Terminal
+  useEffect(() => {
+    const handleExternalBranchSwitch = (e: Event) => {
+      const detail = (e as CustomEvent<BranchSwitchedDetail>).detail;
+      if (detail?.branchId) {
+        setCurrentBranchId(detail.branchId);
+        setCurrentBranchName(detail.branchName);
+      }
+    };
+
+    window.addEventListener('servora:branch-switched', handleExternalBranchSwitch);
+    return () => window.removeEventListener('servora:branch-switched', handleExternalBranchSwitch);
+  }, []);
+
+  // Track recently visited pages
   useEffect(() => {
     if (!pathname || pathname === '/dashboard' || pathname === '/') return;
     setRecentHrefs((prev) => {
       const updated = [pathname, ...prev.filter((h) => h !== pathname)].slice(0, 4);
       try {
         localStorage.setItem('servora_recent_nav', JSON.stringify(updated));
-      } catch { }
+      } catch {
+        // Ignore storage errors
+      }
       return updated;
     });
   }, [pathname]);
@@ -395,7 +439,9 @@ export default function Sidebar({
       const updated = prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href];
       try {
         localStorage.setItem('servora_pinned_nav', JSON.stringify(updated));
-      } catch { }
+      } catch {
+        // Ignore storage errors
+      }
       return updated;
     });
   };
@@ -415,57 +461,77 @@ export default function Sidebar({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isBranchDropdownOpen]);
 
-  useEffect(() => {
-    let isMounted = true;
-    const loadBranchesAndTelemetry = async () => {
-      try {
-        const [branchRes, telemetryRes] = await Promise.all([
-          fetchApi('/api/v1/branches').catch(() => null),
-          fetchApi('/api/v1/analytics/dashboard?timeframe=today').catch(() => null),
-        ]);
+  // Offline-safe branch list & operational telemetry loader
+  const canPollDashboardTelemetry = useMemo(
+    () =>
+      canAccessRoute('/dashboard', allowedPermissions, userRole) ||
+      canAccessRoute('/kitchen', allowedPermissions, userRole) ||
+      canAccessRoute('/inventory', allowedPermissions, userRole),
+    [allowedPermissions, userRole]
+  );
 
-        if (isMounted && branchRes?.data && Array.isArray(branchRes.data)) {
-          setBranchNodes(branchRes.data);
+  const loadBranchesAndTelemetry = useCallback(async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
-          const savedBranchId = localStorage.getItem('servora_active_branch_id');
-          if (savedBranchId) {
-            const match = branchRes.data.find((b: BranchNode) => String(b.id) === savedBranchId);
-            if (match) {
-              setCurrentBranchName(match.name);
-              setCurrentBranchId(match.id);
-            }
-          } else {
-            const defaultBranch =
-              branchRes.data.find((b: BranchNode) => b.isMainBranch && b.isActive !== false) ||
-              branchRes.data.find((b: BranchNode) => b.isActive !== false) ||
-              branchRes.data[0];
+    try {
+      const [branchRes, telemetryRes] = await Promise.all([
+        fetchApi('/api/v1/branches').catch(() => null),
+        canPollDashboardTelemetry
+          ? fetchApi('/api/v1/analytics/dashboard?timeframe=today').catch(() => null)
+          : Promise.resolve(null),
+      ]);
 
-            if (defaultBranch) {
-              setCurrentBranchName(defaultBranch.name);
-              setCurrentBranchId(defaultBranch.id);
-              localStorage.setItem('servora_active_branch_id', String(defaultBranch.id));
-            }
+      if (branchRes?.data && Array.isArray(branchRes.data)) {
+        const activeOnly: BranchNode[] = branchRes.data.filter(
+          (b: BranchNode) => b.isActive !== false
+        );
+        setBranchNodes(activeOnly);
+        localStorage.setItem('servora_cached_branches', JSON.stringify(activeOnly));
+
+        const savedBranchId = localStorage.getItem('servora_active_branch_id');
+        if (savedBranchId) {
+          const match = activeOnly.find((b) => String(b.id) === savedBranchId);
+          if (match) {
+            setCurrentBranchName(match.name);
+            setCurrentBranchId(match.id);
+          } else if (activeOnly.length > 0) {
+            setCurrentBranchName(activeOnly[0].name);
+            setCurrentBranchId(activeOnly[0].id);
+            localStorage.setItem('servora_active_branch_id', String(activeOnly[0].id));
+            localStorage.setItem('servora_active_branch_name', activeOnly[0].name);
+          }
+        } else {
+          const defaultBranch =
+            activeOnly.find((b) => b.isMainBranch) || activeOnly[0];
+          if (defaultBranch) {
+            setCurrentBranchName(defaultBranch.name);
+            setCurrentBranchId(defaultBranch.id);
+            localStorage.setItem('servora_active_branch_id', String(defaultBranch.id));
+            localStorage.setItem('servora_active_branch_name', defaultBranch.name);
           }
         }
-
-        if (isMounted && telemetryRes?.data) {
-          setLiveCounts({
-            kitchenQueue: Number(telemetryRes.data.orders?.kitchenQueue) || 0,
-            lowStock: Number(telemetryRes.data.inventory?.depletedItemsCount) || 0,
-          });
-        }
-      } catch {
-        // Silent fallback
       }
-    };
 
+      if (telemetryRes?.data) {
+        setLiveCounts({
+          kitchenQueue: Number(telemetryRes.data.orders?.kitchenQueue) || 0,
+          lowStock: Number(telemetryRes.data.inventory?.depletedItemsCount) || 0,
+        });
+      }
+    } catch {
+      // Silent fallback on degraded network
+    }
+  }, [canPollDashboardTelemetry]);
+
+  useEffect(() => {
     loadBranchesAndTelemetry();
     const interval = setInterval(loadBranchesAndTelemetry, 30000);
+    window.addEventListener('online', loadBranchesAndTelemetry);
     return () => {
-      isMounted = false;
       clearInterval(interval);
+      window.removeEventListener('online', loadBranchesAndTelemetry);
     };
-  }, []);
+  }, [loadBranchesAndTelemetry]);
 
   const handleSelectBranch = (branch: BranchNode) => {
     setCurrentBranchName(branch.name);
@@ -475,10 +541,13 @@ export default function Sidebar({
     setIsBranchDropdownOpen(false);
 
     window.dispatchEvent(
-      new CustomEvent('servora:branch-switched', {
+      new CustomEvent<BranchSwitchedDetail>('servora:branch-switched', {
         detail: { branchId: branch.id, branchName: branch.name, branchCode: branch.code },
       })
     );
+
+    void loadBranchesAndTelemetry();
+    router.refresh();
   };
 
   useEffect(() => {
@@ -495,11 +564,16 @@ export default function Sidebar({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isCollapsed, toggleCollapse]);
 
+  // Offline-safe API latency check
   useEffect(() => {
     const fetchLatency = async () => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setLatency(null);
+        return;
+      }
       const start = performance.now();
       try {
-        await fetchApi('/health').catch(() => null);
+        await fetchApi('/health');
         setLatency(Math.round(performance.now() - start));
       } catch {
         setLatency(null);
@@ -507,15 +581,20 @@ export default function Sidebar({
     };
     fetchLatency();
     const interval = setInterval(fetchLatency, 60000);
-    return () => clearInterval(interval);
+    window.addEventListener('online', fetchLatency);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('online', fetchLatency);
+    };
   }, []);
 
+  // Unified RBAC filtering via @/lib/rbac (fail-closed until permissions hydrate)
   const enrichedGroups = useMemo(() => {
     return navigationGroups
       .map((group) => ({
         ...group,
         items: group.items
-          .filter((item) => hasPermission(item, allowedPermissions, userRole))
+          .filter((item) => canAccessRoute(item.href, allowedPermissions, userRole))
           .map((item) => {
             if (item.href === '/kitchen' || item.href === '/orders/open') {
               return liveCounts.kitchenQueue > 0
@@ -534,7 +613,8 @@ export default function Sidebar({
   }, [allowedPermissions, liveCounts, userRole]);
 
   const visibleStandaloneItems = useMemo(
-    () => standaloneItems.filter((item) => hasPermission(item, allowedPermissions, userRole)),
+    () =>
+      standaloneItems.filter((item) => canAccessRoute(item.href, allowedPermissions, userRole)),
     [allowedPermissions, userRole]
   );
 
@@ -544,6 +624,15 @@ export default function Sidebar({
     enrichedGroups.forEach((g) => g.items.forEach((i) => map.set(i.href, i)));
     return map;
   }, [visibleStandaloneItems, enrichedGroups]);
+
+  // Compute single deepest-matching active href so parent routes don't double-highlight
+  const activeHref = useMemo(() => {
+    if (!pathname) return '';
+    const hrefs = Array.from(allAccessibleItems.keys()).sort((a, b) => b.length - a.length);
+    return (
+      hrefs.find((href) => pathname === href || pathname.startsWith(`${href}/`)) || ''
+    );
+  }, [pathname, allAccessibleItems]);
 
   const pinnedItems = useMemo(
     () => pinnedHrefs.map((h) => allAccessibleItems.get(h)).filter(Boolean) as NavItem[],
@@ -594,11 +683,11 @@ export default function Sidebar({
 
   useEffect(() => {
     const active = enrichedGroups
-      .filter((group) => groupIsActive(pathname, group))
+      .filter((group) => group.items.some((item) => item.href === activeHref))
       .map((group) => group.label);
 
     setExpandedGroups((curr) => [...new Set([...curr, ...active])]);
-  }, [pathname, enrichedGroups]);
+  }, [activeHref, enrichedGroups]);
 
   const toggleGroup = (label: string) => {
     if (isCollapsed && toggleCollapse) {
@@ -617,6 +706,11 @@ export default function Sidebar({
     }
   };
 
+  const defaultHomeRoute = getDefaultLandingRoute(allowedPermissions, userRole);
+  const canSwitchBranches = branchNodes.length > 1;
+  const canManageBranches = canAccessRoute('/settings/branches', allowedPermissions, userRole);
+  const canViewTransfers = canAccessRoute('/inventory/transfers', allowedPermissions, userRole);
+
   const getBadgeStyle = (type?: NavItem['badgeType'], active?: boolean) => {
     if (active) return 'bg-white/25 text-white';
     switch (type) {
@@ -633,7 +727,7 @@ export default function Sidebar({
 
   const renderNavItem = (item: NavItem, nested = false, showPinAction = true) => {
     const Icon = item.icon;
-    const active = routeIsActive(pathname, item.href);
+    const active = item.href === activeHref;
     const isPinned = pinnedHrefs.includes(item.href);
 
     return (
@@ -656,7 +750,9 @@ export default function Sidebar({
           size={nested ? 14 : 16}
           className={[
             'shrink-0 transition-transform duration-150',
-            active ? 'text-white' : 'text-servora-pale/60 group-hover:text-servora-teal group-hover:scale-105',
+            active
+              ? 'text-white'
+              : 'text-servora-pale/60 group-hover:text-servora-teal group-hover:scale-105',
           ].join(' ')}
         />
 
@@ -715,6 +811,7 @@ export default function Sidebar({
           isMobileMenuOpen ? 'translate-x-0 w-72' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
       >
+        {/* Top Brand Bar (Routes to role's authorized home workspace) */}
         <div
           className={[
             'flex h-16 shrink-0 items-center border-b border-white/[0.08] bg-white transition-all duration-200',
@@ -722,7 +819,7 @@ export default function Sidebar({
           ].join(' ')}
         >
           <Link
-            href="/dashboard"
+            href={defaultHomeRoute}
             onClick={closeMobileMenu}
             className="flex items-center gap-2 overflow-hidden"
           >
@@ -759,96 +856,111 @@ export default function Sidebar({
           </button>
         </div>
 
+        {/* Multi-Branch Context Selector (Interactive for Multi-Branch, Read-Only for Single-Branch) */}
         {!isCollapsed ? (
           <div ref={branchDropdownRef} className="relative px-3 pt-3 pb-1">
-            <button
-              type="button"
-              onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
-              className="w-full flex items-center justify-between p-2 rounded-xl bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.08] transition-all text-left cursor-pointer"
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
+            {canSwitchBranches ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsBranchDropdownOpen(!isBranchDropdownOpen)}
+                  className="w-full flex items-center justify-between p-2 rounded-xl bg-white/[0.04] border border-white/[0.07] hover:bg-white/[0.08] transition-all text-left cursor-pointer"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-8 w-8 rounded-lg bg-servora-core/25 border border-servora-core/40 flex items-center justify-center text-servora-teal shrink-0">
+                      <Building2 size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-white truncate">{businessName}</p>
+                      <p className="text-[10px] text-servora-teal font-medium truncate flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                        <span className="truncate">{currentBranchName}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronsUpDown size={14} className="text-servora-pale/40 shrink-0 ml-1" />
+                </button>
+
+                {isBranchDropdownOpen && (
+                  <div className="absolute left-3 right-3 top-16 z-30 bg-[#071739] border border-white/10 rounded-xl shadow-2xl p-1.5 space-y-1 backdrop-blur-md animate-in fade-in zoom-in-95">
+                    <div className="flex items-center justify-between px-2 py-1 border-b border-white/[0.08] mb-1">
+                      <span className="text-[10px] font-bold text-servora-pale/40 uppercase tracking-wider">
+                        Operating Branches ({branchNodes.length})
+                      </span>
+                      {canManageBranches && (
+                        <Link
+                          href="/settings/branches"
+                          onClick={() => {
+                            setIsBranchDropdownOpen(false);
+                            closeMobileMenu();
+                          }}
+                          className="text-[10px] font-semibold text-servora-teal hover:underline"
+                        >
+                          Manage
+                        </Link>
+                      )}
+                    </div>
+
+                    <div className="max-h-52 overflow-y-auto space-y-0.5 custom-scrollbar">
+                      {branchNodes.map((b) => {
+                        const isSelected =
+                          currentBranchId === b.id || currentBranchName === b.name;
+                        return (
+                          <button
+                            key={b.id}
+                            type="button"
+                            onClick={() => handleSelectBranch(b)}
+                            className={[
+                              'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left cursor-pointer',
+                              isSelected
+                                ? 'bg-servora-core/25 text-white border border-servora-core/40'
+                                : 'text-servora-pale/75 hover:bg-white/[0.08] hover:text-white',
+                            ].join(' ')}
+                          >
+                            <div className="min-w-0 flex-1 pr-2">
+                              <span className="truncate block font-medium">{b.name}</span>
+                              <span className="text-[9.5px] font-mono text-servora-pale/45 block">
+                                {b.code} {b.isMainBranch ? '• Main Hub' : ''}
+                              </span>
+                            </div>
+                            {isSelected && <Check size={13} className="text-servora-teal shrink-0" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {canViewTransfers && (
+                      <div className="pt-1 mt-1 border-t border-white/[0.08]">
+                        <Link
+                          href="/inventory/transfers"
+                          onClick={() => {
+                            setIsBranchDropdownOpen(false);
+                            closeMobileMenu();
+                          }}
+                          className="flex items-center gap-2 px-2 py-1 rounded-lg text-[11px] font-medium text-servora-pale/60 hover:text-servora-teal hover:bg-white/[0.05] transition-colors"
+                        >
+                          <Truck size={12} className="shrink-0" />
+                          <span>Inter-Branch Stock Transfers</span>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : (
+              <div
+                title="Assigned operating branch"
+                className="w-full flex items-center gap-2.5 p-2 rounded-xl bg-white/[0.04] border border-white/[0.07] select-none"
+              >
                 <div className="h-8 w-8 rounded-lg bg-servora-core/25 border border-servora-core/40 flex items-center justify-center text-servora-teal shrink-0">
                   <Building2 size={16} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-bold text-white truncate">{businessName}</p>
                   <p className="text-[10px] text-servora-teal font-medium truncate flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
                     <span className="truncate">{currentBranchName}</span>
                   </p>
-                </div>
-              </div>
-              <ChevronsUpDown size={14} className="text-servora-pale/40 shrink-0 ml-1" />
-            </button>
-
-            {isBranchDropdownOpen && (
-              <div className="absolute left-3 right-3 top-16 z-30 bg-[#071739] border border-white/10 rounded-xl shadow-2xl p-1.5 space-y-1 backdrop-blur-md animate-in fade-in zoom-in-95">
-                <div className="flex items-center justify-between px-2 py-1 border-b border-white/[0.08] mb-1">
-                  <span className="text-[10px] font-bold text-servora-pale/40 uppercase tracking-wider">
-                    Operating Branches ({branchNodes.length})
-                  </span>
-                  <Link
-                    href="/settings/branches"
-                    onClick={() => {
-                      setIsBranchDropdownOpen(false);
-                      closeMobileMenu();
-                    }}
-                    className="text-[10px] font-semibold text-servora-teal hover:underline"
-                  >
-                    Manage
-                  </Link>
-                </div>
-
-                <div className="max-h-52 overflow-y-auto space-y-0.5 custom-scrollbar">
-                  {branchNodes.length > 0 ? (
-                    branchNodes.map((b) => {
-                      const isSelected = currentBranchId === b.id || currentBranchName === b.name;
-                      return (
-                        <button
-                          key={b.id}
-                          type="button"
-                          onClick={() => handleSelectBranch(b)}
-                          className={[
-                            'w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors text-left cursor-pointer',
-                            isSelected
-                              ? 'bg-servora-core/25 text-white border border-servora-core/40'
-                              : 'text-servora-pale/75 hover:bg-white/[0.08] hover:text-white',
-                          ].join(' ')}
-                        >
-                          <div className="min-w-0 flex-1 pr-2">
-                            <span className="truncate block font-medium">{b.name}</span>
-                            <span className="text-[9.5px] font-mono text-servora-pale/45 block">
-                              {b.code} {b.isMainBranch ? '• Main Hub' : ''}
-                            </span>
-                          </div>
-                          {isSelected && <Check size={13} className="text-servora-teal shrink-0" />}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setIsBranchDropdownOpen(false)}
-                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-servora-core/20 text-white text-xs font-semibold"
-                    >
-                      <span className="truncate">{currentBranchName}</span>
-                      <Check size={13} className="text-servora-teal shrink-0" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="pt-1 mt-1 border-t border-white/[0.08]">
-                  <Link
-                    href="/inventory/transfers"
-                    onClick={() => {
-                      setIsBranchDropdownOpen(false);
-                      closeMobileMenu();
-                    }}
-                    className="flex items-center gap-2 px-2 py-1 rounded-lg text-[11px] font-medium text-servora-pale/60 hover:text-servora-teal hover:bg-white/[0.05] transition-colors"
-                  >
-                    <Truck size={12} className="shrink-0" />
-                    <span>Inter-Branch Stock Transfers</span>
-                  </Link>
                 </div>
               </div>
             )}
@@ -864,6 +976,7 @@ export default function Sidebar({
           </div>
         )}
 
+        {/* Quick Jump Search (Filtered strictly by RBAC) */}
         {!isCollapsed && (
           <div className="px-3 py-2 shrink-0 space-y-1">
             <div className="relative">
@@ -877,13 +990,14 @@ export default function Sidebar({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Jump to module (e.g. marketing, kds, pos)..."
+                placeholder="Jump to module (e.g. kds, pos, stock)..."
                 className="w-full bg-white/[0.04] border border-white/[0.07] focus:border-servora-teal/50 focus:bg-white/[0.08] text-white placeholder-servora-pale/35 text-xs rounded-lg pl-8 pr-12 py-1.5 outline-none transition-all"
               />
               {searchQuery ? (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-servora-pale/40 hover:text-white cursor-pointer"
                 >
                   <X size={12} />
@@ -908,13 +1022,14 @@ export default function Sidebar({
           </div>
         )}
 
+        {/* Role-Filtered Navigation Tree */}
         <nav
           className={[
             'flex-1 space-y-1 overflow-y-auto py-1.5 overscroll-contain select-none custom-scrollbar transition-all',
             isCollapsed ? 'px-2' : 'px-3',
           ].join(' ')}
         >
-          {!searchQuery && (
+          {!searchQuery && visibleStandaloneItems.length > 0 && (
             <div className="mb-2.5">
               {!isCollapsed && (
                 <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
@@ -933,7 +1048,9 @@ export default function Sidebar({
                 <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-400/80 flex items-center gap-1">
                   <Star size={10} fill="currentColor" /> Pinned Favorites
                 </span>
-                <span className="text-[9px] font-mono text-servora-pale/35">{pinnedItems.length}</span>
+                <span className="text-[9px] font-mono text-servora-pale/35">
+                  {pinnedItems.length}
+                </span>
               </div>
               <div className="space-y-0.5">
                 {pinnedItems.map((item) => renderNavItem(item, false, true))}
@@ -952,7 +1069,7 @@ export default function Sidebar({
             </div>
           )}
 
-          {!searchQuery && !isCollapsed && (
+          {!searchQuery && !isCollapsed && enrichedGroups.length > 0 && (
             <div className="pt-2 mb-1 px-2.5 flex items-center justify-between border-t border-white/[0.06]">
               <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
                 Navigation Modules
@@ -960,7 +1077,9 @@ export default function Sidebar({
               <button
                 type="button"
                 onClick={toggleExpandAll}
-                title={expandedGroups.length === enrichedGroups.length ? 'Collapse All' : 'Expand All'}
+                title={
+                  expandedGroups.length === enrichedGroups.length ? 'Collapse All' : 'Expand All'
+                }
                 className="text-[10px] font-semibold text-servora-pale/40 hover:text-servora-teal flex items-center gap-1 transition-colors cursor-pointer"
               >
                 {expandedGroups.length === enrichedGroups.length ? (
@@ -979,14 +1098,16 @@ export default function Sidebar({
           <div className="space-y-1">
             {filteredGroups.map((group, idx) => {
               const GroupIcon = group.icon;
-              const expanded = searchQuery.trim().length > 0 || expandedGroups.includes(group.label);
-              const active = groupIsActive(pathname, group);
+              const expanded =
+                searchQuery.trim().length > 0 || expandedGroups.includes(group.label);
+              const active = group.items.some((item) => item.href === activeHref);
               const prevDomain = idx > 0 ? filteredGroups[idx - 1].domain : null;
-              const showDomainDivider = !searchQuery && !isCollapsed && group.domain !== prevDomain;
+              const showDomainDivider =
+                !searchQuery && !isCollapsed && group.domain !== prevDomain;
 
               const groupBadgeCount = group.items.reduce((acc, item) => {
                 const numeric = parseInt(item.badge || '0', 10);
-                return acc + (isNaN(numeric) ? 0 : numeric);
+                return acc + (Number.isNaN(numeric) ? 0 : numeric);
               }, 0);
 
               return (
@@ -1021,12 +1142,16 @@ export default function Sidebar({
                         size={16}
                         className={[
                           'shrink-0 transition-colors',
-                          active ? 'text-servora-teal' : 'text-servora-pale/50 group-hover:text-servora-teal',
+                          active
+                            ? 'text-servora-teal'
+                            : 'text-servora-pale/50 group-hover:text-servora-teal',
                         ].join(' ')}
                       />
                       {!isCollapsed && (
                         <>
-                          <span className="min-w-0 flex-1 truncate tracking-tight">{group.label}</span>
+                          <span className="min-w-0 flex-1 truncate tracking-tight">
+                            {group.label}
+                          </span>
                           {!expanded && groupBadgeCount > 0 && (
                             <span className="px-1.5 py-0.2 text-[9px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
                               {groupBadgeCount}
@@ -1081,13 +1206,16 @@ export default function Sidebar({
           </div>
 
           {!searchQuery && (
-            <div className={`pt-3 border-t border-white/[0.08] mt-3 ${isCollapsed ? 'flex justify-center' : ''}`}>
+            <div
+              className={`pt-3 border-t border-white/[0.08] mt-3 ${
+                isCollapsed ? 'flex justify-center' : ''
+              }`}
+            >
               {renderNavItem(
                 {
                   label: 'Help & Knowledgebase',
                   href: '/help',
                   icon: CircleHelp,
-                  permission: 'help.view',
                 },
                 false,
                 false
@@ -1096,33 +1224,52 @@ export default function Sidebar({
           )}
         </nav>
 
+        {/* Footer: Live Network / SLA Status & Sign Out */}
         <div className="shrink-0 border-t border-white/[0.08] bg-black/15 p-2.5">
           {!isCollapsed ? (
             <div className="mb-2 flex items-center justify-between rounded-xl bg-white/[0.03] px-3 py-2 border border-white/[0.06]">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                </span>
+                {isOnline ? (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                  </span>
+                ) : (
+                  <WifiOff size={13} className="text-amber-400 shrink-0" />
+                )}
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-bold text-white leading-tight truncate">
-                    Enterprise SLA
+                    {isOnline ? 'Enterprise SLA' : 'Offline Mode'}
                   </p>
-                  <p className="text-[9.5px] text-servora-pale/40 truncate font-mono">
-                    {latency ? `${latency}ms latency` : 'Online • Synced'}
+                  <p className="text-[9.5px] text-servora-pale/45 truncate font-mono">
+                    {!isOnline
+                      ? 'Local Cache Active'
+                      : latency !== null
+                        ? `${latency}ms latency`
+                        : 'Online • Synced'}
                   </p>
                 </div>
               </div>
-              <span className="text-[9.5px] font-bold uppercase tracking-wider text-servora-teal bg-servora-teal/15 border border-servora-teal/30 px-1.5 py-0.5 rounded">
+              <span className="text-[9.5px] font-bold uppercase tracking-wider text-servora-teal bg-servora-teal/15 border border-servora-teal/30 px-1.5 py-0.5 rounded shrink-0">
                 {userRole}
               </span>
             </div>
           ) : (
             <div
-              title={`Enterprise SLA (${latency ? `${latency}ms` : 'Operational'})`}
+              title={
+                isOnline
+                  ? `Enterprise SLA (${latency !== null ? `${latency}ms` : 'Online'})`
+                  : 'Offline Mode — Local Cache Active'
+              }
               className="mb-2 flex justify-center py-1"
             >
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20" />
+              <span
+                className={`h-2.5 w-2.5 rounded-full ring-4 ${
+                  isOnline
+                    ? 'bg-emerald-500 ring-emerald-500/20'
+                    : 'bg-amber-400 ring-amber-400/20'
+                }`}
+              />
             </div>
           )}
 
