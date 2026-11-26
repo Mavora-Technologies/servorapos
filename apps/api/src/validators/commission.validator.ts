@@ -24,47 +24,48 @@ const tierSchema = z.object({
   ratePercent: z.coerce.number().min(0).max(100),
 });
 
-export const createCommissionPlanSchema = z
-  .object({
-    name: z.string().trim().min(2, 'Plan name is required').max(150),
-    description: z.string().trim().max(500).nullable().optional(),
-    branchId: nullablePositiveInt.default(null),
-    targetRole: z
-      .string()
-      .trim()
-      .transform((v) => (v === '' || v === 'ALL' ? null : v))
-      .nullable()
-      .optional(),
-    targetUserId: nullablePositiveInt.default(null),
-    attributionMode: z
-      .enum(['WAITER_ONLY', 'CASHIER_ONLY', 'COALESCE_WAITER_CASHIER'])
-      .default('COALESCE_WAITER_CASHIER'),
-    productScope: z.enum(['ALL_ITEMS', 'CATEGORY', 'MENU_ITEM']).default('ALL_ITEMS'),
-    menuCategoryId: nullablePositiveInt.default(null),
-    menuItemId: nullablePositiveInt.default(null),
-    basisType: z
-      .enum(['NET_SALES', 'GROSS_SALES', 'GROSS_MARGIN', 'ITEM_QUANTITY'])
-      .default('NET_SALES'),
-    rateType: z
-      .enum(['FLAT_PERCENTAGE', 'FLAT_PER_UNIT', 'TIERED_ACCELERATOR'])
-      .default('FLAT_PERCENTAGE'),
-    flatRate: z.coerce.number().min(0).default(0),
-    tiers: z.array(tierSchema).max(10).default([]),
-    minQualifyingSales: z.coerce.number().min(0).default(0),
-    maxPayoutCap: z.preprocess(
-      (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
-      z.number().positive().nullable()
-    ),
-    clawbackOnRefund: z.boolean().default(true),
-    effectiveFrom: z.string().regex(dateRegex, 'effectiveFrom must be YYYY-MM-DD'),
-    effectiveTo: z
-      .string()
-      .trim()
-      .transform((v) => (v === '' ? null : v))
-      .nullable()
-      .optional(),
-    isActive: z.boolean().default(true),
-  })
+const commissionPlanBaseSchema = z.object({
+  name: z.string().trim().min(2, 'Plan name is required').max(150),
+  description: z.string().trim().max(500).nullable().optional(),
+  branchId: nullablePositiveInt.default(null),
+  targetRole: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' || v === 'ALL' ? null : v))
+    .nullable()
+    .optional(),
+  targetUserId: nullablePositiveInt.default(null),
+  attributionMode: z
+    .enum(['WAITER_ONLY', 'CASHIER_ONLY', 'COALESCE_WAITER_CASHIER'])
+    .default('COALESCE_WAITER_CASHIER'),
+  productScope: z.enum(['ALL_ITEMS', 'CATEGORY', 'MENU_ITEM']).default('ALL_ITEMS'),
+  menuCategoryId: nullablePositiveInt.default(null),
+  menuItemId: nullablePositiveInt.default(null),
+  basisType: z
+    .enum(['NET_SALES', 'GROSS_SALES', 'GROSS_MARGIN', 'ITEM_QUANTITY'])
+    .default('NET_SALES'),
+  rateType: z
+    .enum(['FLAT_PERCENTAGE', 'FLAT_PER_UNIT', 'TIERED_ACCELERATOR'])
+    .default('FLAT_PERCENTAGE'),
+  flatRate: z.coerce.number().min(0).default(0),
+  tiers: z.array(tierSchema).max(10).default([]),
+  minQualifyingSales: z.coerce.number().min(0).default(0),
+  maxPayoutCap: z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? null : Number(v)),
+    z.number().positive().nullable()
+  ),
+  clawbackOnRefund: z.boolean().default(true),
+  effectiveFrom: z.string().regex(dateRegex, 'effectiveFrom must be YYYY-MM-DD'),
+  effectiveTo: z
+    .string()
+    .trim()
+    .transform((v) => (v === '' ? null : v))
+    .nullable()
+    .optional(),
+  isActive: z.boolean().default(true),
+});
+
+export const createCommissionPlanSchema = commissionPlanBaseSchema
   .refine((d) => d.productScope !== 'CATEGORY' || d.menuCategoryId !== null, {
     message: 'Select a menu category when Product Scope is CATEGORY.',
     path: ['menuCategoryId'],
@@ -78,7 +79,7 @@ export const createCommissionPlanSchema = z
     path: ['tiers'],
   });
 
-export const updateCommissionPlanSchema = createCommissionPlanSchema.partial();
+export const updateCommissionPlanSchema = commissionPlanBaseSchema.partial();
 
 export const previewCommissionQuerySchema = z
   .object({
