@@ -2,12 +2,13 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const cash_drawer_controller_1 = require("../controllers/cash-drawer.controller");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.requireAuth);
-router.get('/', cash_drawer_controller_1.getDrawersDashboard);
-router.post('/', cash_drawer_controller_1.createCashDrawer);
-router.post('/sessions/open', cash_drawer_controller_1.openDrawerSession);
-router.post('/sessions/drop', cash_drawer_controller_1.recordCashDrop);
-router.post('/sessions/:id/close', cash_drawer_controller_1.closeDrawerSession);
+router.get('/', (0, rbac_middleware_1.requirePermission)(['cash.view', 'cash.reconcile']), cash_drawer_controller_1.getDrawersDashboard);
+router.post('/', (0, rbac_middleware_1.requirePermission)(['cash.reconcile', 'settings.manage']), cash_drawer_controller_1.createCashDrawer);
+router.post('/sessions/open', (0, rbac_middleware_1.requirePermission)(['cash.view', 'cash.reconcile']), cash_drawer_controller_1.openDrawerSession);
+router.post('/sessions/drop', (0, rbac_middleware_1.requirePermission)(['cash.view', 'cash.reconcile']), cash_drawer_controller_1.recordCashDrop);
+router.post('/sessions/:id/close', (0, rbac_middleware_1.requirePermission)('cash.reconcile'), cash_drawer_controller_1.closeDrawerSession);
 exports.default = router;

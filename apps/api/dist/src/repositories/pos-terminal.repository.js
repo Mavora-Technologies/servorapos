@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignStaffPosPinTransaction = exports.authenticatePosPinSwitch = exports.listBranchKioskOperators = exports.syncPostOrderStockAndAvailability = exports.validatePosPromoCode = exports.searchPosCustomersWithLoyalty = exports.deductOrderInventoryInTx = exports.validateOrderStockAvailability = exports.getPosTerminalContext = void 0;
+exports.assignStaffPosPinTransaction = exports.authenticatePosPinSwitch = exports.listBranchKioskOperators = exports.syncPostOrderStockAndAvailability = exports.validatePosPromoCode = exports.searchPosCustomersWithLoyalty = exports.deductOrderInventoryInTx = exports.validateOrderStockAvailability = exports.verifyActiveRegisterForPosSale = exports.getPosTerminalContext = void 0;
 // apps/api/src/repositories/pos-terminal.repository.ts
 const drizzle_orm_1 = require("drizzle-orm");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
@@ -63,9 +63,9 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId, author
     const assignmentBranchCondition = activeBranch
         ? (0, drizzle_orm_1.eq)(schema_1.cashierAssignments.branchId, activeBranch.id)
         : undefined;
-    // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
+    // 2. Parallel Fetch: Drawers, Open Drawer Sessions, User & Branch Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
     const todayStr = new Date().toISOString().split('T')[0];
-    const [branchDrawers, [activeShift], [custodianAssignment], activeRewards, unavailableItems, allTenantKitchenStations, tenantCatalogRouting, tenantInventory, tenantRecipes, attachedModifierLinks,] = await Promise.all([
+    const [branchDrawers, activeDrawerSessions, [userActiveShift], [branchActiveShift], [custodianAssignment], activeRewards, unavailableItems, allTenantKitchenStations, tenantCatalogRouting, tenantInventory, tenantRecipes, attachedModifierLinks,] = await Promise.all([
         db_1.db
             .select({
             id: schema_1.cashDrawers.id,
@@ -79,8 +79,22 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId, author
             .orderBy((0, drizzle_orm_1.asc)(schema_1.cashDrawers.drawerCode)),
         db_1.db
             .select({
+            id: schema_1.drawerSessions.id,
+            drawerId: schema_1.drawerSessions.drawerId,
+            cashierId: schema_1.drawerSessions.cashierId,
+            status: schema_1.drawerSessions.status,
+            openingFloat: schema_1.drawerSessions.openingFloat,
+            expectedClosingBalance: schema_1.drawerSessions.expectedClosingBalance,
+            openedAt: schema_1.drawerSessions.openedAt,
+        })
+            .from(schema_1.drawerSessions)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.drawerSessions.tenantId, tenantId), (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.status} != 'CLOSED_RECONCILED'`))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.drawerSessions.openedAt)),
+        db_1.db
+            .select({
             id: schema_1.cashierShifts.id,
             branchId: schema_1.cashierShifts.branchId,
+            cashierId: schema_1.cashierShifts.cashierId,
             openingFloat: schema_1.cashierShifts.openingFloat,
             expectedCash: schema_1.cashierShifts.expectedCash,
             status: schema_1.cashierShifts.status,
@@ -88,6 +102,20 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId, author
         })
             .from(schema_1.cashierShifts)
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashierShifts.cashierId, userId), (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'), shiftBranchCondition))
+            .limit(1),
+        db_1.db
+            .select({
+            id: schema_1.cashierShifts.id,
+            branchId: schema_1.cashierShifts.branchId,
+            cashierId: schema_1.cashierShifts.cashierId,
+            openingFloat: schema_1.cashierShifts.openingFloat,
+            expectedCash: schema_1.cashierShifts.expectedCash,
+            status: schema_1.cashierShifts.status,
+            openedAt: schema_1.cashierShifts.openedAt,
+        })
+            .from(schema_1.cashierShifts)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'), shiftBranchCondition))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.cashierShifts.openedAt))
             .limit(1),
         db_1.db
             .select({
@@ -409,18 +437,34 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId, author
             };
         }
     }
+    // 6. Map open drawer sessions & resolve branch-level active shift for shared waiter terminals
+    const sessionByDrawerId = new Map();
+    for (const s of activeDrawerSessions) {
+        if (!sessionByDrawerId.has(s.drawerId)) {
+            sessionByDrawerId.set(s.drawerId, s);
+        }
+    }
+    const effectiveActiveShift = userActiveShift || branchActiveShift || null;
     return {
         branches: accessibleBranches,
         activeBranch,
-        drawers: branchDrawers.map((d) => ({
-            ...d,
-            currentBalance: Number(d.currentBalance),
-        })),
-        activeShift: activeShift
+        drawers: branchDrawers.map((d) => {
+            const openSession = sessionByDrawerId.get(d.id) || null;
+            return {
+                ...d,
+                currentBalance: Number(d.currentBalance),
+                activeSessionId: openSession?.id ?? null,
+                hasOpenSession: d.status === 'OPEN' && Boolean(openSession),
+            };
+        }),
+        activeShift: effectiveActiveShift
             ? {
-                ...activeShift,
-                openingFloat: Number(activeShift.openingFloat),
-                expectedCash: Number(activeShift.expectedCash),
+                id: effectiveActiveShift.id,
+                branchId: effectiveActiveShift.branchId,
+                openingFloat: Number(effectiveActiveShift.openingFloat),
+                expectedCash: Number(effectiveActiveShift.expectedCash),
+                status: effectiveActiveShift.status,
+                openedAt: effectiveActiveShift.openedAt,
             }
             : null,
         custodianGuardrails: custodianAssignment
@@ -441,6 +485,62 @@ const getPosTerminalContext = async (tenantId, userId, requestedBranchId, author
     };
 };
 exports.getPosTerminalContext = getPosTerminalContext;
+/**
+ * Verifies that an active cash drawer session and open cashier shift exist
+ * for the target branch/register before allowing a POS checkout to commit.
+ * Supports shared waiter terminals operating under a supervisor/cashier's open float.
+ */
+const verifyActiveRegisterForPosSale = async (tenantId, branchId, cashDrawerId) => {
+    const drawerFilter = cashDrawerId
+        ? (0, drizzle_orm_1.eq)(schema_1.cashDrawers.id, cashDrawerId)
+        : branchId
+            ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.cashDrawers.branchId, branchId), (0, drizzle_orm_1.isNull)(schema_1.cashDrawers.branchId))
+            : undefined;
+    const shiftBranchFilter = branchId ? (0, drizzle_orm_1.eq)(schema_1.cashierShifts.branchId, branchId) : undefined;
+    const [openDrawers, [openShift]] = await Promise.all([
+        db_1.db
+            .select({
+            id: schema_1.cashDrawers.id,
+            name: schema_1.cashDrawers.name,
+            status: schema_1.cashDrawers.status,
+            sessionId: schema_1.drawerSessions.id,
+        })
+            .from(schema_1.cashDrawers)
+            .leftJoin(schema_1.drawerSessions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.drawerSessions.drawerId, schema_1.cashDrawers.id), (0, drizzle_orm_1.eq)(schema_1.drawerSessions.tenantId, tenantId), (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.status} != 'CLOSED_RECONCILED'`))
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashDrawers.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashDrawers.status, 'OPEN'), drawerFilter))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.drawerSessions.openedAt))
+            .limit(1),
+        db_1.db
+            .select({
+            id: schema_1.cashierShifts.id,
+        })
+            .from(schema_1.cashierShifts)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'), shiftBranchFilter))
+            .orderBy((0, drizzle_orm_1.desc)(schema_1.cashierShifts.openedAt))
+            .limit(1),
+    ]);
+    const activeDrawer = openDrawers[0] || null;
+    if (!activeDrawer || !openShift) {
+        return {
+            isReady: false,
+            drawerId: activeDrawer?.id ?? null,
+            drawerName: activeDrawer?.name ?? null,
+            drawerSessionId: activeDrawer?.sessionId ?? null,
+            cashierShiftId: openShift?.id ?? null,
+            reason: !activeDrawer
+                ? 'Cannot complete POS sale: no open cash drawer register is active for this outlet. A supervisor or cashier must open a shift float.'
+                : 'Cannot complete POS sale: no open cashier shift exists for this outlet. A supervisor or cashier must open a shift float.',
+        };
+    }
+    return {
+        isReady: true,
+        drawerId: activeDrawer.id,
+        drawerName: activeDrawer.name,
+        drawerSessionId: activeDrawer.sessionId ?? null,
+        cashierShiftId: openShift.id,
+    };
+};
+exports.verifyActiveRegisterForPosSale = verifyActiveRegisterForPosSale;
 /**
  * Authoritative live database stock validation for a POS order cart.
  * Aggregates shared raw materials across all cart lines and checks manual 86'd caps.

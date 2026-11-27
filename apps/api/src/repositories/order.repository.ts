@@ -1,5 +1,18 @@
 // apps/api/src/repositories/order.repository.ts
-import { eq, desc, and, inArray, sql, asc, or, ilike, gte, lte, isNotNull } from 'drizzle-orm';
+import {
+  eq,
+  desc,
+  and,
+  inArray,
+  sql,
+  asc,
+  or,
+  ilike,
+  gte,
+  lte,
+  isNotNull,
+  isNull,
+} from 'drizzle-orm';
 import { db } from '../config/db';
 import {
   orders,
@@ -27,8 +40,135 @@ import {
 } from '../config/schema';
 import { ListOrdersQuery } from '../validators/order.validator';
 
+export class RegisterClosedError extends Error {
+  public readonly statusCode = 409;
+  public readonly code = 'REGISTER_CLOSED';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RegisterClosedError';
+  }
+}
+
 export const createOrderRecord = async (tenantId: number, data: any, items: any[]) => {
   return await db.transaction(async (tx) => {
+    // 0. Idempotency Guard (prevents duplicate orders on network/offline retries)
+    if (data.idempotencyKey) {
+      const [existingOrder] = await tx
+        .select()
+        .from(orders)
+        .where(
+          and(
+            eq(orders.tenantId, tenantId),
+            eq(orders.idempotencyKey, String(data.idempotencyKey))
+          )
+        )
+        .limit(1);
+
+      if (existingOrder) {
+        return {
+          ...existingOrder,
+          stationRouting: [],
+          isIdempotentReplay: true,
+        };
+      }
+    }
+
+    const branchIdNum = data.branchId ? Number(data.branchId) : null;
+    const requestedDrawerId = data.cashDrawerId ? Number(data.cashDrawerId) : null;
+    const requestedShiftId = data.cashierShiftId ? Number(data.cashierShiftId) : null;
+
+    // 1. Server-Side 409 Conflict Closed-Register Guard (Enterprise POS Custody Rule)
+    // Enforced for all POS orders; only bypassed if explicitly flagged as an external storefront webhook.
+    let activeDrawerSession: {
+      sessionId: number;
+      drawerId: number;
+      drawerName: string;
+    } | null = null;
+    let activeOpenShift: {
+      id: number;
+      branchId: number | null;
+      cashierId: number;
+    } | null = null;
+
+    if (data.isExternalStorefront !== true) {
+      const drawerScope = requestedDrawerId
+        ? eq(cashDrawers.id, requestedDrawerId)
+        : branchIdNum
+          ? or(eq(cashDrawers.branchId, branchIdNum), isNull(cashDrawers.branchId))
+          : undefined;
+
+      const shiftScope = requestedShiftId
+        ? eq(cashierShifts.id, requestedShiftId)
+        : branchIdNum
+          ? eq(cashierShifts.branchId, branchIdNum)
+          : undefined;
+
+      const [[drawerRow], [shiftRow]] = await Promise.all([
+        tx
+          .select({
+            drawerId: cashDrawers.id,
+            drawerName: cashDrawers.name,
+            drawerStatus: cashDrawers.status,
+            sessionId: drawerSessions.id,
+          })
+          .from(cashDrawers)
+          .innerJoin(
+            drawerSessions,
+            and(
+              eq(drawerSessions.drawerId, cashDrawers.id),
+              eq(drawerSessions.tenantId, tenantId),
+              sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`
+            )
+          )
+          .where(
+            and(
+              eq(cashDrawers.tenantId, tenantId),
+              eq(cashDrawers.status, 'OPEN'),
+              drawerScope
+            )
+          )
+          .orderBy(desc(drawerSessions.openedAt))
+          .limit(1),
+
+        tx
+          .select({
+            id: cashierShifts.id,
+            branchId: cashierShifts.branchId,
+            cashierId: cashierShifts.cashierId,
+          })
+          .from(cashierShifts)
+          .where(
+            and(
+              eq(cashierShifts.tenantId, tenantId),
+              eq(cashierShifts.status, 'OPEN'),
+              shiftScope
+            )
+          )
+          .orderBy(desc(cashierShifts.openedAt))
+          .limit(1),
+      ]);
+
+      if (!drawerRow || !drawerRow.sessionId) {
+        throw new RegisterClosedError(
+          'Cannot complete POS sale: no open cash drawer session is active for this outlet. A supervisor or cashier must open a shift float first.'
+        );
+      }
+
+      if (!shiftRow) {
+        throw new RegisterClosedError(
+          'Cannot complete POS sale: no open cashier shift exists for this outlet. A supervisor or cashier must open a shift float first.'
+        );
+      }
+
+      activeDrawerSession = {
+        sessionId: drawerRow.sessionId,
+        drawerId: drawerRow.drawerId,
+        drawerName: drawerRow.drawerName,
+      };
+      activeOpenShift = shiftRow;
+    }
+
     const orderNumber = `SRV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
 
     const subtotal =
@@ -41,14 +181,16 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
     const total = Number(data.total) || subtotal + tax + cateringLevy + serviceCharge;
     const isPaid = Boolean(data.paymentMethod);
 
-    // 1. Insert Order Header with full Branch & Cashier Custody Attribution
+    // 2. Insert Order Header with full Branch, Waiter, Cashier, Customer & Idempotency Attribution
     const [newOrder] = await tx
       .insert(orders)
       .values({
         tenantId,
-        branchId: data.branchId ?? null,
-        cashierId: data.cashierId ?? null,
-        tableId: data.tableId ?? null,
+        branchId: branchIdNum,
+        waiterId: data.waiterId ? Number(data.waiterId) : data.cashierId ? Number(data.cashierId) : null,
+        cashierId: data.cashierId ? Number(data.cashierId) : null,
+        customerId: data.customerId ? Number(data.customerId) : null,
+        tableId: data.tableId ? Number(data.tableId) : null,
         tableName: data.tableName ?? data.orderType ?? 'Counter POS',
         orderNumber,
         orderType: data.orderType || 'Dine-In',
@@ -65,11 +207,12 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         total: total.toFixed(2),
         amountPaid: isPaid ? total.toFixed(2) : '0.00',
         notes: data.notes ?? null,
+        idempotencyKey: data.idempotencyKey ? String(data.idempotencyKey) : null,
         inventoryDeducted: false,
       })
       .returning();
 
-    // 2. Automatically Occupy Table if Dine-In
+    // 3. Automatically Occupy Table if Dine-In
     if (newOrder.orderType === 'Dine-In' && newOrder.tableId) {
       await tx
         .update(restaurantTables)
@@ -85,7 +228,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         );
     }
 
-    // 3. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Increment Active Cash Drawer / Shift Balances
+    // 4. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Atomically Increment Active Drawer / Shift Balances
     if (isPaid) {
       const normalizedMethod = String(data.paymentMethod || '').toUpperCase();
       const isCashTender = normalizedMethod === 'CASH' || normalizedMethod === 'SPLIT';
@@ -94,26 +237,28 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         normalizedMethod === 'CASH'
           ? total
           : normalizedMethod === 'SPLIT'
-          ? Math.min(total, Number(data.cashTendered) || 0)
-          : 0;
+            ? Math.min(total, Number(data.cashTendered) || 0)
+            : 0;
 
       await tx.insert(payments).values({
         tenantId,
-        branchId: data.branchId ?? null,
+        branchId: branchIdNum,
         paymentNumber: `PMT-${Date.now().toString().slice(-6)}-${Math.floor(10 + Math.random() * 89)}`,
         paymentFlow: 'INBOUND_AR',
         status: 'POSTED',
         paymentMethod: isCashTender
           ? 'CASH_DRAWER'
           : normalizedMethod === 'M-PESA'
-          ? 'MPESA_B2B'
-          : 'CREDIT_CARD',
-        clearingAccount: isCashTender ? 'POS Cash Drawer Register' : `${data.paymentMethod} Clearing`,
+            ? 'MPESA_B2B'
+            : 'CREDIT_CARD',
+        clearingAccount: isCashTender
+          ? activeDrawerSession?.drawerName || 'POS Cash Drawer Register'
+          : `${data.paymentMethod} Clearing`,
         transactionReference: orderNumber,
         orderId: newOrder.id,
         currency: 'KES',
         amount: total.toFixed(4),
-        processedById: data.cashierId ?? null,
+        processedById: data.cashierId ? Number(data.cashierId) : null,
         notes: `POS Settlement for ${orderNumber}`,
       });
 
@@ -131,7 +276,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
 
       await tx.insert(fiscalInvoices).values({
         tenantId,
-        branchId: data.branchId ?? null,
+        branchId: branchIdNum,
         orderId: newOrder.id,
         invoiceType: 'SALE',
         buyerKraPin: data.buyerKraPin ?? null,
@@ -142,66 +287,34 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
       });
 
       if (isCashTender && cashInflow > 0) {
-        const sessionFilters = [
-          eq(drawerSessions.tenantId, tenantId),
-          sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`,
-        ];
-        if (data.cashDrawerId) {
-          sessionFilters.push(eq(drawerSessions.drawerId, Number(data.cashDrawerId)));
-        } else if (data.cashierId) {
-          sessionFilters.push(eq(drawerSessions.cashierId, Number(data.cashierId)));
-        }
+        const inflow4 = cashInflow.toFixed(4);
+        const inflow2 = cashInflow.toFixed(2);
 
-        const [activeSession] = await tx
-          .select()
-          .from(drawerSessions)
-          .where(and(...sessionFilters))
-          .orderBy(desc(drawerSessions.openedAt))
-          .limit(1);
-
-        if (activeSession) {
-          const newSalesTotal = (Number(activeSession.cashSalesTotal) || 0) + cashInflow;
-          const newExpectedClosing = (Number(activeSession.expectedClosingBalance) || 0) + cashInflow;
-
+        if (activeDrawerSession) {
           await tx
             .update(drawerSessions)
             .set({
-              cashSalesTotal: newSalesTotal.toFixed(4),
-              expectedClosingBalance: newExpectedClosing.toFixed(4),
+              cashSalesTotal: sql`${drawerSessions.cashSalesTotal} + ${inflow4}::numeric`,
+              expectedClosingBalance: sql`${drawerSessions.expectedClosingBalance} + ${inflow4}::numeric`,
             })
-            .where(eq(drawerSessions.id, activeSession.id));
+            .where(eq(drawerSessions.id, activeDrawerSession.sessionId));
 
           await tx
             .update(cashDrawers)
             .set({
-              currentBalance: newExpectedClosing.toFixed(2),
+              currentBalance: sql`${cashDrawers.currentBalance} + ${inflow2}::numeric`,
               updatedAt: new Date(),
             })
-            .where(eq(cashDrawers.id, activeSession.drawerId));
+            .where(eq(cashDrawers.id, activeDrawerSession.drawerId));
         }
 
-        const shiftFilters = [
-          eq(cashierShifts.tenantId, tenantId),
-          eq(cashierShifts.status, 'OPEN'),
-        ];
-        if (data.cashierShiftId) {
-          shiftFilters.push(eq(cashierShifts.id, Number(data.cashierShiftId)));
-        } else if (data.cashierId) {
-          shiftFilters.push(eq(cashierShifts.cashierId, Number(data.cashierId)));
-        }
-
-        const [openShift] = await tx
-          .select()
-          .from(cashierShifts)
-          .where(and(...shiftFilters))
-          .limit(1);
-
-        if (openShift) {
-          const updatedExpected = (Number(openShift.expectedCash) || 0) + cashInflow;
+        if (activeOpenShift) {
           await tx
             .update(cashierShifts)
-            .set({ expectedCash: updatedExpected.toFixed(2) })
-            .where(eq(cashierShifts.id, openShift.id));
+            .set({
+              expectedCash: sql`${cashierShifts.expectedCash} + ${inflow2}::numeric`,
+            })
+            .where(eq(cashierShifts.id, activeOpenShift.id));
         }
       }
 
@@ -243,7 +356,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
 
           await tx.insert(loyaltyTransactionsLedger).values({
             tenantId,
-            branchId: data.branchId ?? null,
+            branchId: branchIdNum,
             customerId: Number(data.customerId),
             orderId: newOrder.id,
             entryType: 'ACCRUAL_PURCHASE',
@@ -254,13 +367,13 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
             channel: 'POS_TERMINAL',
             auditReference: orderNumber,
             notes: `POS Purchase Accrual (${orderNumber})`,
-            processedById: data.cashierId ?? null,
+            processedById: data.cashierId ? Number(data.cashierId) : null,
           });
         }
       }
     }
 
-    // 4. Resolve Station Routing (Order Override -> Line Override -> Branch Category Routing -> Menu Item Station + Failover)
+    // 5. Resolve Station Routing (Order Override -> Line Override -> Branch Category Routing -> Menu Item Station + Failover)
     const [branchStations, catalogItems] = await Promise.all([
       tx
         .select()
@@ -268,7 +381,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         .where(
           and(
             eq(kitchenStations.tenantId, tenantId),
-            data.branchId ? eq(kitchenStations.branchId, Number(data.branchId)) : undefined
+            branchIdNum ? eq(kitchenStations.branchId, branchIdNum) : undefined
           )
         ),
       tx
@@ -316,7 +429,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
       wasFailover: boolean;
     }> = [];
 
-    // 5. Insert Order Items with Station Routing Tag & Execute Recipe/BOM Stock Deductions
+    // 6. Insert Order Items with Station Routing Tag & Execute Recipe/BOM Stock Deductions
     for (const item of items) {
       const quantity = Number(item.quantity) || 1;
       const unitPrice = Number(item.price || item.unitPrice) || 0;
@@ -324,7 +437,6 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
       const menuItemId = parseInt(String(item.menuItemId || item.id), 10);
       const catalogEntry = !isNaN(menuItemId) ? catalogById.get(menuItemId) : undefined;
 
-      // Determine default station from branch category routing or menu item
       let defaultStation = catalogEntry?.kitchenStation || 'Main Kitchen';
       if (catalogEntry?.categoryName) {
         const catLower = catalogEntry.categoryName.trim().toLowerCase();
@@ -334,7 +446,6 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
         if (catStation) defaultStation = catStation.name;
       }
 
-      // Check order-wide or line-specific station redirect from POS
       const requestedStation =
         (data.targetStation && String(data.targetStation).trim()) ||
         (item.targetStation && String(item.targetStation).trim()) ||
@@ -425,6 +536,7 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
 
               await tx.insert(stockMovements).values({
                 tenantId,
+                branchId: branchIdNum ?? invItem.branchId ?? null,
                 inventoryItemId: invItem.id,
                 orderId: newOrder.id,
                 type: 'SALE_CONSUMPTION',
@@ -444,17 +556,19 @@ export const createOrderRecord = async (tenantId: number, data: any, items: any[
 
     await tx.insert(auditLogs).values({
       tenantId,
-      branchId: data.branchId ?? null,
-      userId: data.cashierId ?? null,
+      branchId: branchIdNum,
+      userId: data.cashierId ? Number(data.cashierId) : null,
       action: 'POS_ORDER_ROUTED_TO_STATIONS',
       module: 'POS',
       entityType: 'orders',
       entityId: String(newOrder.id),
-      reason: `Order ${orderNumber} routed across ${
-        Array.from(new Set(stationRoutingManifest.map((r) => r.routedStation))).join(', ')
-      }`,
+      reason: `Order ${orderNumber} routed across ${Array.from(
+        new Set(stationRoutingManifest.map((r) => r.routedStation))
+      ).join(', ')}`,
       newValues: {
         orderNumber,
+        drawerSessionId: activeDrawerSession?.sessionId ?? null,
+        cashierShiftId: activeOpenShift?.id ?? null,
         stationRoutingManifest,
       },
     });

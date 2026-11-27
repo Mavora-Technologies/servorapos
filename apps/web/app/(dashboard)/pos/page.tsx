@@ -105,6 +105,8 @@ interface CashDrawerOption {
   name: string;
   status: string;
   currentBalance: number;
+  activeSessionId?: number | null;
+  hasOpenSession?: boolean;
 }
 
 interface ActiveCashierShift {
@@ -828,7 +830,9 @@ export default function POSPage() {
           } else if (resolvedDrawers.length > 0) {
             setSelectedDrawerId((prev) => {
               if (prev && resolvedDrawers.some((d) => String(d.id) === prev)) return prev;
-              const openDrawer = resolvedDrawers.find((d) => d.status === 'OPEN');
+              const openDrawer = resolvedDrawers.find(
+                (d) => d.status === 'OPEN' || d.hasOpenSession
+              );
               return String((openDrawer || resolvedDrawers[0]).id);
             });
           } else {
@@ -1920,6 +1924,36 @@ export default function POSPage() {
     [tables, selectedTableId]
   );
 
+  // Permission-Driven Capabilities (Zero Hardcoded Custom Role Slugs)
+  const userPermissions = useMemo(
+    () => (Array.isArray(currentUser?.permissions) ? currentUser.permissions : []),
+    [currentUser?.permissions]
+  );
+
+  const isWildcardAdmin =
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.role === 'SUPER_ADMIN' ||
+    userPermissions.includes('*');
+
+  const canManageCashShift =
+    isWildcardAdmin ||
+    userPermissions.includes('cash.view') ||
+    userPermissions.includes('cash.reconcile');
+
+  const canToggleAutoLock =
+    isWildcardAdmin ||
+    userPermissions.includes('staff.manage') ||
+    userPermissions.includes('settings.manage') ||
+    userPermissions.includes('cash.reconcile');
+
+  // Enterprise Custody Rule: Sales require an OPEN cash drawer session AND an active branch shift
+  const isSelectedDrawerOpen = Boolean(
+    selectedDrawerObj &&
+      (selectedDrawerObj.status === 'OPEN' || selectedDrawerObj.hasOpenSession)
+  );
+  const isShiftOpenForTrading = Boolean(activeShift && activeShift.status === 'OPEN');
+  const isRegisterReadyForSales = isSelectedDrawerOpen && isShiftOpenForTrading;
+
   const splitTotalCovered = useMemo(() => {
     const c = parseFloat(splitCashAmount) || 0;
     const m = parseFloat(splitMpesaAmount) || 0;
@@ -1956,6 +1990,14 @@ export default function POSPage() {
 
   const handleOpenPayment = () => {
     if (cart.length === 0) return;
+    if (!isRegisterReadyForSales) {
+      setStockAlert(
+        canManageCashShift
+          ? 'Register is closed. Open an active shift float & cash drawer before settling sales.'
+          : 'Register is closed. Ask a supervisor or cashier to open a shift float before settling sales.'
+      );
+      return;
+    }
     if (activeServiceModel?.requiresTable && !selectedTableId) {
       setStockAlert('This service model requires assigning a dining table before settlement.');
       setIsOrderMetaExpanded(true);
@@ -1974,7 +2016,7 @@ export default function POSPage() {
   };
 
   const canSubmitPayment = useMemo(() => {
-    if (isCheckingOut) return false;
+    if (isCheckingOut || !isRegisterReadyForSales) return false;
     if (paymentMethod === 'Cash') {
       return (parseFloat(cashTendered) || 0) >= calculations.grandTotal;
     }
@@ -1982,12 +2024,25 @@ export default function POSPage() {
       return splitTotalCovered >= calculations.grandTotal;
     }
     return true;
-  }, [isCheckingOut, paymentMethod, cashTendered, calculations.grandTotal, splitTotalCovered]);
+  }, [
+    isCheckingOut,
+    isRegisterReadyForSales,
+    paymentMethod,
+    cashTendered,
+    calculations.grandTotal,
+    splitTotalCovered,
+  ]);
 
   const handleCompleteCheckout = async () => {
     if (isCheckingOut) return;
     setCheckoutError(null);
 
+    if (!isRegisterReadyForSales) {
+      setCheckoutError(
+        'Cannot complete sale: no active shift and open cash drawer for this outlet.'
+      );
+      return;
+    }
     if (paymentMethod === 'Cash' && (parseFloat(cashTendered) || 0) < calculations.grandTotal) {
       setCheckoutError('Cash tendered is less than the total payable amount.');
       return;
@@ -2131,6 +2186,7 @@ export default function POSPage() {
         body: JSON.stringify({
           idempotencyKey: idempKey,
           branchId: activeBranch?.id,
+          waiterId: currentUser?.id,
           cashDrawerId: selectedDrawerId ? parseInt(selectedDrawerId, 10) : undefined,
           cashierShiftId: activeShift?.id,
           customerId: selectedCustomer?.id,
@@ -2489,17 +2545,17 @@ export default function POSPage() {
                         </option>
                       ))}
                     </select>
-                  ) : isDedicatedKiosk ? (
-                    <span className="text-xs font-bold text-gray-500 block truncate">
-                      Shared Register
-                    </span>
-                  ) : (
+                  ) : canManageCashShift && !isDedicatedKiosk ? (
                     <Link
                       href="/cash-management/drawers"
                       className="text-xs font-bold text-amber-700 hover:underline block truncate"
                     >
                       Configure Drawer &rarr;
                     </Link>
+                  ) : (
+                    <span className="text-xs font-bold text-gray-500 block truncate">
+                      No Active Register
+                    </span>
                   )}
                 </div>
               </div>
@@ -2546,7 +2602,8 @@ export default function POSPage() {
 
           {/* Right: Compact Action Controls */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {!isDedicatedKiosk && (
+            {/* Auto-Lock Toggle: Restricted to Supervisors / Managers (RBAC-enforced) */}
+            {!isDedicatedKiosk && canToggleAutoLock && (
               <button
                 type="button"
                 onClick={() => setAutoLockAfterSale((v) => !v)}
@@ -2586,7 +2643,7 @@ export default function POSPage() {
               </button>
             )}
 
-            {isSafeDropWarning && (
+            {isSafeDropWarning && canManageCashShift && (
               <span
                 title="Drawer cash balance near safe-drop limit"
                 className="hidden md:inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-[11px] font-bold animate-pulse"
@@ -2596,8 +2653,9 @@ export default function POSPage() {
               </span>
             )}
 
-            {!isDedicatedKiosk &&
-              (!activeShift ? (
+            {/* Shift / Open Float Control: Actionable link for Cash/Shift roles; Read-only status pill for Waiters */}
+            {!isDedicatedKiosk && canManageCashShift ? (
+              !isRegisterReadyForSales ? (
                 <Link
                   href="/cash-management/shifts"
                   className="hidden xl:inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1.5 rounded-xl text-[11px] font-bold hover:bg-amber-100 transition-colors"
@@ -2610,9 +2668,23 @@ export default function POSPage() {
                   className="hidden xl:inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-xl text-[11px] font-bold hover:bg-emerald-100 transition-colors"
                 >
                   <Unlock size={12} className="text-emerald-600" />
-                  <span>Shift #{activeShift.id}</span>
+                  <span>Shift #{activeShift?.id}</span>
                 </Link>
-              ))}
+              )
+            ) : (
+              <span
+                className={`hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border ${
+                  isRegisterReadyForSales
+                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                    : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}
+              >
+                {isRegisterReadyForSales ? <Unlock size={12} /> : <Lock size={12} />}
+                <span>
+                  {isRegisterReadyForSales ? `Shift #${activeShift?.id}` : 'Register Closed'}
+                </span>
+              </span>
+            )}
 
             <button
               type="button"
@@ -2692,16 +2764,16 @@ export default function POSPage() {
                   </select>
                 ) : (
                   <span className="text-xs font-bold text-gray-500 block truncate">
-                    Shared Register
+                    No Active Register
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Shift & Auto-Lock Controls */}
-            {!isDedicatedKiosk && (
-              <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
-                {!activeShift ? (
+            {/* Shift Status & Supervisor-Only Controls */}
+            <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+              {!isDedicatedKiosk && canManageCashShift ? (
+                !isRegisterReadyForSales ? (
                   <Link
                     href="/cash-management/shifts"
                     className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold"
@@ -2713,10 +2785,27 @@ export default function POSPage() {
                     href="/cash-management/shifts"
                     className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold"
                   >
-                    <Unlock size={12} /> Shift #{activeShift.id} Active
+                    <Unlock size={12} /> Shift #{activeShift?.id} Active
                   </Link>
-                )}
+                )
+              ) : (
+                <span
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border ${
+                    isRegisterReadyForSales
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                  }`}
+                >
+                  {isRegisterReadyForSales ? <Unlock size={12} /> : <Lock size={12} />}
+                  <span>
+                    {isRegisterReadyForSales
+                      ? `Shift #${activeShift?.id} Open`
+                      : 'Register Closed'}
+                  </span>
+                </span>
+              )}
 
+              {!isDedicatedKiosk && canToggleAutoLock && (
                 <button
                   type="button"
                   onClick={() => setAutoLockAfterSale((v) => !v)}
@@ -2729,11 +2818,38 @@ export default function POSPage() {
                   <Lock size={11} />
                   <span>{autoLockAfterSale ? 'Auto-Lock After Sale: ON' : 'Auto-Lock: OFF'}</span>
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
       </div>
+
+      {/* CLOSED-REGISTER / NO ACTIVE SHIFT LOCKOUT BANNER */}
+      {!isLoading && !isRegisterReadyForSales && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-2 bg-amber-50 border border-amber-300 text-amber-950 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Lock size={14} className="text-amber-700 shrink-0" />
+            <span>
+              POS checkout locked: no active shift &amp; open cash drawer for{' '}
+              <strong>{activeBranch?.name || 'this outlet'}</strong>.{' '}
+              {canManageCashShift
+                ? 'Open a shift float to start trading.'
+                : 'Ask a supervisor or cashier to open a shift float.'}
+            </span>
+          </div>
+          {canManageCashShift && !isDedicatedKiosk && (
+            <Link
+              href="/cash-management/shifts"
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-[11px] font-bold shrink-0 transition-colors"
+            >
+              Open Shift Float &rarr;
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* STATUS / KDS FOOD READY / STOCK ALERT BANNERS */}
       {offlineSyncBanner && (
@@ -3010,9 +3126,16 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={handleOpenPayment}
-                className="py-2.5 px-4 bg-servora-core hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer shrink-0"
+                disabled={!isRegisterReadyForSales}
+                title={
+                  !isRegisterReadyForSales
+                    ? 'Register closed — open a shift float to charge'
+                    : 'Proceed to tender settlement'
+                }
+                className="py-2.5 px-4 bg-servora-core hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                <CreditCard size={14} /> Charge
+                {isRegisterReadyForSales ? <CreditCard size={14} /> : <Lock size={14} />}
+                <span>{isRegisterReadyForSales ? 'Charge' : 'Closed'}</span>
               </button>
             </div>
           )}
@@ -3041,7 +3164,10 @@ export default function POSPage() {
                         : 'text-gray-500 hover:text-servora-navy'
                     }`}
                   >
-                    <Icon size={12} className={isSelected ? 'text-servora-core shrink-0' : 'shrink-0'} />
+                    <Icon
+                      size={12}
+                      className={isSelected ? 'text-servora-core shrink-0' : 'shrink-0'}
+                    />
                     <span className="truncate">{model.name}</span>
                   </button>
                 );
@@ -3630,12 +3756,19 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={handleOpenPayment}
-                disabled={cart.length === 0}
-                className="col-span-3 py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                disabled={cart.length === 0 || !isRegisterReadyForSales}
+                title={
+                  !isRegisterReadyForSales
+                    ? 'Register closed — an active shift & open drawer are required'
+                    : 'Open tender settlement'
+                }
+                className="col-span-3 py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
               >
-                <CreditCard size={14} />
+                {isRegisterReadyForSales ? <CreditCard size={14} /> : <Lock size={14} />}
                 <span className="truncate">
-                  Charge {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
+                  {isRegisterReadyForSales
+                    ? `Charge ${currencySymbol} ${Math.round(calculations.grandTotal).toLocaleString()}`
+                    : 'Register Closed'}
                 </span>
               </button>
             </div>

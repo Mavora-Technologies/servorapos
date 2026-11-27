@@ -1,12 +1,91 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.fetchOnlineStorefrontOrders = exports.fetchTakeawayOrders = exports.updateOrderStatus = exports.fetchOpenOrders = exports.fetchOrderDetailById = exports.fetchTenantOrders = exports.createOrderRecord = void 0;
+exports.fetchOnlineStorefrontOrders = exports.fetchTakeawayOrders = exports.updateOrderStatus = exports.fetchOpenOrders = exports.fetchOrderDetailById = exports.fetchTenantOrders = exports.createOrderRecord = exports.RegisterClosedError = void 0;
 // apps/api/src/repositories/order.repository.ts
 const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
+class RegisterClosedError extends Error {
+    statusCode = 409;
+    code = 'REGISTER_CLOSED';
+    constructor(message) {
+        super(message);
+        this.name = 'RegisterClosedError';
+    }
+}
+exports.RegisterClosedError = RegisterClosedError;
 const createOrderRecord = async (tenantId, data, items) => {
     return await db_1.db.transaction(async (tx) => {
+        // 0. Idempotency Guard (prevents duplicate orders on network/offline retries)
+        if (data.idempotencyKey) {
+            const [existingOrder] = await tx
+                .select()
+                .from(schema_1.orders)
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orders.idempotencyKey, String(data.idempotencyKey))))
+                .limit(1);
+            if (existingOrder) {
+                return {
+                    ...existingOrder,
+                    stationRouting: [],
+                    isIdempotentReplay: true,
+                };
+            }
+        }
+        const branchIdNum = data.branchId ? Number(data.branchId) : null;
+        const requestedDrawerId = data.cashDrawerId ? Number(data.cashDrawerId) : null;
+        const requestedShiftId = data.cashierShiftId ? Number(data.cashierShiftId) : null;
+        // 1. Server-Side 409 Conflict Closed-Register Guard (Enterprise POS Custody Rule)
+        // Enforced for all POS orders; only bypassed if explicitly flagged as an external storefront webhook.
+        let activeDrawerSession = null;
+        let activeOpenShift = null;
+        if (data.isExternalStorefront !== true) {
+            const drawerScope = requestedDrawerId
+                ? (0, drizzle_orm_1.eq)(schema_1.cashDrawers.id, requestedDrawerId)
+                : branchIdNum
+                    ? (0, drizzle_orm_1.or)((0, drizzle_orm_1.eq)(schema_1.cashDrawers.branchId, branchIdNum), (0, drizzle_orm_1.isNull)(schema_1.cashDrawers.branchId))
+                    : undefined;
+            const shiftScope = requestedShiftId
+                ? (0, drizzle_orm_1.eq)(schema_1.cashierShifts.id, requestedShiftId)
+                : branchIdNum
+                    ? (0, drizzle_orm_1.eq)(schema_1.cashierShifts.branchId, branchIdNum)
+                    : undefined;
+            const [[drawerRow], [shiftRow]] = await Promise.all([
+                tx
+                    .select({
+                    drawerId: schema_1.cashDrawers.id,
+                    drawerName: schema_1.cashDrawers.name,
+                    drawerStatus: schema_1.cashDrawers.status,
+                    sessionId: schema_1.drawerSessions.id,
+                })
+                    .from(schema_1.cashDrawers)
+                    .innerJoin(schema_1.drawerSessions, (0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.drawerSessions.drawerId, schema_1.cashDrawers.id), (0, drizzle_orm_1.eq)(schema_1.drawerSessions.tenantId, tenantId), (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.status} != 'CLOSED_RECONCILED'`))
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashDrawers.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashDrawers.status, 'OPEN'), drawerScope))
+                    .orderBy((0, drizzle_orm_1.desc)(schema_1.drawerSessions.openedAt))
+                    .limit(1),
+                tx
+                    .select({
+                    id: schema_1.cashierShifts.id,
+                    branchId: schema_1.cashierShifts.branchId,
+                    cashierId: schema_1.cashierShifts.cashierId,
+                })
+                    .from(schema_1.cashierShifts)
+                    .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'), shiftScope))
+                    .orderBy((0, drizzle_orm_1.desc)(schema_1.cashierShifts.openedAt))
+                    .limit(1),
+            ]);
+            if (!drawerRow || !drawerRow.sessionId) {
+                throw new RegisterClosedError('Cannot complete POS sale: no open cash drawer session is active for this outlet. A supervisor or cashier must open a shift float first.');
+            }
+            if (!shiftRow) {
+                throw new RegisterClosedError('Cannot complete POS sale: no open cashier shift exists for this outlet. A supervisor or cashier must open a shift float first.');
+            }
+            activeDrawerSession = {
+                sessionId: drawerRow.sessionId,
+                drawerId: drawerRow.drawerId,
+                drawerName: drawerRow.drawerName,
+            };
+            activeOpenShift = shiftRow;
+        }
         const orderNumber = `SRV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`;
         const subtotal = Number(data.subtotal) ||
             items.reduce((sum, i) => sum + Number(i.price) * Number(i.quantity), 0);
@@ -16,14 +95,16 @@ const createOrderRecord = async (tenantId, data, items) => {
         const serviceCharge = Number(data.serviceCharge) || 0;
         const total = Number(data.total) || subtotal + tax + cateringLevy + serviceCharge;
         const isPaid = Boolean(data.paymentMethod);
-        // 1. Insert Order Header with full Branch & Cashier Custody Attribution
+        // 2. Insert Order Header with full Branch, Waiter, Cashier, Customer & Idempotency Attribution
         const [newOrder] = await tx
             .insert(schema_1.orders)
             .values({
             tenantId,
-            branchId: data.branchId ?? null,
-            cashierId: data.cashierId ?? null,
-            tableId: data.tableId ?? null,
+            branchId: branchIdNum,
+            waiterId: data.waiterId ? Number(data.waiterId) : data.cashierId ? Number(data.cashierId) : null,
+            cashierId: data.cashierId ? Number(data.cashierId) : null,
+            customerId: data.customerId ? Number(data.customerId) : null,
+            tableId: data.tableId ? Number(data.tableId) : null,
             tableName: data.tableName ?? data.orderType ?? 'Counter POS',
             orderNumber,
             orderType: data.orderType || 'Dine-In',
@@ -40,10 +121,11 @@ const createOrderRecord = async (tenantId, data, items) => {
             total: total.toFixed(2),
             amountPaid: isPaid ? total.toFixed(2) : '0.00',
             notes: data.notes ?? null,
+            idempotencyKey: data.idempotencyKey ? String(data.idempotencyKey) : null,
             inventoryDeducted: false,
         })
             .returning();
-        // 2. Automatically Occupy Table if Dine-In
+        // 3. Automatically Occupy Table if Dine-In
         if (newOrder.orderType === 'Dine-In' && newOrder.tableId) {
             await tx
                 .update(schema_1.restaurantTables)
@@ -53,7 +135,7 @@ const createOrderRecord = async (tenantId, data, items) => {
             })
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.restaurantTables.id, newOrder.tableId), (0, drizzle_orm_1.eq)(schema_1.restaurantTables.tenantId, tenantId)));
         }
-        // 3. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Increment Active Cash Drawer / Shift Balances
+        // 4. Record Treasury Payment, KRA eTIMS Fiscal Invoice & Atomically Increment Active Drawer / Shift Balances
         if (isPaid) {
             const normalizedMethod = String(data.paymentMethod || '').toUpperCase();
             const isCashTender = normalizedMethod === 'CASH' || normalizedMethod === 'SPLIT';
@@ -64,7 +146,7 @@ const createOrderRecord = async (tenantId, data, items) => {
                     : 0;
             await tx.insert(schema_1.payments).values({
                 tenantId,
-                branchId: data.branchId ?? null,
+                branchId: branchIdNum,
                 paymentNumber: `PMT-${Date.now().toString().slice(-6)}-${Math.floor(10 + Math.random() * 89)}`,
                 paymentFlow: 'INBOUND_AR',
                 status: 'POSTED',
@@ -73,12 +155,14 @@ const createOrderRecord = async (tenantId, data, items) => {
                     : normalizedMethod === 'M-PESA'
                         ? 'MPESA_B2B'
                         : 'CREDIT_CARD',
-                clearingAccount: isCashTender ? 'POS Cash Drawer Register' : `${data.paymentMethod} Clearing`,
+                clearingAccount: isCashTender
+                    ? activeDrawerSession?.drawerName || 'POS Cash Drawer Register'
+                    : `${data.paymentMethod} Clearing`,
                 transactionReference: orderNumber,
                 orderId: newOrder.id,
                 currency: 'KES',
                 amount: total.toFixed(4),
-                processedById: data.cashierId ?? null,
+                processedById: data.cashierId ? Number(data.cashierId) : null,
                 notes: `POS Settlement for ${orderNumber}`,
             });
             const [finSettings] = await tx
@@ -93,7 +177,7 @@ const createOrderRecord = async (tenantId, data, items) => {
             const cuInvoiceNo = shouldAutoSign ? `KRA-CU-${Date.now().toString().slice(-8)}` : null;
             await tx.insert(schema_1.fiscalInvoices).values({
                 tenantId,
-                branchId: data.branchId ?? null,
+                branchId: branchIdNum,
                 orderId: newOrder.id,
                 invoiceType: 'SALE',
                 buyerKraPin: data.buyerKraPin ?? null,
@@ -103,61 +187,31 @@ const createOrderRecord = async (tenantId, data, items) => {
                 fiscalizedAt: shouldAutoSign ? new Date() : null,
             });
             if (isCashTender && cashInflow > 0) {
-                const sessionFilters = [
-                    (0, drizzle_orm_1.eq)(schema_1.drawerSessions.tenantId, tenantId),
-                    (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.status} != 'CLOSED_RECONCILED'`,
-                ];
-                if (data.cashDrawerId) {
-                    sessionFilters.push((0, drizzle_orm_1.eq)(schema_1.drawerSessions.drawerId, Number(data.cashDrawerId)));
-                }
-                else if (data.cashierId) {
-                    sessionFilters.push((0, drizzle_orm_1.eq)(schema_1.drawerSessions.cashierId, Number(data.cashierId)));
-                }
-                const [activeSession] = await tx
-                    .select()
-                    .from(schema_1.drawerSessions)
-                    .where((0, drizzle_orm_1.and)(...sessionFilters))
-                    .orderBy((0, drizzle_orm_1.desc)(schema_1.drawerSessions.openedAt))
-                    .limit(1);
-                if (activeSession) {
-                    const newSalesTotal = (Number(activeSession.cashSalesTotal) || 0) + cashInflow;
-                    const newExpectedClosing = (Number(activeSession.expectedClosingBalance) || 0) + cashInflow;
+                const inflow4 = cashInflow.toFixed(4);
+                const inflow2 = cashInflow.toFixed(2);
+                if (activeDrawerSession) {
                     await tx
                         .update(schema_1.drawerSessions)
                         .set({
-                        cashSalesTotal: newSalesTotal.toFixed(4),
-                        expectedClosingBalance: newExpectedClosing.toFixed(4),
+                        cashSalesTotal: (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.cashSalesTotal} + ${inflow4}::numeric`,
+                        expectedClosingBalance: (0, drizzle_orm_1.sql) `${schema_1.drawerSessions.expectedClosingBalance} + ${inflow4}::numeric`,
                     })
-                        .where((0, drizzle_orm_1.eq)(schema_1.drawerSessions.id, activeSession.id));
+                        .where((0, drizzle_orm_1.eq)(schema_1.drawerSessions.id, activeDrawerSession.sessionId));
                     await tx
                         .update(schema_1.cashDrawers)
                         .set({
-                        currentBalance: newExpectedClosing.toFixed(2),
+                        currentBalance: (0, drizzle_orm_1.sql) `${schema_1.cashDrawers.currentBalance} + ${inflow2}::numeric`,
                         updatedAt: new Date(),
                     })
-                        .where((0, drizzle_orm_1.eq)(schema_1.cashDrawers.id, activeSession.drawerId));
+                        .where((0, drizzle_orm_1.eq)(schema_1.cashDrawers.id, activeDrawerSession.drawerId));
                 }
-                const shiftFilters = [
-                    (0, drizzle_orm_1.eq)(schema_1.cashierShifts.tenantId, tenantId),
-                    (0, drizzle_orm_1.eq)(schema_1.cashierShifts.status, 'OPEN'),
-                ];
-                if (data.cashierShiftId) {
-                    shiftFilters.push((0, drizzle_orm_1.eq)(schema_1.cashierShifts.id, Number(data.cashierShiftId)));
-                }
-                else if (data.cashierId) {
-                    shiftFilters.push((0, drizzle_orm_1.eq)(schema_1.cashierShifts.cashierId, Number(data.cashierId)));
-                }
-                const [openShift] = await tx
-                    .select()
-                    .from(schema_1.cashierShifts)
-                    .where((0, drizzle_orm_1.and)(...shiftFilters))
-                    .limit(1);
-                if (openShift) {
-                    const updatedExpected = (Number(openShift.expectedCash) || 0) + cashInflow;
+                if (activeOpenShift) {
                     await tx
                         .update(schema_1.cashierShifts)
-                        .set({ expectedCash: updatedExpected.toFixed(2) })
-                        .where((0, drizzle_orm_1.eq)(schema_1.cashierShifts.id, openShift.id));
+                        .set({
+                        expectedCash: (0, drizzle_orm_1.sql) `${schema_1.cashierShifts.expectedCash} + ${inflow2}::numeric`,
+                    })
+                        .where((0, drizzle_orm_1.eq)(schema_1.cashierShifts.id, activeOpenShift.id));
                 }
             }
             if (data.customerId && total >= 100) {
@@ -189,7 +243,7 @@ const createOrderRecord = async (tenantId, data, items) => {
                         .where((0, drizzle_orm_1.eq)(schema_1.customers.id, Number(data.customerId)));
                     await tx.insert(schema_1.loyaltyTransactionsLedger).values({
                         tenantId,
-                        branchId: data.branchId ?? null,
+                        branchId: branchIdNum,
                         customerId: Number(data.customerId),
                         orderId: newOrder.id,
                         entryType: 'ACCRUAL_PURCHASE',
@@ -200,17 +254,17 @@ const createOrderRecord = async (tenantId, data, items) => {
                         channel: 'POS_TERMINAL',
                         auditReference: orderNumber,
                         notes: `POS Purchase Accrual (${orderNumber})`,
-                        processedById: data.cashierId ?? null,
+                        processedById: data.cashierId ? Number(data.cashierId) : null,
                     });
                 }
             }
         }
-        // 4. Resolve Station Routing (Order Override -> Line Override -> Branch Category Routing -> Menu Item Station + Failover)
+        // 5. Resolve Station Routing (Order Override -> Line Override -> Branch Category Routing -> Menu Item Station + Failover)
         const [branchStations, catalogItems] = await Promise.all([
             tx
                 .select()
                 .from(schema_1.kitchenStations)
-                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.kitchenStations.tenantId, tenantId), data.branchId ? (0, drizzle_orm_1.eq)(schema_1.kitchenStations.branchId, Number(data.branchId)) : undefined)),
+                .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.kitchenStations.tenantId, tenantId), branchIdNum ? (0, drizzle_orm_1.eq)(schema_1.kitchenStations.branchId, branchIdNum) : undefined)),
             tx
                 .select({
                 id: schema_1.menuItems.id,
@@ -243,14 +297,13 @@ const createOrderRecord = async (tenantId, data, items) => {
             };
         };
         const stationRoutingManifest = [];
-        // 5. Insert Order Items with Station Routing Tag & Execute Recipe/BOM Stock Deductions
+        // 6. Insert Order Items with Station Routing Tag & Execute Recipe/BOM Stock Deductions
         for (const item of items) {
             const quantity = Number(item.quantity) || 1;
             const unitPrice = Number(item.price || item.unitPrice) || 0;
             const totalPrice = quantity * unitPrice;
             const menuItemId = parseInt(String(item.menuItemId || item.id), 10);
             const catalogEntry = !isNaN(menuItemId) ? catalogById.get(menuItemId) : undefined;
-            // Determine default station from branch category routing or menu item
             let defaultStation = catalogEntry?.kitchenStation || 'Main Kitchen';
             if (catalogEntry?.categoryName) {
                 const catLower = catalogEntry.categoryName.trim().toLowerCase();
@@ -258,7 +311,6 @@ const createOrderRecord = async (tenantId, data, items) => {
                 if (catStation)
                     defaultStation = catStation.name;
             }
-            // Check order-wide or line-specific station redirect from POS
             const requestedStation = (data.targetStation && String(data.targetStation).trim()) ||
                 (item.targetStation && String(item.targetStation).trim()) ||
                 defaultStation;
@@ -319,6 +371,7 @@ const createOrderRecord = async (tenantId, data, items) => {
                             const totalValuationNum = Number((Math.abs(qtyNum) * unitCostNum).toFixed(4));
                             await tx.insert(schema_1.stockMovements).values({
                                 tenantId,
+                                branchId: branchIdNum ?? invItem.branchId ?? null,
                                 inventoryItemId: invItem.id,
                                 orderId: newOrder.id,
                                 type: 'SALE_CONSUMPTION',
@@ -336,8 +389,8 @@ const createOrderRecord = async (tenantId, data, items) => {
         await tx.update(schema_1.orders).set({ inventoryDeducted: true }).where((0, drizzle_orm_1.eq)(schema_1.orders.id, newOrder.id));
         await tx.insert(schema_1.auditLogs).values({
             tenantId,
-            branchId: data.branchId ?? null,
-            userId: data.cashierId ?? null,
+            branchId: branchIdNum,
+            userId: data.cashierId ? Number(data.cashierId) : null,
             action: 'POS_ORDER_ROUTED_TO_STATIONS',
             module: 'POS',
             entityType: 'orders',
@@ -345,6 +398,8 @@ const createOrderRecord = async (tenantId, data, items) => {
             reason: `Order ${orderNumber} routed across ${Array.from(new Set(stationRoutingManifest.map((r) => r.routedStation))).join(', ')}`,
             newValues: {
                 orderNumber,
+                drawerSessionId: activeDrawerSession?.sessionId ?? null,
+                cashierShiftId: activeOpenShift?.id ?? null,
                 stationRoutingManifest,
             },
         });

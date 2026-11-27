@@ -17,6 +17,7 @@ import { db } from '../config/db';
 import {
   branches,
   cashDrawers,
+  drawerSessions,
   cashierShifts,
   cashierAssignments,
   customers,
@@ -95,6 +96,15 @@ export interface PosModifierGroupDTO {
   options: PosModifierOptionDTO[];
 }
 
+export interface ActiveRegisterResolution {
+  isReady: boolean;
+  drawerId: number | null;
+  drawerName: string | null;
+  drawerSessionId: number | null;
+  cashierShiftId: number | null;
+  reason?: string;
+}
+
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 // In-memory failed PIN rate limiter (tenantId:branchId:target -> { count, lockedUntil })
@@ -160,12 +170,14 @@ export const getPosTerminalContext = async (
     ? eq(cashierAssignments.branchId, activeBranch.id)
     : undefined;
 
-  // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
+  // 2. Parallel Fetch: Drawers, Open Drawer Sessions, User & Branch Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [
     branchDrawers,
-    [activeShift],
+    activeDrawerSessions,
+    [userActiveShift],
+    [branchActiveShift],
     [custodianAssignment],
     activeRewards,
     unavailableItems,
@@ -189,8 +201,28 @@ export const getPosTerminalContext = async (
 
     db
       .select({
+        id: drawerSessions.id,
+        drawerId: drawerSessions.drawerId,
+        cashierId: drawerSessions.cashierId,
+        status: drawerSessions.status,
+        openingFloat: drawerSessions.openingFloat,
+        expectedClosingBalance: drawerSessions.expectedClosingBalance,
+        openedAt: drawerSessions.openedAt,
+      })
+      .from(drawerSessions)
+      .where(
+        and(
+          eq(drawerSessions.tenantId, tenantId),
+          sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`
+        )
+      )
+      .orderBy(desc(drawerSessions.openedAt)),
+
+    db
+      .select({
         id: cashierShifts.id,
         branchId: cashierShifts.branchId,
+        cashierId: cashierShifts.cashierId,
         openingFloat: cashierShifts.openingFloat,
         expectedCash: cashierShifts.expectedCash,
         status: cashierShifts.status,
@@ -205,6 +237,27 @@ export const getPosTerminalContext = async (
           shiftBranchCondition
         )
       )
+      .limit(1),
+
+    db
+      .select({
+        id: cashierShifts.id,
+        branchId: cashierShifts.branchId,
+        cashierId: cashierShifts.cashierId,
+        openingFloat: cashierShifts.openingFloat,
+        expectedCash: cashierShifts.expectedCash,
+        status: cashierShifts.status,
+        openedAt: cashierShifts.openedAt,
+      })
+      .from(cashierShifts)
+      .where(
+        and(
+          eq(cashierShifts.tenantId, tenantId),
+          eq(cashierShifts.status, 'OPEN'),
+          shiftBranchCondition
+        )
+      )
+      .orderBy(desc(cashierShifts.openedAt))
       .limit(1),
 
     db
@@ -435,9 +488,7 @@ export const getPosTerminalContext = async (
     ])
   );
 
-  const manualAvailByMenuId = new Map(
-    unavailableItems.map((u) => [u.menuItemId, u])
-  );
+  const manualAvailByMenuId = new Map(unavailableItems.map((u) => [u.menuItemId, u]));
 
   const recipeByMenuId = new Map(
     tenantRecipes.map((r) => [
@@ -622,18 +673,36 @@ export const getPosTerminalContext = async (
     }
   }
 
+  // 6. Map open drawer sessions & resolve branch-level active shift for shared waiter terminals
+  const sessionByDrawerId = new Map<number, (typeof activeDrawerSessions)[number]>();
+  for (const s of activeDrawerSessions) {
+    if (!sessionByDrawerId.has(s.drawerId)) {
+      sessionByDrawerId.set(s.drawerId, s);
+    }
+  }
+
+  const effectiveActiveShift = userActiveShift || branchActiveShift || null;
+
   return {
     branches: accessibleBranches,
     activeBranch,
-    drawers: branchDrawers.map((d) => ({
-      ...d,
-      currentBalance: Number(d.currentBalance),
-    })),
-    activeShift: activeShift
+    drawers: branchDrawers.map((d) => {
+      const openSession = sessionByDrawerId.get(d.id) || null;
+      return {
+        ...d,
+        currentBalance: Number(d.currentBalance),
+        activeSessionId: openSession?.id ?? null,
+        hasOpenSession: d.status === 'OPEN' && Boolean(openSession),
+      };
+    }),
+    activeShift: effectiveActiveShift
       ? {
-          ...activeShift,
-          openingFloat: Number(activeShift.openingFloat),
-          expectedCash: Number(activeShift.expectedCash),
+          id: effectiveActiveShift.id,
+          branchId: effectiveActiveShift.branchId,
+          openingFloat: Number(effectiveActiveShift.openingFloat),
+          expectedCash: Number(effectiveActiveShift.expectedCash),
+          status: effectiveActiveShift.status,
+          openedAt: effectiveActiveShift.openedAt,
         }
       : null,
     custodianGuardrails: custodianAssignment
@@ -651,6 +720,85 @@ export const getPosTerminalContext = async (
     kitchenStations: effectiveStations,
     itemStationMap,
     itemModifierGroupsMap,
+  };
+};
+
+/**
+ * Verifies that an active cash drawer session and open cashier shift exist
+ * for the target branch/register before allowing a POS checkout to commit.
+ * Supports shared waiter terminals operating under a supervisor/cashier's open float.
+ */
+export const verifyActiveRegisterForPosSale = async (
+  tenantId: number,
+  branchId: number | null,
+  cashDrawerId?: number | null
+): Promise<ActiveRegisterResolution> => {
+  const drawerFilter = cashDrawerId
+    ? eq(cashDrawers.id, cashDrawerId)
+    : branchId
+      ? or(eq(cashDrawers.branchId, branchId), isNull(cashDrawers.branchId))
+      : undefined;
+
+  const shiftBranchFilter = branchId ? eq(cashierShifts.branchId, branchId) : undefined;
+
+  const [openDrawers, [openShift]] = await Promise.all([
+    db
+      .select({
+        id: cashDrawers.id,
+        name: cashDrawers.name,
+        status: cashDrawers.status,
+        sessionId: drawerSessions.id,
+      })
+      .from(cashDrawers)
+      .leftJoin(
+        drawerSessions,
+        and(
+          eq(drawerSessions.drawerId, cashDrawers.id),
+          eq(drawerSessions.tenantId, tenantId),
+          sql`${drawerSessions.status} != 'CLOSED_RECONCILED'`
+        )
+      )
+      .where(and(eq(cashDrawers.tenantId, tenantId), eq(cashDrawers.status, 'OPEN'), drawerFilter))
+      .orderBy(desc(drawerSessions.openedAt))
+      .limit(1),
+
+    db
+      .select({
+        id: cashierShifts.id,
+      })
+      .from(cashierShifts)
+      .where(
+        and(
+          eq(cashierShifts.tenantId, tenantId),
+          eq(cashierShifts.status, 'OPEN'),
+          shiftBranchFilter
+        )
+      )
+      .orderBy(desc(cashierShifts.openedAt))
+      .limit(1),
+  ]);
+
+  const activeDrawer = openDrawers[0] || null;
+
+  if (!activeDrawer || !openShift) {
+    return {
+      isReady: false,
+      drawerId: activeDrawer?.id ?? null,
+      drawerName: activeDrawer?.name ?? null,
+      drawerSessionId: activeDrawer?.sessionId ?? null,
+      cashierShiftId: openShift?.id ?? null,
+      reason: !activeDrawer
+        ? 'Cannot complete POS sale: no open cash drawer register is active for this outlet. A supervisor or cashier must open a shift float.'
+        : 'Cannot complete POS sale: no open cashier shift exists for this outlet. A supervisor or cashier must open a shift float.',
+    };
+  }
+
+  return {
+    isReady: true,
+    drawerId: activeDrawer.id,
+    drawerName: activeDrawer.name,
+    drawerSessionId: activeDrawer.sessionId ?? null,
+    cashierShiftId: openShift.id,
   };
 };
 

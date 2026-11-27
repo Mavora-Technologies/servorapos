@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth.middleware';
 import { db } from '../config/db';
 import { users } from '../config/schema';
 import * as orderRepo from '../repositories/order.repository';
+import { RegisterClosedError } from '../repositories/order.repository';
 import * as posRepo from '../repositories/pos-terminal.repository';
 import { listOrdersQuerySchema } from '../validators/order.validator';
 
@@ -34,12 +35,14 @@ const resolveAuthenticatedUserId = async (req: AuthRequest): Promise<number | nu
 export const createOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user!.tenantId;
-    const cashierId = await resolveAuthenticatedUserId(req);
+    const authenticatedUserId = await resolveAuthenticatedUserId(req);
 
     const {
+      idempotencyKey,
       branchId,
       cashDrawerId,
       cashierShiftId,
+      waiterId,
       customerId,
       orderType,
       targetStation,
@@ -59,6 +62,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       buyerKraPin,
       paymentMethod,
       notes,
+      isExternalStorefront,
     } = req.body;
 
     const effectiveBranchId =
@@ -67,6 +71,11 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
         : req.user?.defaultBranchId
           ? Number(req.user.defaultBranchId)
           : null;
+
+    const effectiveWaiterId =
+      waiterId !== undefined && waiterId !== null
+        ? Number(waiterId)
+        : authenticatedUserId;
 
     const normalizedItems: Array<{ menuItemId: number; quantity: number }> = Array.isArray(items)
       ? items
@@ -88,6 +97,7 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       if (!stockCheck.valid) {
         res.status(409).json({
           status: 'error',
+          code: 'INSUFFICIENT_STOCK',
           message: stockCheck.shortages.map((s) => s.reason).join(' '),
           shortages: stockCheck.shortages,
         });
@@ -95,12 +105,14 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
       }
     }
 
-    // 2. Create the order record
+    // 2. Create the order record (enforces transactional 409 closed-register custody & idempotency)
     const order = await orderRepo.createOrderRecord(
       tenantId,
       {
+        idempotencyKey: idempotencyKey ? String(idempotencyKey) : null,
         branchId: effectiveBranchId,
-        cashierId,
+        waiterId: effectiveWaiterId,
+        cashierId: authenticatedUserId,
         cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
         cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
         customerId: customerId ? Number(customerId) : null,
@@ -121,24 +133,37 @@ export const createOrder = async (req: AuthRequest, res: Response): Promise<void
         buyerKraPin,
         paymentMethod,
         notes,
+        isExternalStorefront: Boolean(isExternalStorefront),
       },
       items
     );
 
-    // 3. Synchronize menu_item_availability remainingCount / is86ed (and deduct stock if not already done)
-    if (order?.id && normalizedItems.length > 0) {
+    const isReplay =
+      'isIdempotentReplay' in order && Boolean((order as { isIdempotentReplay?: boolean }).isIdempotentReplay);
+
+    // 3. Synchronize menu_item_availability remainingCount / is86ed (skipped on idempotent replay)
+    if (!isReplay && order?.id && normalizedItems.length > 0) {
       await posRepo.syncPostOrderStockAndAvailability({
         tenantId,
         branchId: effectiveBranchId,
-        userId: cashierId,
+        userId: authenticatedUserId,
         orderId: Number(order.id),
         orderNumber: String(order.orderNumber || `ORD-${order.id}`),
         items: normalizedItems,
       });
     }
 
-    res.status(201).json({ status: 'success', data: order });
+    res.status(isReplay ? 200 : 201).json({ status: 'success', data: order });
   } catch (error: unknown) {
+    if (error instanceof RegisterClosedError) {
+      res.status(409).json({
+        status: 'error',
+        code: error.code,
+        message: error.message,
+      });
+      return;
+    }
+
     console.error('[Order Error]:', error);
     const message = error instanceof Error ? error.message : 'Failed to process order';
     res.status(500).json({ status: 'error', message });

@@ -38,6 +38,7 @@ const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
 const orderRepo = __importStar(require("../repositories/order.repository"));
+const order_repository_1 = require("../repositories/order.repository");
 const posRepo = __importStar(require("../repositories/pos-terminal.repository"));
 const order_validator_1 = require("../validators/order.validator");
 const resolveAuthenticatedUserId = async (req) => {
@@ -61,13 +62,16 @@ const resolveAuthenticatedUserId = async (req) => {
 const createOrder = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const cashierId = await resolveAuthenticatedUserId(req);
-        const { branchId, cashDrawerId, cashierShiftId, customerId, orderType, targetStation, subtotal, discountTotal, tax, cateringLevy, serviceCharge, packingCharge, total, cashTendered, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod, notes, } = req.body;
+        const authenticatedUserId = await resolveAuthenticatedUserId(req);
+        const { idempotencyKey, branchId, cashDrawerId, cashierShiftId, waiterId, customerId, orderType, targetStation, subtotal, discountTotal, tax, cateringLevy, serviceCharge, packingCharge, total, cashTendered, items, tableId, tableName, customerName, customerPhone, buyerKraPin, paymentMethod, notes, isExternalStorefront, } = req.body;
         const effectiveBranchId = branchId !== undefined && branchId !== null
             ? Number(branchId)
             : req.user?.defaultBranchId
                 ? Number(req.user.defaultBranchId)
                 : null;
+        const effectiveWaiterId = waiterId !== undefined && waiterId !== null
+            ? Number(waiterId)
+            : authenticatedUserId;
         const normalizedItems = Array.isArray(items)
             ? items
                 .map((i) => ({
@@ -82,16 +86,19 @@ const createOrder = async (req, res) => {
             if (!stockCheck.valid) {
                 res.status(409).json({
                     status: 'error',
+                    code: 'INSUFFICIENT_STOCK',
                     message: stockCheck.shortages.map((s) => s.reason).join(' '),
                     shortages: stockCheck.shortages,
                 });
                 return;
             }
         }
-        // 2. Create the order record
+        // 2. Create the order record (enforces transactional 409 closed-register custody & idempotency)
         const order = await orderRepo.createOrderRecord(tenantId, {
+            idempotencyKey: idempotencyKey ? String(idempotencyKey) : null,
             branchId: effectiveBranchId,
-            cashierId,
+            waiterId: effectiveWaiterId,
+            cashierId: authenticatedUserId,
             cashDrawerId: cashDrawerId ? Number(cashDrawerId) : null,
             cashierShiftId: cashierShiftId ? Number(cashierShiftId) : null,
             customerId: customerId ? Number(customerId) : null,
@@ -112,21 +119,31 @@ const createOrder = async (req, res) => {
             buyerKraPin,
             paymentMethod,
             notes,
+            isExternalStorefront: Boolean(isExternalStorefront),
         }, items);
-        // 3. Synchronize menu_item_availability remainingCount / is86ed (and deduct stock if not already done)
-        if (order?.id && normalizedItems.length > 0) {
+        const isReplay = 'isIdempotentReplay' in order && Boolean(order.isIdempotentReplay);
+        // 3. Synchronize menu_item_availability remainingCount / is86ed (skipped on idempotent replay)
+        if (!isReplay && order?.id && normalizedItems.length > 0) {
             await posRepo.syncPostOrderStockAndAvailability({
                 tenantId,
                 branchId: effectiveBranchId,
-                userId: cashierId,
+                userId: authenticatedUserId,
                 orderId: Number(order.id),
                 orderNumber: String(order.orderNumber || `ORD-${order.id}`),
                 items: normalizedItems,
             });
         }
-        res.status(201).json({ status: 'success', data: order });
+        res.status(isReplay ? 200 : 201).json({ status: 'success', data: order });
     }
     catch (error) {
+        if (error instanceof order_repository_1.RegisterClosedError) {
+            res.status(409).json({
+                status: 'error',
+                code: error.code,
+                message: error.message,
+            });
+            return;
+        }
         console.error('[Order Error]:', error);
         const message = error instanceof Error ? error.message : 'Failed to process order';
         res.status(500).json({ status: 'error', message });
