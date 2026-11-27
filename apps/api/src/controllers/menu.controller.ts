@@ -7,6 +7,8 @@ import {
   updateCategorySchema,
   createMenuItemSchema,
   updateMenuItemSchema,
+  signMenuImageUploadSchema,
+  deleteMenuImageSchema,
 } from '../validators/menu.validator';
 import * as menuService from '../services/menu.service';
 
@@ -17,6 +19,63 @@ function getPgErrorCode(error: unknown): string | undefined {
   }
   return undefined;
 }
+
+function parseOptionalBranchId(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '' || raw === 'ALL') return undefined;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+export const signMenuImageUpload = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    signMenuImageUploadSchema.parse(req.body);
+    const signed = menuService.requestMenuImageUploadSignature(tenantId);
+    res.status(200).json({ status: 'success', data: signed });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid image file parameters',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message =
+      error instanceof Error ? error.message : 'Failed to authorize Cloudinary upload';
+    res.status(400).json({ status: 'error', message });
+  }
+};
+
+export const deleteMenuImageAsset = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const { publicId } = deleteMenuImageSchema.parse(req.body);
+    const result = await menuService.cleanupOrphanedMenuImage(tenantId, publicId);
+    res.status(200).json({ status: 'success', data: result });
+  } catch (error: unknown) {
+    if (error instanceof ZodError) {
+      res.status(400).json({
+        status: 'error',
+        message: error.issues[0]?.message || 'Invalid image asset reference',
+        errors: error.issues,
+      });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Failed to remove image asset';
+    res.status(400).json({ status: 'error', message });
+  }
+};
 
 export const createCategory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -51,7 +110,7 @@ export const getMenuCatalog = async (req: AuthRequest, res: Response): Promise<v
       return;
     }
 
-    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const branchId = parseOptionalBranchId(req.query.branchId);
     const catalog = await menuService.fetchMenuCatalog(tenantId, branchId);
     res.status(200).json({ status: 'success', data: catalog });
   } catch (error: unknown) {
@@ -165,7 +224,7 @@ export const getActiveMenu = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const branchId = parseOptionalBranchId(req.query.branchId);
     const menu = await menuService.fetchActiveMenu(tenantId, branchId);
     res.status(200).json({ status: 'success', data: menu });
   } catch (error: unknown) {
@@ -255,7 +314,7 @@ export const getCategories = async (req: AuthRequest, res: Response): Promise<vo
       return;
     }
 
-    const branchId = req.query.branchId ? parseInt(String(req.query.branchId), 10) : undefined;
+    const branchId = parseOptionalBranchId(req.query.branchId);
     const includeInactive = req.query.includeInactive === 'true';
     const categories = await menuService.fetchCategories(tenantId, branchId, includeInactive);
     res.status(200).json({ status: 'success', data: categories });

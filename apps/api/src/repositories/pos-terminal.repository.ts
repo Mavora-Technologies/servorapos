@@ -80,9 +80,29 @@ type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export const getPosTerminalContext = async (
   tenantId: number,
   userId: number,
-  requestedBranchId?: number
+  requestedBranchId?: number,
+  authorizedBranchIds: number[] | null = null
 ) => {
-  // 1. Fetch Authorized Tenant Branches
+  // 1. Fetch Authorized Tenant Branches (enforced via user_branch_memberships)
+  const branchConditions = [eq(branches.tenantId, tenantId), eq(branches.isActive, true)];
+  if (authorizedBranchIds !== null) {
+    if (authorizedBranchIds.length === 0) {
+      return {
+        branches: [],
+        activeBranch: null,
+        drawers: [],
+        activeShift: null,
+        custodianGuardrails: null,
+        loyaltyRewards: [],
+        itemAvailability: [],
+        kitchenStations: [],
+        itemStationMap: {},
+        itemModifierGroupsMap: {},
+      };
+    }
+    branchConditions.push(inArray(branches.id, authorizedBranchIds));
+  }
+
   const accessibleBranches = await db
     .select({
       id: branches.id,
@@ -97,7 +117,7 @@ export const getPosTerminalContext = async (
       isMainBranch: branches.isMainBranch,
     })
     .from(branches)
-    .where(and(eq(branches.tenantId, tenantId), eq(branches.isActive, true)))
+    .where(and(...branchConditions))
     .orderBy(desc(branches.isMainBranch), asc(branches.name));
 
   const activeBranch =
@@ -108,7 +128,12 @@ export const getPosTerminalContext = async (
   const branchCondition = activeBranch
     ? or(eq(cashDrawers.branchId, activeBranch.id), isNull(cashDrawers.branchId))
     : undefined;
-  const shiftBranchCondition = activeBranch ? eq(cashierShifts.branchId, activeBranch.id) : undefined;
+  const shiftBranchCondition = activeBranch
+    ? eq(cashierShifts.branchId, activeBranch.id)
+    : undefined;
+  const assignmentBranchCondition = activeBranch
+    ? eq(cashierAssignments.branchId, activeBranch.id)
+    : undefined;
 
   // 2. Parallel Fetch: Drawers, Shifts, Guardrails, Rewards, Availability, Stations, Catalog, Inventory, Recipes & Modifier Links
   const todayStr = new Date().toISOString().split('T')[0];
@@ -174,7 +199,9 @@ export const getPosTerminalContext = async (
         and(
           eq(cashierAssignments.tenantId, tenantId),
           eq(cashierAssignments.userId, userId),
-          eq(cashierAssignments.assignmentDate, todayStr)
+          eq(cashierAssignments.assignmentDate, todayStr),
+          inArray(cashierAssignments.status, ['ASSIGNED', 'ACTIVE']),
+          assignmentBranchCondition
         )
       )
       .limit(1),

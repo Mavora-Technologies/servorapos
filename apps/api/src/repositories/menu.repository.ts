@@ -11,6 +11,7 @@ import {
   modifierGroups,
   menuItemModifierGroups,
 } from '../config/schema';
+import { assertPublicIdBelongsToTenant } from '../utils/cloudinary';
 import type {
   CreateCategoryInput,
   UpdateCategoryInput,
@@ -85,6 +86,19 @@ async function syncMenuItemModifierGroupsInTx(
     );
   }
 }
+
+export const isImagePublicIdReferenced = async (
+  tenantId: number,
+  publicId: string
+): Promise<boolean> => {
+  const [row] = await db
+    .select({ id: menuItems.id })
+    .from(menuItems)
+    .where(and(eq(menuItems.tenantId, tenantId), eq(menuItems.imagePublicId, publicId)))
+    .limit(1);
+
+  return Boolean(row);
+};
 
 export const createCategory = async (tenantId: number, data: CreateCategoryInput) => {
   const [duplicate] = await db
@@ -434,6 +448,11 @@ export const getMenuCatalogWithLinks = async (tenantId: number, branchId?: numbe
       isTaxInclusive: row.item.isTaxInclusive,
       isAvailable: row.item.isAvailable,
       imageUrl: row.item.imageUrl,
+      imagePublicId: row.item.imagePublicId,
+      imageOriginalFilename: row.item.imageOriginalFilename,
+      imageMimeType: row.item.imageMimeType,
+      imageFileSize: row.item.imageFileSize,
+      imageUploadedAt: row.item.imageUploadedAt,
     };
   });
 
@@ -468,7 +487,12 @@ export const createMenuItemTransaction = async (
       }
     }
 
-    // 3. Validate direct inventory link or recipe raw materials
+    // 3. Enforce tenant ownership on uploaded Cloudinary public ID
+    if (data.imagePublicId) {
+      assertPublicIdBelongsToTenant(tenantId, data.imagePublicId);
+    }
+
+    // 4. Validate direct inventory link or recipe raw materials
     let resolvedDirectInvId: number | null = null;
     let computedCost = data.costEstimate ?? 0;
 
@@ -525,7 +549,7 @@ export const createMenuItemTransaction = async (
       }, 0);
     }
 
-    // 4. Insert Menu Item
+    // 5. Insert Menu Item with Image Metadata
     const [createdItem] = await tx
       .insert(menuItems)
       .values({
@@ -546,10 +570,15 @@ export const createMenuItemTransaction = async (
         isTaxInclusive: data.isTaxInclusive,
         isAvailable: data.isAvailable,
         imageUrl: data.imageUrl ?? null,
+        imagePublicId: data.imageUrl ? (data.imagePublicId ?? null) : null,
+        imageOriginalFilename: data.imageUrl ? (data.imageOriginalFilename ?? null) : null,
+        imageMimeType: data.imageUrl ? (data.imageMimeType ?? null) : null,
+        imageFileSize: data.imageUrl ? (data.imageFileSize ?? null) : null,
+        imageUploadedAt: data.imageUrl ? new Date() : null,
       })
       .returning();
 
-    // 5. Persist Recipe BOM lines if provided
+    // 6. Persist Recipe BOM lines if provided
     if (recipeLines.length > 0) {
       const [createdRecipe] = await tx
         .insert(recipes)
@@ -577,7 +606,7 @@ export const createMenuItemTransaction = async (
       );
     }
 
-    // 6. Attach Modifier Groups if provided
+    // 7. Attach Modifier Groups if provided
     if (data.modifierGroupIds !== undefined) {
       await syncMenuItemModifierGroupsInTx(
         tx,
@@ -633,6 +662,10 @@ export const updateMenuItemTransaction = async (
       }
     }
 
+    if (data.imagePublicId) {
+      assertPublicIdBelongsToTenant(tenantId, data.imagePublicId);
+    }
+
     const nextTrackingType = data.stockTrackingType ?? existing.stockTrackingType;
     const updateFields: Partial<typeof menuItems.$inferInsert> = {
       updatedAt: new Date(),
@@ -656,7 +689,35 @@ export const updateMenuItemTransaction = async (
     }
     if (data.isTaxInclusive !== undefined) updateFields.isTaxInclusive = data.isTaxInclusive;
     if (data.isAvailable !== undefined) updateFields.isAvailable = data.isAvailable;
-    if (data.imageUrl !== undefined) updateFields.imageUrl = data.imageUrl;
+
+    // Handle image update / removal metadata
+    if (data.imageUrl !== undefined) {
+      updateFields.imageUrl = data.imageUrl;
+      if (data.imageUrl === null) {
+        updateFields.imagePublicId = null;
+        updateFields.imageOriginalFilename = null;
+        updateFields.imageMimeType = null;
+        updateFields.imageFileSize = null;
+        updateFields.imageUploadedAt = null;
+      } else {
+        if (data.imagePublicId !== undefined) updateFields.imagePublicId = data.imagePublicId;
+        if (data.imageOriginalFilename !== undefined) {
+          updateFields.imageOriginalFilename = data.imageOriginalFilename;
+        }
+        if (data.imageMimeType !== undefined) updateFields.imageMimeType = data.imageMimeType;
+        if (data.imageFileSize !== undefined) updateFields.imageFileSize = data.imageFileSize;
+        if (data.imageUrl !== existing.imageUrl) {
+          updateFields.imageUploadedAt = new Date();
+        }
+      }
+    } else {
+      if (data.imagePublicId !== undefined) updateFields.imagePublicId = data.imagePublicId;
+      if (data.imageOriginalFilename !== undefined) {
+        updateFields.imageOriginalFilename = data.imageOriginalFilename;
+      }
+      if (data.imageMimeType !== undefined) updateFields.imageMimeType = data.imageMimeType;
+      if (data.imageFileSize !== undefined) updateFields.imageFileSize = data.imageFileSize;
+    }
 
     // Handle STOCKED_PRODUCT direct inventory link
     if (nextTrackingType === 'STOCKED_PRODUCT') {
@@ -792,7 +853,12 @@ export const updateMenuItemTransaction = async (
       .where(and(eq(menuItems.id, itemId), eq(menuItems.tenantId, tenantId)))
       .returning();
 
-    return updated ?? null;
+    if (!updated) return null;
+
+    return {
+      item: updated,
+      previousImagePublicId: existing.imagePublicId,
+    };
   });
 };
 
@@ -800,6 +866,6 @@ export const deleteMenuItemRecord = async (tenantId: number, itemId: number) => 
   const [deleted] = await db
     .delete(menuItems)
     .where(and(eq(menuItems.id, itemId), eq(menuItems.tenantId, tenantId)))
-    .returning({ id: menuItems.id });
+    .returning({ id: menuItems.id, imagePublicId: menuItems.imagePublicId });
   return deleted ?? null;
 };

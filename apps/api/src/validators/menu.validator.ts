@@ -1,5 +1,9 @@
 // apps/api/src/validators/menu.validator.ts
 import { z } from 'zod';
+import {
+  ALLOWED_IMAGE_MIME_TYPES,
+  MAX_MENU_IMAGE_BYTES,
+} from '../utils/cloudinary';
 
 export const STOCK_TRACKING_TYPES = [
   'RECIPE',
@@ -42,6 +46,22 @@ export const recipeIngredientInputSchema = z.object({
   wastagePercentage: z.coerce.number().min(0).max(100).default(0),
 });
 
+export const signMenuImageUploadSchema = z.object({
+  fileName: z.string().trim().min(1, 'File name is required').max(255),
+  mimeType: z.enum(ALLOWED_IMAGE_MIME_TYPES, {
+    message: 'Unsupported image format. Only JPEG, PNG, and WebP are allowed.',
+  }),
+  fileSize: z.coerce
+    .number()
+    .int()
+    .positive('File size must be greater than zero')
+    .max(MAX_MENU_IMAGE_BYTES, 'Image exceeds the 5 MB maximum upload limit.'),
+});
+
+export const deleteMenuImageSchema = z.object({
+  publicId: z.string().trim().min(3, 'Cloudinary publicId is required').max(255),
+});
+
 const menuItemBaseSchema = z.object({
   categoryId: z.coerce.number().int().positive('Valid category is required'),
   branchId: z.coerce.number().int().positive().nullable().optional(),
@@ -72,6 +92,13 @@ const menuItemBaseSchema = z.object({
     .refine((val) => !val || /^https?:\/\//i.test(val) || val.startsWith('/'), {
       message: 'Image URL must be a valid URL or relative path',
     }),
+  imagePublicId: optionalTrimmed,
+  imageOriginalFilename: optionalTrimmed,
+  imageMimeType: optionalTrimmed,
+  imageFileSize: z.preprocess(
+    (val) => (val === '' || val === null || val === undefined ? null : Number(val)),
+    z.number().int().nonnegative().max(MAX_MENU_IMAGE_BYTES).nullable().optional()
+  ),
 });
 
 export const createMenuItemSchema = menuItemBaseSchema.superRefine((data, ctx) => {
@@ -91,3 +118,4 @@ export type UpdateCategoryInput = z.infer<typeof updateCategorySchema>;
 export type RecipeIngredientInput = z.infer<typeof recipeIngredientInputSchema>;
 export type CreateMenuItemInput = z.infer<typeof createMenuItemSchema>;
 export type UpdateMenuItemInput = z.infer<typeof updateMenuItemSchema>;
+export type SignMenuImageUploadInput = z.infer<typeof signMenuImageUploadSchema>;

@@ -243,6 +243,11 @@ export const menuItems = pgTable(
     etimsTaxTypeCode: varchar('etims_tax_type_code', { length: 10 }).default('B'), // B = 16% VAT
     isAvailable: boolean('is_available').default(true).notNull(),
     imageUrl: text('image_url'),
+    imagePublicId: varchar('image_public_id', { length: 255 }),
+    imageOriginalFilename: varchar('image_original_filename', { length: 255 }),
+    imageMimeType: varchar('image_mime_type', { length: 64 }),
+    imageFileSize: integer('image_file_size'),
+    imageUploadedAt: timestamp('image_uploaded_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
@@ -1793,18 +1798,34 @@ export const comboBundles = pgTable(
     id: serial('id').primaryKey(),
     tenantId: integer('tenant_id').notNull().references(() => tenants.id, { onDelete: 'cascade' }),
     branchId: integer('branch_id').references(() => branches.id, { onDelete: 'set null' }),
-    name: varchar('name', { length: 150 }).notNull(), // e.g. "Family Feast Combo", "Burger & Shake Deal"
+    name: varchar('name', { length: 150 }).notNull(),
     description: text('description'),
     sku: varchar('sku', { length: 50 }),
     basePrice: decimal('base_price', { precision: 10, scale: 2 }).notNull(),
     isAvailable: boolean('is_available').default(true).notNull(),
+    // Optional promotional schedule
+    validFrom: timestamp('valid_from', { withTimezone: true }),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    // Cloudinary image metadata (reuses existing Menu Catalog image pipeline)
+    imageUrl: text('image_url'),
+    imagePublicId: varchar('image_public_id', { length: 255 }),
+    imageOriginalFilename: varchar('image_original_filename', { length: 255 }),
+    imageMimeType: varchar('image_mime_type', { length: 64 }),
+    imageFileSize: integer('image_file_size'),
+    imageUploadedAt: timestamp('image_uploaded_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true })
       .defaultNow()
       .$onUpdate(() => new Date())
       .notNull(),
   },
-  (t) => [index('combo_bundles_tenant_idx').on(t.tenantId)]
+  (t) => [
+    index('combo_bundles_tenant_idx').on(t.tenantId),
+    index('combo_bundles_tenant_avail_idx').on(t.tenantId, t.isAvailable),
+    uniqueIndex('combo_bundles_tenant_sku_idx')
+      .on(t.tenantId, t.sku)
+      .where(sql`${t.sku} IS NOT NULL`),
+  ]
 );
 
 export const comboBundleItems = pgTable(

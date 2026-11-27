@@ -16,7 +16,18 @@ export const getCombos = async (req: AuthRequest, res: Response): Promise<void> 
       return;
     }
 
-    const combos = await comboService.listTenantCombos(tenantId);
+    const rawBranchId = req.query.branchId;
+    const branchId =
+      typeof rawBranchId === 'string' && rawBranchId !== '' && rawBranchId !== 'ALL'
+        ? Number(rawBranchId)
+        : undefined;
+    const activeOnly = req.query.activeOnly === 'true';
+
+    const combos = await comboService.listTenantCombos(tenantId, {
+      branchId: branchId && Number.isInteger(branchId) && branchId > 0 ? branchId : undefined,
+      activeOnly,
+    });
+
     res.status(200).json({ status: 'success', data: combos });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to fetch combo bundles';
@@ -27,7 +38,8 @@ export const getCombos = async (req: AuthRequest, res: Response): Promise<void> 
 export const createCombo = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const userId = req.user?.userId;
+    if (!tenantId || !userId) {
       res.status(401).json({ status: 'error', message: 'Unauthorized' });
       return;
     }
@@ -35,7 +47,10 @@ export const createCombo = async (req: AuthRequest, res: Response): Promise<void
     const validated = createComboBundleSchema.parse(req.body);
     const branchId = req.user?.defaultBranchId ?? null;
 
-    const created = await comboService.registerComboBundle(tenantId, branchId, validated);
+    const created = await comboService.registerComboBundle(tenantId, branchId, validated, {
+      userId,
+      ipAddress: req.ip || null,
+    });
     res.status(201).json({ status: 'success', data: created });
   } catch (error: unknown) {
     if (error instanceof ZodError) {
@@ -54,7 +69,8 @@ export const createCombo = async (req: AuthRequest, res: Response): Promise<void
 export const updateCombo = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const userId = req.user?.userId;
+    if (!tenantId || !userId) {
       res.status(401).json({ status: 'error', message: 'Unauthorized' });
       return;
     }
@@ -66,7 +82,10 @@ export const updateCombo = async (req: AuthRequest, res: Response): Promise<void
     }
 
     const validated = updateComboBundleSchema.parse(req.body);
-    const updated = await comboService.modifyComboBundle(tenantId, comboId, validated);
+    const updated = await comboService.modifyComboBundle(tenantId, comboId, validated, {
+      userId,
+      ipAddress: req.ip || null,
+    });
 
     if (!updated) {
       res.status(404).json({ status: 'error', message: 'Combo bundle not found' });
@@ -91,7 +110,8 @@ export const updateCombo = async (req: AuthRequest, res: Response): Promise<void
 export const deleteCombo = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const userId = req.user?.userId;
+    if (!tenantId || !userId) {
       res.status(401).json({ status: 'error', message: 'Unauthorized' });
       return;
     }
@@ -102,7 +122,10 @@ export const deleteCombo = async (req: AuthRequest, res: Response): Promise<void
       return;
     }
 
-    const deleted = await comboService.removeComboBundle(tenantId, comboId);
+    const deleted = await comboService.removeComboBundle(tenantId, comboId, {
+      userId,
+      ipAddress: req.ip || null,
+    });
     if (!deleted) {
       res.status(404).json({ status: 'error', message: 'Combo bundle not found' });
       return;

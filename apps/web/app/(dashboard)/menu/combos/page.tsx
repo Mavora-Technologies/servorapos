@@ -16,10 +16,16 @@ import {
   Search,
   ChevronRight,
   RefreshCw,
+  Tag,
+  Calendar,
+  TrendingDown,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
+import MenuItemImageUploader from '@/components/menu/MenuItemImageUploader';
+import { getOptimizedMenuImageUrl, cleanupOrphanedUpload } from '@/lib/cloudinary';
 
-type AvailabilityFilter = 'ALL' | 'ACTIVE' | 'HIDDEN';
+type AvailabilityFilter = 'ALL' | 'ACTIVE' | 'HIDDEN' | 'ISSUES';
+type SortOption = 'UPDATED' | 'NAME' | 'PRICE_ASC' | 'PRICE_DESC' | 'SAVINGS_DESC';
 
 interface ComboItemRecord {
   id: number;
@@ -39,7 +45,22 @@ interface ComboBundle {
   sku: string | null;
   basePrice: string;
   isAvailable: boolean;
-  standaloneTotal?: number;
+  validFrom: string | null;
+  validUntil: string | null;
+  imageUrl: string | null;
+  imageCardUrl?: string | null;
+  imagePublicId?: string | null;
+  imageOriginalFilename?: string | null;
+  imageMimeType?: string | null;
+  imageFileSize?: number | null;
+  standaloneTotal: number;
+  savingsAmount: number;
+  savingsPercent: number;
+  pricingMode: 'DISCOUNTED' | 'EXACT' | 'PREMIUM';
+  unavailableComponents: string[];
+  isWithinSchedule: boolean;
+  effectiveAvailable: boolean;
+  updatedAt: string;
   items: ComboItemRecord[];
 }
 
@@ -57,10 +78,15 @@ interface ComboFormLine {
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
+  if (error instanceof Error && error.message) return error.message;
   return fallback;
+}
+
+function toDateInputValue(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
 }
 
 export default function CombosPage() {
@@ -74,9 +100,10 @@ export default function CombosPage() {
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  // Filters
+  // Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>('ALL');
+  const [sortBy, setSortBy] = useState<SortOption>('UPDATED');
 
   // Create / Edit Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -94,9 +121,19 @@ export default function CombosPage() {
   const [sku, setSku] = useState('');
   const [basePrice, setBasePrice] = useState('');
   const [isAvailable, setIsAvailable] = useState(true);
+  const [validFrom, setValidFrom] = useState('');
+  const [validUntil, setValidUntil] = useState('');
   const [items, setItems] = useState<ComboFormLine[]>([
     { menuItemId: '', quantity: '1', additionalPrice: '0' },
   ]);
+
+  // Cloudinary Image State
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imagePublicId, setImagePublicId] = useState<string | null>(null);
+  const [imageOriginalFilename, setImageOriginalFilename] = useState<string | null>(null);
+  const [imageMimeType, setImageMimeType] = useState<string | null>(null);
+  const [imageFileSize, setImageFileSize] = useState<number | null>(null);
+  const [unsavedUploadedPublicIds, setUnsavedUploadedPublicIds] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -156,7 +193,23 @@ export default function CombosPage() {
     loadData();
   }, [loadData]);
 
-  // Merge catalog menu items with any linked items on the bundle being edited so options never blank out
+  // Overview KPI Stats (derived strictly from live DB records)
+  const kpis = useMemo(() => {
+    const total = combos.length;
+    const active = combos.filter((c) => c.effectiveAvailable).length;
+    const issues = combos.filter(
+      (c) => c.unavailableComponents.length > 0 || !c.isWithinSchedule
+    ).length;
+    const discounted = combos.filter((c) => c.savingsPercent > 0);
+    const avgSavingsPct =
+      discounted.length > 0
+        ? (
+            discounted.reduce((acc, c) => acc + c.savingsPercent, 0) / discounted.length
+          ).toFixed(1)
+        : null;
+    return { total, active, issues, avgSavingsPct };
+  }, [combos]);
+
   const selectableMenuItems = useMemo(() => {
     const byId = new Map<number, MenuItemOption>(menuItemsList.map((m) => [m.id, m]));
     if (editingCombo) {
@@ -176,7 +229,7 @@ export default function CombosPage() {
 
   const filteredCombos = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return combos.filter((combo) => {
+    const list = combos.filter((combo) => {
       const matchesSearch =
         !q ||
         combo.name.toLowerCase().includes(q) ||
@@ -184,16 +237,34 @@ export default function CombosPage() {
         (combo.description && combo.description.toLowerCase().includes(q)) ||
         combo.items.some((i) => i.itemName?.toLowerCase().includes(q));
 
+      const hasIssue =
+        combo.unavailableComponents.length > 0 || !combo.isWithinSchedule;
+
       const matchesAvail =
         availabilityFilter === 'ALL' ||
-        (availabilityFilter === 'ACTIVE' && combo.isAvailable) ||
-        (availabilityFilter === 'HIDDEN' && !combo.isAvailable);
+        (availabilityFilter === 'ACTIVE' && combo.effectiveAvailable) ||
+        (availabilityFilter === 'HIDDEN' && !combo.isAvailable) ||
+        (availabilityFilter === 'ISSUES' && hasIssue);
 
       return matchesSearch && matchesAvail;
     });
-  }, [combos, searchQuery, availabilityFilter]);
 
-  // Live standalone retail total inside modal for pricing comparison
+    return [...list].sort((a, b) => {
+      switch (sortBy) {
+        case 'NAME':
+          return a.name.localeCompare(b.name);
+        case 'PRICE_ASC':
+          return parseFloat(a.basePrice) - parseFloat(b.basePrice);
+        case 'PRICE_DESC':
+          return parseFloat(b.basePrice) - parseFloat(a.basePrice);
+        case 'SAVINGS_DESC':
+          return b.savingsAmount - a.savingsAmount;
+        default:
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
+    });
+  }, [combos, searchQuery, availabilityFilter, sortBy]);
+
   const modalStandaloneTotal = useMemo(() => {
     return items.reduce((sum, row) => {
       const itemId = parseInt(row.menuItemId, 10);
@@ -206,8 +277,15 @@ export default function CombosPage() {
     }, 0);
   }, [items, selectableMenuItems]);
 
+  const hasDuplicateComponentsInForm = useMemo(() => {
+    const ids = items.map((i) => i.menuItemId).filter(Boolean);
+    return new Set(ids).size !== ids.length;
+  }, [items]);
+
   const openModal = (combo?: ComboBundle) => {
     setModalError(null);
+    setUnsavedUploadedPublicIds([]);
+
     if (combo) {
       setEditingCombo(combo);
       setName(combo.name);
@@ -215,6 +293,13 @@ export default function CombosPage() {
       setSku(combo.sku || '');
       setBasePrice((parseFloat(combo.basePrice) || 0).toFixed(2));
       setIsAvailable(combo.isAvailable);
+      setValidFrom(toDateInputValue(combo.validFrom));
+      setValidUntil(toDateInputValue(combo.validUntil));
+      setImageUrl(combo.imageUrl ?? null);
+      setImagePublicId(combo.imagePublicId ?? null);
+      setImageOriginalFilename(combo.imageOriginalFilename ?? null);
+      setImageMimeType(combo.imageMimeType ?? null);
+      setImageFileSize(combo.imageFileSize ?? null);
       setItems(
         combo.items.length > 0
           ? combo.items.map((line) => ({
@@ -231,6 +316,13 @@ export default function CombosPage() {
       setSku('');
       setBasePrice('');
       setIsAvailable(true);
+      setValidFrom('');
+      setValidUntil('');
+      setImageUrl(null);
+      setImagePublicId(null);
+      setImageOriginalFilename(null);
+      setImageMimeType(null);
+      setImageFileSize(null);
       setItems([{ menuItemId: '', quantity: '1', additionalPrice: '0' }]);
     }
     setIsModalOpen(true);
@@ -238,6 +330,8 @@ export default function CombosPage() {
 
   const closeModal = () => {
     if (isSubmitting) return;
+    unsavedUploadedPublicIds.forEach((pid) => void cleanupOrphanedUpload(pid));
+    setUnsavedUploadedPublicIds([]);
     setIsModalOpen(false);
     setEditingCombo(null);
     setModalError(null);
@@ -298,6 +392,13 @@ export default function CombosPage() {
         sku: sku.trim() || null,
         basePrice: parsedBasePrice,
         isAvailable,
+        validFrom: validFrom ? `${validFrom}T00:00:00.000Z` : null,
+        validUntil: validUntil ? `${validUntil}T23:59:59.999Z` : null,
+        imageUrl,
+        imagePublicId,
+        imageOriginalFilename,
+        imageMimeType,
+        imageFileSize,
         items: validItems,
       };
 
@@ -314,6 +415,11 @@ export default function CombosPage() {
         });
         setStatusBanner(`Created combo bundle "${name.trim()}".`);
       }
+
+      unsavedUploadedPublicIds
+        .filter((pid) => pid !== imagePublicId)
+        .forEach((pid) => void cleanupOrphanedUpload(pid));
+      setUnsavedUploadedPublicIds([]);
 
       setIsModalOpen(false);
       setEditingCombo(null);
@@ -363,12 +469,14 @@ export default function CombosPage() {
 
   const parsedModalPrice = parseFloat(basePrice) || 0;
   const modalSavings =
-    modalStandaloneTotal > 0 && parsedModalPrice > 0
+    modalStandaloneTotal > 0 && basePrice !== ''
       ? modalStandaloneTotal - parsedModalPrice
       : 0;
+  const modalSavingsPct =
+    modalStandaloneTotal > 0 ? (modalSavings / modalStandaloneTotal) * 100 : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-10">
       {/* Feedback Banners */}
       {statusBanner && (
         <div
@@ -444,7 +552,7 @@ export default function CombosPage() {
           </div>
           <h1 className="text-xl font-bold text-servora-navy">Combos &amp; Meal Bundles</h1>
           <p className="text-xs sm:text-sm text-servora-deepTeal mt-1">
-            Package authorized POS dishes and beverages into multi-item bundles with unified pricing.
+            Package existing menu items into unified POS bundles with cover photography, KDS component routing, and automatic BOM deduction.
           </p>
         </div>
 
@@ -453,7 +561,7 @@ export default function CombosPage() {
             type="button"
             onClick={loadData}
             disabled={isLoading}
-            className="px-3 py-2 text-xs font-semibold text-servora-deepTeal bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors border border-gray-200 inline-flex items-center gap-1.5 disabled:opacity-50"
+            className="px-3 py-2 text-xs font-semibold text-servora-deepTeal bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors border border-gray-200 inline-flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
             Refresh
@@ -462,7 +570,7 @@ export default function CombosPage() {
             type="button"
             onClick={() => openModal()}
             disabled={menuItemsList.length === 0}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-servora-core text-white text-xs font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-xs disabled:opacity-50"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-servora-core text-white text-xs font-semibold rounded-xl hover:bg-blue-700 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
           >
             <Plus size={16} />
             Create Combo Bundle
@@ -470,9 +578,62 @@ export default function CombosPage() {
         </div>
       </div>
 
-      {/* Search & Availability Filter Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="relative w-full sm:w-80">
+      {/* Overview KPI Tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Total Bundles
+            </span>
+            <p className="text-xl font-bold font-mono text-servora-navy mt-0.5">{kpis.total}</p>
+          </div>
+          <div className="p-2.5 bg-servora-pale text-servora-core rounded-xl">
+            <ShoppingBasket size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Sellable on POS
+            </span>
+            <p className="text-xl font-bold font-mono text-emerald-700 mt-0.5">{kpis.active}</p>
+          </div>
+          <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
+            <CheckCircle2 size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Avg Bundle Savings
+            </span>
+            <p className="text-xl font-bold font-mono text-servora-core mt-0.5">
+              {kpis.avgSavingsPct ? `${kpis.avgSavingsPct}%` : '—'}
+            </p>
+          </div>
+          <div className="p-2.5 bg-blue-50 text-servora-core rounded-xl">
+            <TrendingDown size={18} />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Component Alerts
+            </span>
+            <p className="text-xl font-bold font-mono text-amber-700 mt-0.5">{kpis.issues}</p>
+          </div>
+          <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl">
+            <AlertTriangle size={18} />
+          </div>
+        </div>
+      </div>
+
+      {/* Search, Filter & Sort Toolbar */}
+      <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
           <input
             type="text"
@@ -484,29 +645,46 @@ export default function CombosPage() {
           />
         </div>
 
-        <div className="flex items-center gap-1.5 p-1 bg-gray-50 border border-gray-100 rounded-xl">
-          {(['ALL', 'ACTIVE', 'HIDDEN'] as const).map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => setAvailabilityFilter(tab)}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                availabilityFilter === tab
-                  ? 'bg-white shadow-xs text-servora-navy font-bold'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              {tab === 'ALL'
-                ? `All (${combos.length})`
-                : tab === 'ACTIVE'
-                  ? 'Active'
-                  : 'Hidden'}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 p-1 bg-gray-50 border border-gray-100 rounded-xl">
+            {(['ALL', 'ACTIVE', 'HIDDEN', 'ISSUES'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setAvailabilityFilter(tab)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                  availabilityFilter === tab
+                    ? 'bg-white shadow-xs text-servora-navy font-bold'
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                {tab === 'ALL'
+                  ? `All (${combos.length})`
+                  : tab === 'ACTIVE'
+                    ? 'Active'
+                    : tab === 'HIDDEN'
+                      ? 'Hidden'
+                      : `Alerts (${kpis.issues})`}
+              </button>
+            ))}
+          </div>
+
+          <select
+            aria-label="Sort bundles"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortOption)}
+            className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
+          >
+            <option value="UPDATED">Sort: Recently Updated</option>
+            <option value="NAME">Sort: Name (A–Z)</option>
+            <option value="PRICE_ASC">Sort: Price (Low–High)</option>
+            <option value="PRICE_DESC">Sort: Price (High–Low)</option>
+            <option value="SAVINGS_DESC">Sort: Highest Savings</option>
+          </select>
         </div>
       </div>
 
-      {/* Grid of Combos / Loading / Error / Empty States */}
+      {/* Grid of Combos */}
       {isLoading ? (
         <div className="flex items-center justify-center p-12 bg-white rounded-2xl border border-gray-100">
           <p className="text-xs font-medium text-servora-deepTeal animate-pulse">
@@ -543,7 +721,7 @@ export default function CombosPage() {
             <button
               type="button"
               onClick={() => openModal()}
-              className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700"
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 text-xs font-bold bg-servora-core text-white rounded-xl hover:bg-blue-700 cursor-pointer"
             >
               <Plus size={14} /> Create First Combo Bundle
             </button>
@@ -564,109 +742,160 @@ export default function CombosPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
           {filteredCombos.map((combo) => {
             const bundlePrice = parseFloat(combo.basePrice) || 0;
-            const standaloneTotal =
-              combo.standaloneTotal ??
-              combo.items.reduce(
-                (sum, line) =>
-                  sum +
-                  ((parseFloat(line.itemPrice || '0') || 0) +
-                    (parseFloat(line.additionalPrice || '0') || 0)) *
-                    line.quantity,
-                0
-              );
-            const savings = standaloneTotal - bundlePrice;
+            const cardImg = getOptimizedMenuImageUrl(combo.imageCardUrl || combo.imageUrl, 'card');
 
             return (
               <div
                 key={combo.id}
-                className="bg-white rounded-2xl border border-gray-100 p-5 shadow-xs flex flex-col justify-between gap-4"
+                className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-xs flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] font-bold tracking-wider uppercase text-servora-teal bg-servora-teal/10 px-2 py-0.5 rounded-md font-mono">
-                          {combo.sku || 'COMBO'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleAvailability(combo)}
-                          title="Toggle POS availability"
-                          className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
-                            combo.isAvailable
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                              : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
-                          }`}
-                        >
-                          {combo.isAvailable ? (
-                            <>
-                              <CheckCircle2 size={10} /> Active
-                            </>
-                          ) : (
-                            <>
-                              <XCircle size={10} /> Hidden
-                            </>
-                          )}
-                        </button>
+                  {/* Cover Image Header */}
+                  <div className="relative h-36 w-full bg-servora-pale overflow-hidden border-b border-gray-100">
+                    {cardImg ? (
+                      <img
+                        src={cardImg}
+                        alt={combo.name}
+                        loading="lazy"
+                        decoding="async"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-servora-deepTeal/25">
+                        <ShoppingBasket size={32} />
                       </div>
-                      <h3 className="text-sm font-bold text-servora-navy mt-1.5 truncate">
-                        {combo.name}
-                      </h3>
+                    )}
+
+                    <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold tracking-wider uppercase text-servora-navy bg-white/95 px-2 py-0.5 rounded-md font-mono shadow-xs">
+                        {combo.sku || 'COMBO'}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAvailability(combo)}
+                      title="Toggle POS availability"
+                      className={`absolute top-2.5 right-2.5 inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full border shadow-xs cursor-pointer ${
+                        combo.effectiveAvailable
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          : combo.isAvailable
+                            ? 'bg-amber-50 text-amber-800 border-amber-300'
+                            : 'bg-white/95 text-gray-600 border-gray-200 hover:bg-gray-100'
+                      }`}
+                    >
+                      {combo.effectiveAvailable ? (
+                        <>
+                          <CheckCircle2 size={10} /> Active
+                        </>
+                      ) : combo.isAvailable ? (
+                        <>
+                          <AlertTriangle size={10} /> Blocked
+                        </>
+                      ) : (
+                        <>
+                          <XCircle size={10} /> Hidden
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-servora-navy truncate">{combo.name}</h3>
                       {combo.description && (
                         <p className="text-xs text-servora-deepTeal mt-0.5 line-clamp-2">
                           {combo.description}
                         </p>
                       )}
                     </div>
-                  </div>
 
-                  <div className="my-3 py-2.5 px-3 bg-servora-pale rounded-xl space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-servora-deepTeal">Bundle Price:</span>
-                      <span className="text-sm font-mono font-bold text-servora-core">
-                        KES {bundlePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </span>
-                    </div>
-                    {standaloneTotal > 0 && (
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="text-gray-500">
-                          A la carte value: KES{' '}
-                          {standaloneTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {/* Component / Schedule Availability Warnings */}
+                    {combo.unavailableComponents.length > 0 && (
+                      <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-medium flex items-start gap-1.5">
+                        <AlertTriangle size={13} className="text-amber-600 shrink-0 mt-0.5" />
+                        <span>
+                          Hidden component(s):{' '}
+                          <strong>{combo.unavailableComponents.join(', ')}</strong>. Bundle is
+                          paused on POS until restored.
                         </span>
-                        {savings > 0 && (
-                          <span className="font-bold text-emerald-700">
-                            Save KES {savings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </span>
-                        )}
                       </div>
                     )}
-                  </div>
 
-                  {/* Included Items */}
-                  <div className="space-y-1.5 border-t border-gray-100 pt-3">
-                    <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
-                      Includes Items ({combo.items.length}):
-                    </p>
-                    {combo.items.map((item) => (
-                      <div key={item.id} className="flex items-center justify-between text-xs py-0.5">
-                        <span className="text-servora-navy font-medium flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-servora-core shrink-0" />
-                          <span>
-                            {item.quantity}x {item.itemName || `Item #${item.menuItemId}`}
-                          </span>
-                        </span>
-                        {parseFloat(item.additionalPrice) > 0 && (
-                          <span className="text-[11px] font-mono font-semibold text-gray-500">
-                            +KES {parseFloat(item.additionalPrice).toFixed(2)}
-                          </span>
-                        )}
+                    {!combo.isWithinSchedule && (
+                      <div className="p-2 bg-gray-100 border border-gray-200 rounded-xl text-[11px] text-gray-700 font-medium flex items-center gap-1.5">
+                        <Calendar size={12} className="shrink-0" />
+                        <span>Outside configured promotional window.</span>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Pricing & Savings Breakdown */}
+                    <div className="py-2.5 px-3 bg-servora-pale rounded-xl space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-servora-deepTeal">
+                          Bundle Price:
+                        </span>
+                        <span className="text-sm font-mono font-bold text-servora-core">
+                          KES {bundlePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      {combo.standaloneTotal > 0 && (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-gray-500">
+                            Standalone: KES{' '}
+                            {combo.standaloneTotal.toLocaleString(undefined, {
+                              minimumFractionDigits: 2,
+                            })}
+                          </span>
+                          {combo.pricingMode === 'DISCOUNTED' ? (
+                            <span className="font-bold text-emerald-700">
+                              Save KES {combo.savingsAmount.toLocaleString()} (
+                              {combo.savingsPercent}%)
+                            </span>
+                          ) : combo.pricingMode === 'PREMIUM' ? (
+                            <span className="font-bold text-purple-700">
+                              Premium (+KES {Math.abs(combo.savingsAmount).toLocaleString()})
+                            </span>
+                          ) : (
+                            <span className="font-semibold text-gray-500">Standard Value</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Included Items */}
+                    <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                      <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">
+                        Includes Items ({combo.items.length}):
+                      </p>
+                      {combo.items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between text-xs py-0.5"
+                        >
+                          <span className="text-servora-navy font-medium flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                item.itemIsAvailable === false ? 'bg-rose-500' : 'bg-servora-core'
+                              }`}
+                            />
+                            <span className="truncate">
+                              {item.quantity}x {item.itemName || `Item #${item.menuItemId}`}
+                            </span>
+                          </span>
+                          {parseFloat(item.additionalPrice) > 0 && (
+                            <span className="text-[11px] font-mono font-semibold text-gray-500 shrink-0 ml-2">
+                              +KES {parseFloat(item.additionalPrice).toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
                 {/* Card Footer Actions */}
-                <div className="flex items-center justify-between gap-2 pt-3 border-t border-gray-100">
+                <div className="flex items-center justify-between gap-2 px-5 py-3.5 border-t border-gray-100 bg-slate-50/40">
                   <button
                     type="button"
                     onClick={() => openModal(combo)}
@@ -698,16 +927,16 @@ export default function CombosPage() {
           aria-labelledby="combo-modal-title"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
         >
-          <div className="bg-white rounded-2xl w-full max-w-xl shadow-xl border border-gray-100 overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-xl border border-gray-100 overflow-hidden">
             <div className="flex items-center justify-between p-5 border-b border-gray-100">
               <div>
                 <h2 id="combo-modal-title" className="text-sm font-bold text-servora-navy">
-                  {editingCombo ? `Edit Combo Bundle: ${editingCombo.name}` : 'Create Combo Bundle'}
+                  {editingCombo
+                    ? `Edit Combo Bundle: ${editingCombo.name}`
+                    : 'Create Combo Bundle'}
                 </h2>
                 <p className="text-[11px] text-servora-deepTeal">
-                  {editingCombo
-                    ? 'Modify bundle pricing, SKU, included dishes/drinks, or POS availability'
-                    : 'Group existing POS items under a single promotional bundle price'}
+                  Configure cover photo, bundle pricing, promotional window, and included menu items
                 </p>
               </div>
               <button
@@ -720,7 +949,7 @@ export default function CombosPage() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+            <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
               {modalError && (
                 <div
                   role="alert"
@@ -739,17 +968,40 @@ export default function CombosPage() {
                   id="cb-name"
                   type="text"
                   required
-                  placeholder="e.g. Nyama Choma Feast Platter, Burger & Drink Deal"
+                  placeholder="e.g. Nyama Choma Family Platter, Burger & Drink Deal"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 text-xs border border-gray-200 rounded-xl focus:border-servora-core focus:outline-none font-semibold"
                 />
               </div>
 
+              {/* Bundle Cover Image (Reuses Menu Catalog Cloudinary Signed Upload) */}
+              <MenuItemImageUploader
+                imageUrl={imageUrl}
+                imagePublicId={imagePublicId}
+                imageOriginalFilename={imageOriginalFilename}
+                disabled={isSubmitting}
+                onUploaded={(meta) => {
+                  setImageUrl(meta.imageUrl);
+                  setImagePublicId(meta.imagePublicId);
+                  setImageOriginalFilename(meta.imageOriginalFilename);
+                  setImageMimeType(meta.imageMimeType);
+                  setImageFileSize(meta.imageFileSize);
+                  setUnsavedUploadedPublicIds((prev) => [...prev, meta.imagePublicId]);
+                }}
+                onRemoved={() => {
+                  setImageUrl(null);
+                  setImagePublicId(null);
+                  setImageOriginalFilename(null);
+                  setImageMimeType(null);
+                  setImageFileSize(null);
+                }}
+              />
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="cb-price">
-                    Bundle Price (KES) *
+                    Bundle Selling Price (KES) *
                   </label>
                   <input
                     id="cb-price"
@@ -765,7 +1017,7 @@ export default function CombosPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="cb-sku">
-                    SKU / Code (Optional)
+                    SKU / Bundle Code (Optional)
                   </label>
                   <input
                     id="cb-sku"
@@ -773,6 +1025,33 @@ export default function CombosPage() {
                     placeholder="BNDL-001"
                     value={sku}
                     onChange={(e) => setSku(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-xl focus:border-servora-core focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="cb-from">
+                    Promo Start Date (Optional)
+                  </label>
+                  <input
+                    id="cb-from"
+                    type="date"
+                    value={validFrom}
+                    onChange={(e) => setValidFrom(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-xl focus:border-servora-core focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-servora-navy mb-1" htmlFor="cb-until">
+                    Promo End Date (Optional)
+                  </label>
+                  <input
+                    id="cb-until"
+                    type="date"
+                    value={validUntil}
+                    onChange={(e) => setValidUntil(e.target.value)}
                     className="w-full px-3 py-2 text-xs font-mono border border-gray-200 rounded-xl focus:border-servora-core focus:outline-none"
                   />
                 </div>
@@ -807,7 +1086,12 @@ export default function CombosPage() {
                   </button>
                 </div>
 
-                {/* Column Headers */}
+                {hasDuplicateComponentsInForm && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-lg font-medium">
+                    Duplicate menu items selected will be automatically consolidated into combined quantities on save.
+                  </p>
+                )}
+
                 <div className="grid grid-cols-12 gap-2 px-1 text-[10px] font-bold uppercase tracking-wider text-gray-400">
                   <span className="col-span-6">Menu Item</span>
                   <span className="col-span-2 text-center">Qty</span>
@@ -842,7 +1126,6 @@ export default function CombosPage() {
                           type="number"
                           min="1"
                           aria-label="Quantity"
-                          placeholder="Qty"
                           value={row.quantity}
                           onChange={(e) => handleItemChange(idx, { quantity: e.target.value })}
                           className="w-full px-2 py-2 text-xs font-mono border border-gray-200 rounded-xl bg-white focus:border-servora-core focus:outline-none text-center"
@@ -855,8 +1138,6 @@ export default function CombosPage() {
                           step="0.01"
                           min="0"
                           aria-label="Additional upcharge (KES)"
-                          placeholder="0.00"
-                          title="Optional upcharge (KES)"
                           value={row.additionalPrice}
                           onChange={(e) =>
                             handleItemChange(idx, { additionalPrice: e.target.value })
@@ -882,18 +1163,27 @@ export default function CombosPage() {
                 </div>
 
                 {modalStandaloneTotal > 0 && (
-                  <div className="pt-2 border-t border-gray-200 flex items-center justify-between text-[11px]">
+                  <div className="pt-2 border-t border-gray-200 flex flex-wrap items-center justify-between gap-2 text-[11px]">
                     <span className="text-gray-600 font-medium">
                       Standalone Value:{' '}
                       <strong className="font-mono text-servora-navy">
-                        KES {modalStandaloneTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        KES{' '}
+                        {modalStandaloneTotal.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                        })}
                       </strong>
                     </span>
-                    {modalSavings > 0 && (
-                      <span className="font-bold text-emerald-700">
-                        Guest Savings: KES{' '}
-                        {modalSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {modalSavings > 0.005 ? (
+                      <span className="font-bold text-emerald-700 inline-flex items-center gap-1">
+                        <Tag size={11} /> Save KES {modalSavings.toFixed(2)} (
+                        {modalSavingsPct.toFixed(1)}%)
                       </span>
+                    ) : modalSavings < -0.005 ? (
+                      <span className="font-bold text-purple-700">
+                        Premium Bundle (+KES {Math.abs(modalSavings).toFixed(2)})
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-gray-500">Exact Standalone Value</span>
                     )}
                   </div>
                 )}
@@ -953,7 +1243,9 @@ export default function CombosPage() {
                 </h3>
                 <p className="text-xs text-servora-deepTeal mt-1 leading-relaxed">
                   Are you sure you want to delete{' '}
-                  <strong className="text-servora-navy">{pendingDeleteCombo.name}</strong>? This removes the bundle configuration from your tenant catalog without deleting the underlying menu items.
+                  <strong className="text-servora-navy">{pendingDeleteCombo.name}</strong>? This
+                  removes the bundle configuration without deleting the underlying menu items or
+                  historical POS orders.
                 </p>
               </div>
             </div>

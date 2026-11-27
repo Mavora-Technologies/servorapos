@@ -2,6 +2,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import * as posRepo from '../repositories/pos-terminal.repository';
+import { getUserAuthorizedBranches } from '../services/role.service';
 import {
   posBootstrapQuerySchema,
   posCustomerSearchQuerySchema,
@@ -13,15 +14,45 @@ export const getPosContext = async (req: AuthRequest, res: Response): Promise<vo
   try {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.userId;
-    if (!tenantId || !userId) {
+    const role = req.user?.role;
+
+    if (!tenantId || !userId || !role) {
       res.status(401).json({ status: 'error', message: 'Unauthorized terminal session' });
       return;
     }
 
     const parsed = posBootstrapQuerySchema.safeParse(req.query);
-    const branchId = parsed.success ? parsed.data.branchId : undefined;
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'Invalid branch parameter',
+      });
+      return;
+    }
 
-    const context = await posRepo.getPosTerminalContext(tenantId, userId, branchId);
+    const requestedBranchId = parsed.data.branchId;
+    const authorized = await getUserAuthorizedBranches(tenantId, userId, role);
+    const authorizedBranchIds = authorized === 'ALL' ? null : authorized;
+
+    if (
+      requestedBranchId !== undefined &&
+      authorizedBranchIds !== null &&
+      !authorizedBranchIds.includes(requestedBranchId)
+    ) {
+      res.status(403).json({
+        status: 'error',
+        message: 'You are not authorized to operate a POS terminal at the selected branch.',
+      });
+      return;
+    }
+
+    const context = await posRepo.getPosTerminalContext(
+      tenantId,
+      userId,
+      requestedBranchId,
+      authorizedBranchIds
+    );
+
     res.status(200).json({ status: 'success', data: context });
   } catch (error: unknown) {
     const message =
@@ -62,7 +93,10 @@ export const postValidatePromo = async (req: AuthRequest, res: Response): Promis
 
     const parsed = posValidatePromoSchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ status: 'error', message: 'Invalid promo validation payload' });
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'Invalid promo validation payload',
+      });
       return;
     }
 
@@ -71,6 +105,7 @@ export const postValidatePromo = async (req: AuthRequest, res: Response): Promis
       parsed.data.code,
       parsed.data.subtotalKes
     );
+
     res.status(200).json({ status: 'success', data: result });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Promo code invalid';
@@ -81,7 +116,10 @@ export const postValidatePromo = async (req: AuthRequest, res: Response): Promis
 export const postValidateStock = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const tenantId = req.user?.tenantId;
-    if (!tenantId) {
+    const userId = req.user?.userId;
+    const role = req.user?.role;
+
+    if (!tenantId || !userId || !role) {
       res.status(401).json({ status: 'error', message: 'Unauthorized session' });
       return;
     }
@@ -95,10 +133,25 @@ export const postValidateStock = async (req: AuthRequest, res: Response): Promis
       return;
     }
 
+    const targetBranchId = parsed.data.branchId ?? req.user?.defaultBranchId ?? undefined;
+    const authorized = await getUserAuthorizedBranches(tenantId, userId, role);
+
+    if (
+      targetBranchId !== undefined &&
+      authorized !== 'ALL' &&
+      !authorized.includes(targetBranchId)
+    ) {
+      res.status(403).json({
+        status: 'error',
+        message: 'Unauthorized branch scope for stock validation.',
+      });
+      return;
+    }
+
     const validation = await posRepo.validateOrderStockAvailability(
       tenantId,
       parsed.data.items,
-      parsed.data.branchId ?? req.user?.defaultBranchId ?? undefined
+      targetBranchId
     );
 
     if (!validation.valid) {

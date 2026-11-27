@@ -1,7 +1,7 @@
 // apps/web/app/(dashboard)/pos/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, memo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -46,6 +46,8 @@ import {
   UploadCloud,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
+import { getOptimizedMenuImageUrl } from '@/lib/cloudinary';
+import { syncPosMenuImagesCache } from '@/lib/pos-image-cache';
 import {
   cacheOfflinePolicy,
   cachePosSnapshot,
@@ -232,7 +234,10 @@ interface MenuItem {
   } | null;
   isAvailable: boolean;
   sku?: string;
-  image?: string;
+  image?: string | null;
+  imageUrl?: string | null;
+  imageCardUrl?: string | null;
+  imagePublicId?: string | null;
   isCombo?: boolean;
   comboId?: number;
   comboItems?: ComboComponentItem[];
@@ -286,6 +291,7 @@ interface FinancialSettings {
   enableSafeDropAlerts: boolean;
   taxPin: string | null;
   etimsEnvironment: string;
+  etimsDeviceSerial?: string | null;
 }
 
 interface ReceiptTemplate {
@@ -346,10 +352,163 @@ function getModifierSignature(mods?: SelectedCartModifier[]): string {
     .join(',');
 }
 
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function isValidKenyanPhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s\-+]/g, '');
+  return /^(?:254|0)[17]\d{8}$/.test(cleaned);
+}
+
+/**
+ * Memoized POS Product Card with fixed 4:3 Cloudinary image, zero layout shift,
+ * lazy loading, graceful fallback, pricing rule strikethrough, and stock badges.
+ */
+const PosCatalogCard = memo(function PosCatalogCard({
+  item,
+  currencySymbol,
+  remaining,
+  stationName,
+  hasModifiers,
+  onAdd,
+}: {
+  item: MenuItem;
+  currencySymbol: string;
+  remaining: number | null;
+  stationName: string;
+  hasModifiers: boolean;
+  onAdd: (item: MenuItem) => void;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const rawImg = item.imageCardUrl || item.imageUrl || item.image || null;
+  const imgSrc = !imgFailed ? getOptimizedMenuImageUrl(rawImg, 'card') : null;
+  const isOutOfStock = remaining !== null && remaining <= 0;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onAdd(item)}
+      disabled={isOutOfStock}
+      className={`flex flex-col text-left rounded-2xl border overflow-hidden shadow-xs transition-all justify-between group ${
+        isOutOfStock
+          ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
+          : item.isCombo
+            ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-[0.98] cursor-pointer'
+            : 'bg-white border-gray-200 hover:border-servora-core/50 hover:shadow-md active:scale-[0.98] cursor-pointer'
+      }`}
+    >
+      {/* Fixed 4:3 Image Container */}
+      <div className="relative w-full aspect-[4/3] bg-servora-pale overflow-hidden shrink-0">
+        {imgSrc ? (
+          <img
+            src={imgSrc}
+            alt={item.name}
+            loading="lazy"
+            decoding="async"
+            onError={() => setImgFailed(true)}
+            className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-[1.04]"
+          />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center text-servora-deepTeal/25">
+            {item.isCombo ? <ShoppingBasket size={26} /> : <Utensils size={24} />}
+          </div>
+        )}
+
+        {/* Top-Left Category / Combo Pill */}
+        <span
+          className={`absolute top-2 left-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md max-w-[62%] truncate inline-flex items-center gap-1 shadow-xs ${
+            item.isCombo
+              ? 'bg-servora-core text-white'
+              : 'bg-white/90 text-servora-navy backdrop-blur-xs'
+          }`}
+        >
+          {item.isCombo ? (
+            <>
+              <ShoppingBasket size={9} /> Combo
+            </>
+          ) : (
+            item.category
+          )}
+        </span>
+
+        {/* Top-Right Stock / 86ed / Modifier Badge */}
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+          {isOutOfStock ? (
+            <span className="text-[9px] font-bold uppercase bg-rose-600 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+              Out of Stock
+            </span>
+          ) : remaining !== null && remaining <= 5 ? (
+            <span className="text-[9px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+              {remaining} left
+            </span>
+          ) : remaining !== null ? (
+            <span className="text-[9px] font-mono font-bold bg-emerald-600/90 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+              {remaining}
+            </span>
+          ) : null}
+
+          {hasModifiers && !isOutOfStock && (
+            <span
+              title="Customizable options"
+              className="inline-flex items-center gap-0.5 text-[9px] font-bold text-white bg-servora-navy/85 px-1.5 py-0.5 rounded-md backdrop-blur-xs"
+            >
+              <SlidersHorizontal size={8} /> Opts
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Card Body */}
+      <div className="p-2.5 flex-1 flex flex-col justify-between gap-1.5 w-full">
+        <div>
+          <span className="text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
+            {item.name}
+          </span>
+          <div className="flex items-center gap-1 text-[9.5px] font-mono text-gray-500 mt-0.5 truncate">
+            {item.isCombo && item.comboItems ? (
+              <span className="truncate text-servora-deepTeal font-sans">
+                {item.comboItems.map((c) => `${c.quantity}x ${c.itemName}`).join(' + ')}
+              </span>
+            ) : (
+              <>
+                <ChefHat size={10} className="text-servora-core shrink-0" />
+                <span className="truncate">{stationName}</span>
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="flex justify-between items-center gap-1 pt-1 border-t border-gray-100">
+          <div className="flex items-baseline gap-1.5 min-w-0">
+            <span className="text-xs font-mono font-bold text-servora-core">
+              {currencySymbol} {item.price.toLocaleString()}
+            </span>
+            {item.activePricingRule &&
+              item.originalPrice !== undefined &&
+              item.originalPrice !== item.price && (
+                <span
+                  title={item.activePricingRule.ruleName}
+                  className="text-[10px] font-mono text-gray-400 line-through truncate"
+                >
+                  {item.originalPrice.toLocaleString()}
+                </span>
+              )}
+          </div>
+          <div className="w-6 h-6 rounded-lg bg-servora-pale border border-servora-core/20 flex items-center justify-center text-servora-core group-hover:bg-servora-core group-hover:text-white transition-colors shrink-0">
+            <Plus size={12} />
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+});
+
 export default function POSPage() {
   const searchParams = useSearchParams();
   const preselectedTableId = searchParams.get('tableId');
   const receiptPrintRef = useRef<HTMLDivElement>(null);
+  const loadRequestIdRef = useRef(0);
 
   // Dynamic Workspace, Branch & Auth User States
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -389,9 +548,10 @@ export default function POSPage() {
   const [offlineSyncBanner, setOfflineSyncBanner] = useState<string | null>(null);
   const [offlineMpesaRef, setOfflineMpesaRef] = useState('');
 
-  // Inline Stock & Checkout Alert Banners
+  // Inline Stock, Clear Confirmation & Checkout Alert Banners
   const [stockAlert, setStockAlert] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [confirmClearArmed, setConfirmClearArmed] = useState(false);
 
   // CRM Customer & Loyalty Engine States
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
@@ -430,14 +590,16 @@ export default function POSPage() {
   // Mobile layout state
   const [mobileTab, setMobileTab] = useState<MobileTab>('menu');
 
-  // Tender & Checkout States
+  // Tender, Idempotency & Checkout States
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [checkoutIdempotencyKey, setCheckoutIdempotencyKey] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
   const [cashTendered, setCashTendered] = useState<string>('');
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [splitCashAmount, setSplitCashAmount] = useState<string>('');
   const [splitMpesaAmount, setSplitMpesaAmount] = useState<string>('');
   const [isCheckingOut, setIsCheckingOut] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
 
   // Completed Receipt State
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -474,16 +636,18 @@ export default function POSPage() {
 
   const loadInitialData = useCallback(
     async (overrideBranchId?: number) => {
+      const requestId = ++loadRequestIdRef.current;
+
       try {
         setIsLoading(true);
         const queued = await getQueuedOfflineOrders();
+        if (requestId !== loadRequestIdRef.current) return;
         setPendingOfflineCount(queued.length);
 
-        // If browser is offline, hydrate directly from local IndexedDB snapshot
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
           setIsOnline(false);
           const cached = await getCachedPosSnapshot();
-          if (cached) {
+          if (cached && requestId === loadRequestIdRef.current) {
             hydrateFromSnapshot(cached);
           }
           setIsLoading(false);
@@ -522,7 +686,9 @@ export default function POSPage() {
           fetchApi('/api/v1/settings/offline').catch(() => null),
         ]);
 
-        // If upstream API/DB is unreachable, fall back to cached local snapshot
+        // Discard stale response if user switched branches mid-flight
+        if (requestId !== loadRequestIdRef.current) return;
+
         if (!authRes && !posContextRes && !(menuRes?.data?.items?.length > 0)) {
           const cached = await getCachedPosSnapshot();
           if (cached) {
@@ -598,9 +764,14 @@ export default function POSPage() {
 
           if (resolvedGuardrails?.cashDrawerId) {
             setSelectedDrawerId(String(resolvedGuardrails.cashDrawerId));
-          } else if (resolvedDrawers.length > 0 && !selectedDrawerId) {
-            const openDrawer = resolvedDrawers.find((d) => d.status === 'OPEN');
-            setSelectedDrawerId(String((openDrawer || resolvedDrawers[0]).id));
+          } else if (resolvedDrawers.length > 0) {
+            setSelectedDrawerId((prev) => {
+              if (prev && resolvedDrawers.some((d) => String(d.id) === prev)) return prev;
+              const openDrawer = resolvedDrawers.find((d) => d.status === 'OPEN');
+              return String((openDrawer || resolvedDrawers[0]).id);
+            });
+          } else {
+            setSelectedDrawerId('');
           }
 
           for (const flag of ctx.itemAvailability || []) {
@@ -612,7 +783,7 @@ export default function POSPage() {
           setActiveBranch(resolvedActiveBranch);
         }
 
-        // 1. Base Menu Items
+        // 1. Base Menu Items (preserving Cloudinary imageUrl / imageCardUrl / imagePublicId)
         let baseItems: MenuItem[] = [];
         let baseCategories: string[] = [];
 
@@ -631,7 +802,8 @@ export default function POSPage() {
                 price?: number | string;
                 isAvailable?: boolean;
                 sku?: string;
-                imageUrl?: string;
+                imageUrl?: string | null;
+                imagePublicId?: string | null;
               }) => ({
                 id: String(i.id),
                 name: i.name,
@@ -639,7 +811,9 @@ export default function POSPage() {
                 price: Number(i.price || 0),
                 isAvailable: i.isAvailable !== false,
                 sku: i.sku,
-                image: i.imageUrl,
+                image: i.imageUrl ?? null,
+                imageUrl: i.imageUrl ?? null,
+                imagePublicId: i.imagePublicId ?? null,
               })
             );
             baseCategories = Array.from(new Set(baseItems.map((i) => i.category)));
@@ -649,42 +823,52 @@ export default function POSPage() {
         // 2. Active Combos & Meal Bundles
         const rawCombos = Array.isArray(combosRes?.data) ? combosRes.data : [];
         const comboMenuItems: MenuItem[] = rawCombos
-          .filter(
-            (c: { isAvailable?: boolean; items?: unknown[] }) =>
-              c.isAvailable !== false && Array.isArray(c.items) && c.items.length > 0
-          )
-          .map(
-            (c: {
-              id: number;
-              name: string;
-              sku?: string | null;
-              basePrice: string | number;
-              isAvailable: boolean;
-              items: Array<{
-                menuItemId: number;
-                quantity: number;
-                additionalPrice?: string | number;
-                itemName?: string | null;
-                itemPrice?: string | number | null;
-              }>;
-            }) => ({
-              id: `combo-${c.id}`,
-              comboId: c.id,
-              isCombo: true,
-              name: c.name,
-              category: COMBOS_CATEGORY_LABEL,
-              price: Number(c.basePrice || 0),
-              isAvailable: c.isAvailable !== false,
-              sku: c.sku || undefined,
-              comboItems: c.items.map((line) => ({
-                menuItemId: Number(line.menuItemId),
-                quantity: Number(line.quantity) || 1,
-                additionalPrice: Number(line.additionalPrice || 0),
-                itemName: line.itemName || `Item #${line.menuItemId}`,
-                itemPrice: Number(line.itemPrice || 0),
-              })),
-            })
-          );
+       .filter(
+         (c: { effectiveAvailable?: boolean; isAvailable?: boolean; items?: unknown[] }) =>
+           c.effectiveAvailable !== false &&
+           c.isAvailable !== false &&
+           Array.isArray(c.items) &&
+           c.items.length > 0
+       )
+       .map(
+         (c: {
+           id: number;
+           name: string;
+           sku?: string | null;
+           basePrice: string | number;
+           isAvailable: boolean;
+           imageUrl?: string | null;
+           imageCardUrl?: string | null;
+           imagePublicId?: string | null;
+           items: Array<{
+             menuItemId: number;
+             quantity: number;
+             additionalPrice?: string | number;
+             itemName?: string | null;
+             itemPrice?: string | number | null;
+           }>;
+         }) => ({
+           id: `combo-${c.id}`,
+           comboId: c.id,
+           isCombo: true,
+           name: c.name,
+           category: COMBOS_CATEGORY_LABEL,
+           price: Number(c.basePrice || 0),
+           isAvailable: c.isAvailable !== false,
+           sku: c.sku || undefined,
+           image: c.imageCardUrl || c.imageUrl || null,
+           imageUrl: c.imageUrl || null,
+           imageCardUrl: c.imageCardUrl || null,
+           imagePublicId: c.imagePublicId || null,
+           comboItems: c.items.map((line) => ({
+             menuItemId: Number(line.menuItemId),
+             quantity: Number(line.quantity) || 1,
+             additionalPrice: Number(line.additionalPrice || 0),
+             itemName: line.itemName || `Item #${line.menuItemId}`,
+             itemPrice: Number(line.itemPrice || 0),
+           })),
+         })
+       );
 
         const mergedItems = [...comboMenuItems, ...baseItems];
         const mergedCategories = Array.from(
@@ -698,6 +882,11 @@ export default function POSPage() {
         setMenuItems(mergedItems);
         setCategories(mergedCategories);
 
+        // Warm-cache optimized Cloudinary menu images in Cache Storage for offline POS
+        void syncPosMenuImagesCache(
+          mergedItems.map((m) => m.imageCardUrl || m.imageUrl || m.image)
+        );
+
         const resolvedTables: RestaurantTable[] = Array.isArray(tablesRes?.data)
           ? tablesRes.data
           : [];
@@ -709,7 +898,11 @@ export default function POSPage() {
         setServiceModels(resolvedModels);
         const defaultModel =
           resolvedModels.find((m) => m.type === 'DINE_IN') || resolvedModels[0] || null;
-        if (defaultModel) setActiveServiceModel(defaultModel);
+        if (defaultModel) {
+          setActiveServiceModel((prev) =>
+            prev && resolvedModels.some((m) => m.id === prev.id) ? prev : defaultModel
+          );
+        }
 
         const resolvedFinancial: FinancialSettings | null = finRes?.data?.settings ?? null;
         if (resolvedFinancial) {
@@ -725,7 +918,7 @@ export default function POSPage() {
           if (resolvedTemplate) setReceiptTemplate(resolvedTemplate);
         }
 
-        // Persist complete POS snapshot to IndexedDB for offline survivability
+        // Persist complete POS snapshot (including image URLs) to IndexedDB
         if (mergedItems.length > 0) {
           void cachePosSnapshot({
             branchId: resolvedActiveBranch?.id,
@@ -753,12 +946,16 @@ export default function POSPage() {
       } catch (error) {
         console.warn('POS: Initializing terminal state from cache if available.', error);
         const cached = await getCachedPosSnapshot();
-        if (cached) hydrateFromSnapshot(cached);
+        if (cached && requestId === loadRequestIdRef.current) {
+          hydrateFromSnapshot(cached);
+        }
       } finally {
-        setIsLoading(false);
+        if (requestId === loadRequestIdRef.current) {
+          setIsLoading(false);
+        }
       }
     },
-    [selectedDrawerId, hydrateFromSnapshot]
+    [hydrateFromSnapshot]
   );
 
   useEffect(() => {
@@ -798,9 +995,7 @@ export default function POSPage() {
       }
     };
 
-    const onOffline = () => {
-      setIsOnline(false);
-    };
+    const onOffline = () => setIsOnline(false);
 
     window.addEventListener('online', onOnline);
     window.addEventListener('offline', onOffline);
@@ -810,7 +1005,7 @@ export default function POSPage() {
     };
   }, [handleSyncOfflineQueue, loadInitialData, activeBranch?.id]);
 
-  // Debounced CRM & Loyalty Member Search (disabled when offline)
+  // Debounced CRM & Loyalty Member Search
   useEffect(() => {
     if (!isOnline || !customerSearchQuery.trim() || customerSearchQuery.trim().length < 2) {
       setCustomerMatches([]);
@@ -831,7 +1026,7 @@ export default function POSPage() {
     return () => clearTimeout(timer);
   }, [customerSearchQuery, isOnline]);
 
-  // Aggregate total units of each menuItemId currently in cart (both standalone & inside combos)
+  // Aggregate total units of each menuItemId currently in cart
   const cartMenuItemQuantities = useMemo(() => {
     const qtyMap: Record<number, number> = {};
     for (const cartLine of cart) {
@@ -850,7 +1045,7 @@ export default function POSPage() {
     return qtyMap;
   }, [cart]);
 
-  // Compute total raw-material consumption already reserved by current cart items (recipes + combos + linked modifiers)
+  // Compute total raw-material consumption reserved by active cart
   const cartIngredientConsumption = useMemo(() => {
     const usedByInvId: Record<number, number> = {};
 
@@ -877,7 +1072,6 @@ export default function POSPage() {
     return usedByInvId;
   }, [cartMenuItemQuantities, availabilityMap, cart]);
 
-  // Compute remaining sellable units for a single menu item given current cart reservations
   const getSingleItemRemainingSellable = useCallback(
     (menuItemId: number): { remaining: number | null; limitingName: string | null } => {
       const flag = availabilityMap[menuItemId];
@@ -916,7 +1110,6 @@ export default function POSPage() {
     [availabilityMap, cartMenuItemQuantities, cartIngredientConsumption]
   );
 
-  // Unified remaining sellable calculation for both standalone items and combo bundles
   const getItemRemainingSellable = useCallback(
     (item: MenuItem): { remaining: number | null; limitingName: string | null } => {
       if (!item.isCombo || !item.comboItems?.length) {
@@ -996,6 +1189,8 @@ export default function POSPage() {
     setSelectedStationFilter('ALL');
     setOrderTargetStation('AUTO');
     setStockAlert(null);
+    setCart([]);
+    setConfirmClearArmed(false);
     loadInitialData(idNum);
   };
 
@@ -1036,6 +1231,7 @@ export default function POSPage() {
       });
       if (res?.data) {
         setAppliedPromo(res.data);
+        setOrderDiscountPercent(0); // Prevent stacking manual discount on top of promo code
         setPromoCodeInput('');
       }
     } catch (err: unknown) {
@@ -1103,6 +1299,7 @@ export default function POSPage() {
     [orderTargetStation, itemStationMap]
   );
 
+  // Search across name, SKU, category, and combo components
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
@@ -1125,6 +1322,7 @@ export default function POSPage() {
       const matchesSearch =
         !q ||
         item.name.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q) ||
         (item.sku && item.sku.toLowerCase().includes(q)) ||
         (item.isCombo &&
           item.comboItems?.some((c) => c.itemName.toLowerCase().includes(q)));
@@ -1133,8 +1331,7 @@ export default function POSPage() {
     });
   }, [menuItems, selectedCategory, selectedStationFilter, itemStationMap, searchQuery]);
 
-  // Open modifier customization modal with default options pre-selected
-  const openModifierPicker = (item: MenuItem, groups: PosModifierGroup[]) => {
+  const openModifierPicker = useCallback((item: MenuItem, groups: PosModifierGroup[]) => {
     const initial: Record<number, number[]> = {};
     for (const g of groups) {
       const defaults = g.options
@@ -1146,51 +1343,55 @@ export default function POSPage() {
     setDraftSelections(initial);
     setModifierModalError(null);
     setCustomizingItem(item);
-  };
+  }, []);
 
-  const addToCart = (item: MenuItem) => {
-    const { remaining, limitingName } = getItemRemainingSellable(item);
-    if (remaining !== null && remaining <= 0) {
-      setStockAlert(
-        limitingName
-          ? `Cannot add "${item.name}": available stock for ${limitingName} is exhausted.`
-          : `Cannot add "${item.name}": no available stock remaining.`
-      );
-      return;
-    }
-
-    const attachedGroups = !item.isCombo ? itemModifierGroupsMap[Number(item.id)] : undefined;
-    if (attachedGroups && attachedGroups.length > 0) {
-      setStockAlert(null);
-      openModifierPicker(item, attachedGroups);
-      return;
-    }
-
-    setStockAlert(null);
-    setCart((prev) => {
-      const existing = prev.find(
-        (c) =>
-          c.id === item.id &&
-          !c.notes &&
-          !c.targetStation &&
-          (!c.selectedModifiers || c.selectedModifiers.length === 0)
-      );
-      if (existing) {
-        return prev.map((c) =>
-          c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
+  const addToCart = useCallback(
+    (item: MenuItem) => {
+      const { remaining, limitingName } = getItemRemainingSellable(item);
+      if (remaining !== null && remaining <= 0) {
+        setStockAlert(
+          limitingName
+            ? `Cannot add "${item.name}": available stock for ${limitingName} is exhausted.`
+            : `Cannot add "${item.name}": no available stock remaining.`
         );
+        return;
       }
-      return [
-        ...prev,
-        {
-          ...item,
-          basePrice: item.price,
-          cartItemId: crypto.randomUUID(),
-          quantity: 1,
-        },
-      ];
-    });
-  };
+
+      const attachedGroups = !item.isCombo ? itemModifierGroupsMap[Number(item.id)] : undefined;
+      if (attachedGroups && attachedGroups.length > 0) {
+        setStockAlert(null);
+        openModifierPicker(item, attachedGroups);
+        return;
+      }
+
+      setStockAlert(null);
+      setConfirmClearArmed(false);
+      setCart((prev) => {
+        const existing = prev.find(
+          (c) =>
+            c.id === item.id &&
+            !c.notes &&
+            !c.targetStation &&
+            (!c.selectedModifiers || c.selectedModifiers.length === 0)
+        );
+        if (existing) {
+          return prev.map((c) =>
+            c.cartItemId === existing.cartItemId ? { ...c, quantity: c.quantity + 1 } : c
+          );
+        }
+        return [
+          ...prev,
+          {
+            ...item,
+            basePrice: item.price,
+            cartItemId: crypto.randomUUID(),
+            quantity: 1,
+          },
+        ];
+      });
+    },
+    [getItemRemainingSellable, itemModifierGroupsMap, openModifierPicker]
+  );
 
   const draftCustomizedUnitPrice = useMemo(() => {
     if (!customizingItem) return 0;
@@ -1203,7 +1404,7 @@ export default function POSPage() {
         if (opt) delta += opt.priceAdjustment;
       }
     }
-    return Number((customizingItem.price + delta).toFixed(2));
+    return roundMoney(customizingItem.price + delta);
   }, [customizingItem, itemModifierGroupsMap, draftSelections]);
 
   const handleConfirmModifiers = () => {
@@ -1238,9 +1439,10 @@ export default function POSPage() {
     }
 
     const modDelta = chosen.reduce((sum, m) => sum + m.price, 0);
-    const unitPriceWithMods = Number((customizingItem.price + modDelta).toFixed(2));
+    const unitPriceWithMods = roundMoney(customizingItem.price + modDelta);
     const newSig = getModifierSignature(chosen);
 
+    setConfirmClearArmed(false);
     setCart((prev) => {
       const existing = prev.find(
         (c) =>
@@ -1301,21 +1503,25 @@ export default function POSPage() {
     );
   };
 
-  const clearCart = () => {
-    if (window.confirm('Clear active terminal ticket? All unposted line items will be removed.')) {
-      setCart([]);
-      setSelectedTableId('');
-      handleClearLoyaltyCustomer();
-      setOrderDiscountPercent(0);
-      setOrderTargetStation('AUTO');
-      setAppliedPromo(null);
-      setPromoError(null);
-      setStockAlert(null);
-      setGuestCount(1);
+  const handleClearTicket = () => {
+    if (!confirmClearArmed) {
+      setConfirmClearArmed(true);
+      setTimeout(() => setConfirmClearArmed(false), 4000);
+      return;
     }
+    setCart([]);
+    setSelectedTableId('');
+    handleClearLoyaltyCustomer();
+    setOrderDiscountPercent(0);
+    setOrderTargetStation('AUTO');
+    setAppliedPromo(null);
+    setPromoError(null);
+    setStockAlert(null);
+    setGuestCount(1);
+    setConfirmClearArmed(false);
   };
 
-  // Expand combos into constituent menu items & attach selectedModifiers for API / KDS
+  // Expand combos into constituent menu items & attach selectedModifiers
   const expandCartForOrderApi = useCallback(
     (cartLines: CartItem[]) => {
       const expanded: Array<{
@@ -1333,7 +1539,7 @@ export default function POSPage() {
 
       for (const line of cartLines) {
         if (line.isCombo && line.comboItems && line.comboItems.length > 0) {
-          const bundleTotal = Number((line.price * line.quantity).toFixed(2));
+          const bundleTotal = roundMoney(line.price * line.quantity);
           const componentWeights = line.comboItems.map((comp) =>
             Math.max(0, (comp.itemPrice + comp.additionalPrice) * comp.quantity)
           );
@@ -1345,12 +1551,12 @@ export default function POSPage() {
             const totalCompQty = comp.quantity * line.quantity;
             const isLast = idx === line.comboItems!.length - 1;
             const compLineTotal = isLast
-              ? Number((bundleTotal - allocatedSoFar).toFixed(2))
+              ? roundMoney(bundleTotal - allocatedSoFar)
               : totalWeight > 0
-                ? Number(((bundleTotal * componentWeights[idx]) / totalWeight).toFixed(2))
-                : Number((bundleTotal / line.comboItems!.length).toFixed(2));
+                ? roundMoney((bundleTotal * componentWeights[idx]) / totalWeight)
+                : roundMoney(bundleTotal / line.comboItems!.length);
 
-            allocatedSoFar = Number((allocatedSoFar + compLineTotal).toFixed(2));
+            allocatedSoFar = roundMoney(allocatedSoFar + compLineTotal);
 
             const notePrefix = `[Combo: ${line.name}]`;
             const combinedNote = line.notes ? `${notePrefix} ${line.notes}` : notePrefix;
@@ -1359,7 +1565,7 @@ export default function POSPage() {
               menuItemId: comp.menuItemId,
               name: comp.itemName,
               quantity: totalCompQty,
-              unitPrice: totalCompQty > 0 ? Number((compLineTotal / totalCompQty).toFixed(2)) : 0,
+              unitPrice: totalCompQty > 0 ? roundMoney(compLineTotal / totalCompQty) : 0,
               totalPrice: compLineTotal,
               sku: line.sku,
               targetStation:
@@ -1373,9 +1579,7 @@ export default function POSPage() {
             name: `${m.groupName}: ${m.name}`,
             price: m.price,
           }));
-          const modifiersPrice = Number(
-            modList.reduce((sum, m) => sum + m.price, 0).toFixed(2)
-          );
+          const modifiersPrice = roundMoney(modList.reduce((sum, m) => sum + m.price, 0));
           const modNoteText =
             modList.length > 0 ? modList.map((m) => m.name).join(' | ') : '';
           const combinedNote =
@@ -1389,7 +1593,7 @@ export default function POSPage() {
             quantity: line.quantity,
             unitPrice: line.price,
             modifiersPrice,
-            totalPrice: Number((line.price * line.quantity).toFixed(2)),
+            totalPrice: roundMoney(line.price * line.quantity),
             sku: line.sku,
             targetStation:
               orderTargetStation !== 'AUTO' ? orderTargetStation : line.targetStation,
@@ -1404,7 +1608,6 @@ export default function POSPage() {
     [orderTargetStation]
   );
 
-  // Group active cart items (including expanded combo components) by resolved KDS station
   const stationRoutingPreview = useMemo(() => {
     const grouped: Record<
       string,
@@ -1446,25 +1649,27 @@ export default function POSPage() {
     return Object.values(grouped);
   }, [cart, getEffectiveItemStation]);
 
+  // Precision-rounded financial calculations
   const calculations = useMemo(() => {
-    const rawSubtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const manualDiscountKes = rawSubtotal * (orderDiscountPercent / 100);
-    const promoDiscountKes = appliedPromo ? appliedPromo.calculatedDiscountKes : 0;
+    const rawSubtotal = roundMoney(
+      cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    );
+    const manualDiscountKes = roundMoney(rawSubtotal * (orderDiscountPercent / 100));
+    const promoDiscountKes = appliedPromo ? roundMoney(appliedPromo.calculatedDiscountKes) : 0;
 
     let rewardDiscountKes = 0;
     if (selectedReward) {
       if (selectedReward.rewardType === 'DISCOUNT_FIXED') {
-        rewardDiscountKes = selectedReward.rewardValue;
+        rewardDiscountKes = roundMoney(selectedReward.rewardValue);
       } else if (selectedReward.rewardType === 'PERCENTAGE_OFF') {
-        rewardDiscountKes = rawSubtotal * (selectedReward.rewardValue / 100);
+        rewardDiscountKes = roundMoney(rawSubtotal * (selectedReward.rewardValue / 100));
       }
     }
 
-    const totalDiscountAmount = Math.min(
-      rawSubtotal,
-      manualDiscountKes + promoDiscountKes + rewardDiscountKes
+    const totalDiscountAmount = roundMoney(
+      Math.min(rawSubtotal, manualDiscountKes + promoDiscountKes + rewardDiscountKes)
     );
-    const discountedGross = Math.max(0, rawSubtotal - totalDiscountAmount);
+    const discountedGross = roundMoney(Math.max(0, rawSubtotal - totalDiscountAmount));
 
     const isVatInclusive = financialSettings ? financialSettings.isVatInclusive : true;
     const vatRate = financialSettings ? parseFloat(financialSettings.vatRate) / 100 : 0.16;
@@ -1482,9 +1687,9 @@ export default function POSPage() {
         ? parseFloat(financialSettings.serviceChargeRate) / 100
         : 0;
 
-    const packingChargeAmount = activeServiceModel
-      ? parseFloat(activeServiceModel.packingChargeAmount) || 0
-      : 0;
+    const packingChargeAmount = roundMoney(
+      activeServiceModel ? parseFloat(activeServiceModel.packingChargeAmount) || 0 : 0
+    );
 
     let netAmount = 0;
     let vatAmount = 0;
@@ -1494,17 +1699,19 @@ export default function POSPage() {
 
     if (isVatInclusive) {
       const combinedDivisor = 1 + vatRate + levyRate + modelServiceChargePercent;
-      netAmount = discountedGross / combinedDivisor;
-      vatAmount = netAmount * vatRate;
-      levyAmount = netAmount * levyRate;
-      serviceChargeAmount = netAmount * modelServiceChargePercent;
-      grandTotal = discountedGross + packingChargeAmount;
+      netAmount = roundMoney(discountedGross / combinedDivisor);
+      vatAmount = roundMoney(netAmount * vatRate);
+      levyAmount = roundMoney(netAmount * levyRate);
+      serviceChargeAmount = roundMoney(netAmount * modelServiceChargePercent);
+      grandTotal = roundMoney(discountedGross + packingChargeAmount);
     } else {
       netAmount = discountedGross;
-      vatAmount = netAmount * vatRate;
-      levyAmount = netAmount * levyRate;
-      serviceChargeAmount = netAmount * modelServiceChargePercent;
-      grandTotal = netAmount + vatAmount + levyAmount + serviceChargeAmount + packingChargeAmount;
+      vatAmount = roundMoney(netAmount * vatRate);
+      levyAmount = roundMoney(netAmount * levyRate);
+      serviceChargeAmount = roundMoney(netAmount * modelServiceChargePercent);
+      grandTotal = roundMoney(
+        netAmount + vatAmount + levyAmount + serviceChargeAmount + packingChargeAmount
+      );
     }
 
     const basePoints = Math.floor(grandTotal / 100);
@@ -1539,18 +1746,22 @@ export default function POSPage() {
     [drawers, selectedDrawerId]
   );
 
+  const splitTotalCovered = useMemo(() => {
+    const c = parseFloat(splitCashAmount) || 0;
+    const m = parseFloat(splitMpesaAmount) || 0;
+    return roundMoney(c + m);
+  }, [splitCashAmount, splitMpesaAmount]);
+
   const cashChangeDue = useMemo(() => {
     if (paymentMethod === 'Cash') {
       const tendered = parseFloat(cashTendered) || 0;
-      return Math.max(0, tendered - calculations.grandTotal);
+      return roundMoney(Math.max(0, tendered - calculations.grandTotal));
     }
     if (paymentMethod === 'Split') {
-      const c = parseFloat(splitCashAmount) || 0;
-      const m = parseFloat(splitMpesaAmount) || 0;
-      return Math.max(0, c + m - calculations.grandTotal);
+      return roundMoney(Math.max(0, splitTotalCovered - calculations.grandTotal));
     }
     return 0;
-  }, [paymentMethod, cashTendered, splitCashAmount, splitMpesaAmount, calculations.grandTotal]);
+  }, [paymentMethod, cashTendered, splitTotalCovered, calculations.grandTotal]);
 
   const isSafeDropWarning = useMemo(() => {
     if (!financialSettings?.enableSafeDropAlerts) return false;
@@ -1578,20 +1789,59 @@ export default function POSPage() {
     setCheckoutError(null);
     setStockAlert(null);
     setOfflineMpesaRef('');
+    setCheckoutIdempotencyKey(`POS-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`);
     setCashTendered(calculations.grandTotal.toFixed(2));
     setMpesaPhone(customerPhone || '');
-    setSplitCashAmount((calculations.grandTotal / 2).toFixed(2));
-    setSplitMpesaAmount((calculations.grandTotal / 2).toFixed(2));
+    const half = roundMoney(calculations.grandTotal / 2);
+    setSplitCashAmount(half.toFixed(2));
+    setSplitMpesaAmount(roundMoney(calculations.grandTotal - half).toFixed(2));
     setIsPaymentModalOpen(true);
   };
 
+  const canSubmitPayment = useMemo(() => {
+    if (isCheckingOut) return false;
+    if (paymentMethod === 'Cash') {
+      return (parseFloat(cashTendered) || 0) >= calculations.grandTotal;
+    }
+    if (paymentMethod === 'Split') {
+      return splitTotalCovered >= calculations.grandTotal;
+    }
+    return true;
+  }, [isCheckingOut, paymentMethod, cashTendered, calculations.grandTotal, splitTotalCovered]);
+
   const handleCompleteCheckout = async () => {
     if (isCheckingOut) return;
-    setIsCheckingOut(true);
     setCheckoutError(null);
+
+    // Pre-flight payment validation
+    if (paymentMethod === 'Cash' && (parseFloat(cashTendered) || 0) < calculations.grandTotal) {
+      setCheckoutError('Cash tendered is less than the total payable amount.');
+      return;
+    }
+    if (paymentMethod === 'Split' && splitTotalCovered < calculations.grandTotal) {
+      setCheckoutError(
+        `Split tender total (${currencySymbol} ${splitTotalCovered.toLocaleString()}) is less than Total Due.`
+      );
+      return;
+    }
+    if (
+      isOnline &&
+      (paymentMethod === 'M-Pesa' ||
+        (paymentMethod === 'Split' && (parseFloat(splitMpesaAmount) || 0) > 0))
+    ) {
+      const targetPhone = (mpesaPhone || customerPhone).trim();
+      if (!isValidKenyanPhone(targetPhone)) {
+        setCheckoutError('Enter a valid Kenyan M-Pesa phone number (07XXXXXXXX or 2547XXXXXXXX).');
+        return;
+      }
+    }
+
+    setIsCheckingOut(true);
 
     const tableObj = tables.find((t) => String(t.id) === selectedTableId);
     const expandedItems = expandCartForOrderApi(cart);
+    const authoritativeSerial =
+      activeBranch?.etimsDeviceSerial || financialSettings?.etimsDeviceSerial || null;
 
     const processOfflineFallback = async () => {
       const queued = await enqueueOfflineOrder({
@@ -1634,6 +1884,7 @@ export default function POSPage() {
       setCompletedOrder({
         orderNumber: `${queued.idempotencyKey.slice(0, 14)} (OFFLINE)`,
         isOfflineQueued: true,
+        paymentConfirmationStatus: 'QUEUED_OFFLINE',
         items: cart.map((item) => ({
           ...item,
           resolvedStation: getEffectiveItemStation(item).stationName,
@@ -1661,14 +1912,10 @@ export default function POSPage() {
         branchAddress: activeBranch?.address || '',
         branchPhone: activeBranch?.phone || business?.phone || '',
         kraPin: financialSettings?.taxPin || activeBranch?.kraPin || business?.kraPin || '',
-        etimsDeviceSerial:
-          activeBranch?.etimsDeviceSerial ||
-          (financialSettings as (FinancialSettings & { etimsDeviceSerial?: string }) | null)
-            ?.etimsDeviceSerial ||
-          'PENDING-SYNC',
+        etimsDeviceSerial: authoritativeSerial,
         footerMessage:
           'OFFLINE RECEIPT — Queued for automatic cloud sync & KRA eTIMS fiscalization.',
-        returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
+        returnPolicy: receiptTemplate?.returnPolicy || null,
         wifiDetails: receiptTemplate?.wifiDetails || null,
       });
 
@@ -1681,18 +1928,17 @@ export default function POSPage() {
       setIsPaymentModalOpen(false);
       setMobileTab('menu');
       setOfflineSyncBanner(
-        `Order queued locally (${updatedQueue.length} pending). Will auto-sync to PostgreSQL once online.`
+        `Order queued locally (${updatedQueue.length} pending). Will auto-sync once online.`
       );
     };
 
     try {
-      // Fast-path directly to local IndexedDB queue when browser is offline
       if (!isOnline || (typeof navigator !== 'undefined' && !navigator.onLine)) {
         await processOfflineFallback();
         return;
       }
 
-      // 0. Authoritative live database stock verification before taking payment
+      // 1. Authoritative live database stock verification
       await fetchApi('/api/v1/pos/validate-stock', {
         method: 'POST',
         body: JSON.stringify({
@@ -1704,22 +1950,14 @@ export default function POSPage() {
         }),
       });
 
-      // 1. Redeem Loyalty Reward if selected
-      if (selectedCustomer && selectedReward) {
-        await fetchApi('/api/v1/loyalty/rewards/redeem', {
-          method: 'POST',
-          body: JSON.stringify({
-            customerId: selectedCustomer.id,
-            rewardId: selectedReward.id,
-            notes: `Redeemed at POS Terminal (${activeBranch?.name || 'Outlet'})`,
-          }),
-        });
-      }
+      // 2. Commit Order FIRST with stable idempotencyKey (prevents duplicates on retry)
+      const idempKey =
+        checkoutIdempotencyKey || `POS-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
-      // 2. Post Order, Tender Settlement & Station Routing Manifest
       const result = await fetchApi('/api/v1/orders', {
         method: 'POST',
         body: JSON.stringify({
+          idempotencyKey: idempKey,
           branchId: activeBranch?.id,
           cashDrawerId: selectedDrawerId ? parseInt(selectedDrawerId, 10) : undefined,
           cashierShiftId: activeShift?.id,
@@ -1753,43 +1991,82 @@ export default function POSPage() {
         }),
       });
 
+      const authoritativeOrderNumber: string | undefined = result?.data?.orderNumber;
+      if (!authoritativeOrderNumber) {
+        throw new Error('Server did not return an authoritative order reference.');
+      }
+
+      // 3. Redeem Loyalty Reward ONLY AFTER order is safely persisted
+      let loyaltyWarning: string | null = null;
+      if (selectedCustomer && selectedReward) {
+        try {
+          await fetchApi('/api/v1/loyalty/rewards/redeem', {
+            method: 'POST',
+            body: JSON.stringify({
+              customerId: selectedCustomer.id,
+              rewardId: selectedReward.id,
+              orderId: result?.data?.id,
+              notes: `Redeemed on Order ${authoritativeOrderNumber} (${activeBranch?.name || 'Outlet'})`,
+            }),
+          });
+        } catch (rewardErr: unknown) {
+          loyaltyWarning = getErrorMessage(
+            rewardErr,
+            'Order saved, but loyalty reward redemption needs manual reconciliation.'
+          );
+        }
+      }
+
       if (activeServiceModel?.requiresTable && selectedTableId) {
         setTables((prev) =>
           prev.map((t) => (String(t.id) === selectedTableId ? { ...t, status: 'Occupied' } : t))
         );
       }
 
-      // 3. Trigger M-Pesa STK Push if M-Pesa was selected or split
+      // 4. Trigger M-Pesa STK Push and report explicit pending/failed state (never swallow errors)
+      let paymentConfirmationStatus: 'PAID' | 'PENDING_MPESA' | 'STK_FAILED' | 'CARD_PENDING' =
+        paymentMethod === 'Card' ? 'CARD_PENDING' : 'PAID';
+      let paymentStatusMessage: string | null = null;
+
       if (
-        (paymentMethod === 'M-Pesa' || paymentMethod === 'Split') &&
-        (customerPhone || mpesaPhone)
+        paymentMethod === 'M-Pesa' ||
+        (paymentMethod === 'Split' && (parseFloat(splitMpesaAmount) || 0) > 0)
       ) {
         const amountToPrompt =
           paymentMethod === 'Split'
             ? parseFloat(splitMpesaAmount)
             : calculations.grandTotal;
+        const targetPhone = (mpesaPhone || customerPhone).trim();
 
-        await fetchApi('/api/v1/payments/mpesa/stk-push', {
-          method: 'POST',
-          body: JSON.stringify({
-            phoneNumber: mpesaPhone || customerPhone,
-            amount: amountToPrompt,
-            accountReference:
-              result?.data?.orderNumber || `POS-${Date.now().toString().slice(-4)}`,
-            notes: `POS Tender for ${customerName || 'Guest'}`,
-          }),
-        }).catch(() => {});
+        try {
+          await fetchApi('/api/v1/payments/mpesa/stk-push', {
+            method: 'POST',
+            body: JSON.stringify({
+              phoneNumber: targetPhone,
+              amount: amountToPrompt,
+              accountReference: authoritativeOrderNumber,
+              orderId: result?.data?.id,
+              notes: `POS Tender for ${customerName || 'Guest'}`,
+            }),
+          });
+          paymentConfirmationStatus = 'PENDING_MPESA';
+          paymentStatusMessage = `M-Pesa STK Push sent to ${targetPhone} (${currencySymbol} ${amountToPrompt.toLocaleString()}). Awaiting customer PIN confirmation.`;
+        } catch (mpesaErr: unknown) {
+          paymentConfirmationStatus = 'STK_FAILED';
+          paymentStatusMessage = `Order ${authoritativeOrderNumber} recorded, but M-Pesa STK Push failed: ${getErrorMessage(mpesaErr, 'Gateway unreachable')}. Collect via Till / C2B reconciliation.`;
+        }
       }
 
       const dispatchedStations = Array.from(
         new Set(stationRoutingPreview.map((s) => s.stationName))
       );
 
-      const generatedReceipt = {
+      setCompletedOrder({
         ...(result?.data || {}),
-        orderNumber:
-          result?.data?.orderNumber ||
-          `INV-${Date.now().toString().slice(-6)}-${Math.floor(100 + Math.random() * 900)}`,
+        orderNumber: authoritativeOrderNumber,
+        paymentConfirmationStatus,
+        paymentStatusMessage,
+        loyaltyWarning,
         items: cart.map((item) => ({
           ...item,
           resolvedStation: getEffectiveItemStation(item).stationName,
@@ -1823,27 +2100,22 @@ export default function POSPage() {
         branchAddress: activeBranch?.address || '',
         branchPhone: activeBranch?.phone || business?.phone || '',
         kraPin: financialSettings?.taxPin || activeBranch?.kraPin || business?.kraPin || '',
-        etimsDeviceSerial:
-          activeBranch?.etimsDeviceSerial ||
-          (financialSettings as (FinancialSettings & { etimsDeviceSerial?: string }) | null)
-            ?.etimsDeviceSerial ||
-          'OSCU-SCU-2026-NBO',
+        etimsDeviceSerial: result?.data?.etimsDeviceSerial || authoritativeSerial,
         footerMessage: receiptTemplate?.footerMessage || 'Thank you for your business. Karibu tena!',
-        returnPolicy: receiptTemplate?.returnPolicy || 'Consumables cannot be returned.',
+        returnPolicy: receiptTemplate?.returnPolicy || null,
         wifiDetails: receiptTemplate?.wifiDetails || null,
-      };
+      });
 
-      setCompletedOrder(generatedReceipt);
       setCart([]);
+      setCheckoutIdempotencyKey('');
       setOrderTargetStation('AUTO');
       setAppliedPromo(null);
       setSelectedReward(null);
       setOrderDiscountPercent(0);
       setIsPaymentModalOpen(false);
       setMobileTab('menu');
-      loadInitialData(activeBranch?.id);
+      void loadInitialData(activeBranch?.id);
     } catch (error: unknown) {
-      // Automatic failover to IndexedDB queue on WAN drop or upstream DB outage
       if (isOfflineOrNetworkError(error)) {
         try {
           if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1865,22 +2137,26 @@ export default function POSPage() {
       setCheckoutError(
         getErrorMessage(error, 'POS Checkout transaction encountered an error.')
       );
-      loadInitialData(activeBranch?.id);
+      void loadInitialData(activeBranch?.id);
     } finally {
       setIsCheckingOut(false);
     }
   };
 
   const handlePrintReceipt = () => {
+    if (isPrinting) return;
     const receiptElement = receiptPrintRef.current;
     if (!receiptElement) {
       window.print();
       return;
     }
 
-    const is80mm = receiptTemplate?.paperWidth !== '58MM';
-    const paperWidth = is80mm ? '80mm' : '58mm';
-    const printableWidth = is80mm ? '72mm' : '48mm';
+    setIsPrinting(true);
+    const widthSetting = receiptTemplate?.paperWidth || '80MM';
+    const isA4 = widthSetting === 'A4_INVOICE';
+    const is58mm = widthSetting === '58MM';
+    const paperWidth = isA4 ? '210mm' : is58mm ? '58mm' : '80mm';
+    const printableWidth = isA4 ? '190mm' : is58mm ? '48mm' : '72mm';
 
     const printFrame = document.createElement('iframe');
     printFrame.style.position = 'fixed';
@@ -1893,7 +2169,11 @@ export default function POSPage() {
     document.body.appendChild(printFrame);
 
     const frameDoc = printFrame.contentWindow?.document;
-    if (!frameDoc) return;
+    if (!frameDoc) {
+      document.body.removeChild(printFrame);
+      setIsPrinting(false);
+      return;
+    }
 
     frameDoc.open();
     frameDoc.write(`
@@ -1903,7 +2183,7 @@ export default function POSPage() {
           <meta charset="utf-8" />
           <title>Receipt - ${completedOrder?.orderNumber || 'Slip'}</title>
           <style>
-            @page { size: ${paperWidth} auto; margin: 0mm !important; }
+            @page { size: ${paperWidth} auto; margin: ${isA4 ? '10mm' : '0mm'} !important; }
             html, body {
               margin: 0 !important;
               padding: 0 !important;
@@ -1913,15 +2193,15 @@ export default function POSPage() {
             }
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-              font-size: ${is80mm ? '12px' : '10px'};
+              font-size: ${isA4 ? '13px' : is58mm ? '10px' : '12px'};
               line-height: 1.35;
               font-weight: 700;
               color: #000000 !important;
-              padding: 2mm 1mm 4mm 1mm !important;
+              padding: ${isA4 ? '6mm' : '2mm 1mm 4mm 1mm'} !important;
               box-sizing: border-box;
             }
             .header-title {
-              font-size: ${is80mm ? '15px' : '13px'};
+              font-size: ${isA4 ? '18px' : is58mm ? '13px' : '15px'};
               font-weight: 900;
               text-align: center;
               text-transform: uppercase;
@@ -1959,25 +2239,29 @@ export default function POSPage() {
       printFrame.contentWindow?.focus();
       printFrame.contentWindow?.print();
       setTimeout(() => {
-        document.body.removeChild(printFrame);
+        if (document.body.contains(printFrame)) {
+          document.body.removeChild(printFrame);
+        }
+        setIsPrinting(false);
       }, 1000);
     }, 250);
   };
 
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] gap-3 font-sans">
-      {/* 1. ENTERPRISE TERMINAL HEADER: BRANCH, DRAWER, SHIFT & OFFLINE TELEMETRY */}
+      {/* 1. ENTERPRISE TERMINAL HEADER */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           {/* Branch Outlet Switcher */}
           <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl">
             <Building2 size={15} className="text-servora-core shrink-0" />
             <div>
               <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
-                Active Outlet
+                {business?.name || 'Active Outlet'}
               </span>
               {branches.length > 1 ? (
                 <select
+                  aria-label="Active Branch"
                   value={activeBranch?.id || ''}
                   onChange={(e) => handleBranchSwitch(e.target.value)}
                   disabled={!isOnline}
@@ -2006,6 +2290,7 @@ export default function POSPage() {
               </span>
               {drawers.length > 0 ? (
                 <select
+                  aria-label="Cash Drawer"
                   value={selectedDrawerId}
                   onChange={(e) => setSelectedDrawerId(e.target.value)}
                   className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
@@ -2026,6 +2311,18 @@ export default function POSPage() {
               )}
             </div>
           </div>
+
+          {currentUser && (
+            <div className="hidden sm:flex items-center gap-1.5 bg-servora-pale border border-servora-core/15 px-3 py-1.5 rounded-xl text-xs">
+              <UserCheck size={14} className="text-servora-core shrink-0" />
+              <span className="font-bold text-servora-navy">
+                {currentUser.fullName || currentUser.firstName}
+              </span>
+              <span className="text-[10px] font-mono uppercase text-servora-deepTeal">
+                ({currentUser.role})
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right Side: Network Pill, Offline Queue Sync, Shift Status & Refresh */}
@@ -2058,7 +2355,7 @@ export default function POSPage() {
           {isSafeDropWarning && (
             <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold animate-pulse">
               <AlertTriangle size={13} className="text-amber-600" />
-              <span>Safe Drop Threshold Reached</span>
+              <span>Safe Drop Alert</span>
             </div>
           )}
 
@@ -2067,7 +2364,7 @@ export default function POSPage() {
               href="/cash-management/shifts"
               className="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors flex items-center gap-1.5"
             >
-              <Clock size={13} /> No Active Shift &bull; Open Till Float &rarr;
+              <Clock size={13} /> Open Shift Float &rarr;
             </Link>
           ) : (
             <Link
@@ -2076,7 +2373,7 @@ export default function POSPage() {
               title="Blind Custody Active — Manage Shift"
             >
               <Unlock size={13} className="text-emerald-600" />
-              <span>Shift #{activeShift.id} &bull; Active</span>
+              <span>Shift #{activeShift.id}</span>
             </Link>
           )}
 
@@ -2155,7 +2452,7 @@ export default function POSPage() {
               : 'text-gray-500 hover:text-servora-navy'
           }`}
         >
-          <ShoppingCart size={15} /> Current Order
+          <ShoppingCart size={15} /> Active Order
           {totalItemsCount > 0 && (
             <span className="bg-servora-core text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
               {totalItemsCount}
@@ -2166,7 +2463,7 @@ export default function POSPage() {
 
       {/* MAIN SPLIT-VIEW VIEWPORT */}
       <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
-        {/* LEFT COLUMN: ITEM CATALOG & STATION LOOKUP */}
+        {/* LEFT COLUMN: VISUAL MENU CATALOG */}
         <div
           className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
             mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
@@ -2181,7 +2478,8 @@ export default function POSPage() {
                 />
                 <input
                   type="text"
-                  placeholder="Scan SKU or search dishes, drinks, combos..."
+                  aria-label="Search menu catalog"
+                  placeholder="Scan SKU or search dishes, drinks, categories, combos..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
@@ -2192,6 +2490,7 @@ export default function POSPage() {
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
                   <ChefHat size={13} className="text-servora-core" />
                   <select
+                    aria-label="Filter by kitchen station"
                     value={selectedStationFilter}
                     onChange={(e) => setSelectedStationFilter(e.target.value)}
                     className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
@@ -2210,6 +2509,7 @@ export default function POSPage() {
                 <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
                   <Utensils size={13} className="text-servora-core" />
                   <select
+                    aria-label="Assign dining table"
                     value={selectedTableId}
                     onChange={(e) => setSelectedTableId(e.target.value)}
                     className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
@@ -2256,126 +2556,49 @@ export default function POSPage() {
             </div>
           </div>
 
-          {/* Product & Combo Cards Grid with Live Stock & Modifier Indicators */}
+          {/* Visual Menu Cards Grid */}
           <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
             {isLoading ? (
-              <div className="h-full flex items-center justify-center text-xs text-servora-deepTeal animate-pulse">
-                Synchronizing product catalog...
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-2xl border border-gray-200 bg-white overflow-hidden animate-pulse"
+                  >
+                    <div className="aspect-[4/3] bg-gray-200" />
+                    <div className="p-3 space-y-2">
+                      <div className="h-3 bg-gray-200 rounded w-3/4" />
+                      <div className="h-3 bg-gray-100 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400">
                 <Utensils size={40} className="mb-2 opacity-25" />
                 <p className="text-sm font-bold text-servora-navy">No products available</p>
                 <p className="text-xs text-gray-400">
-                  Refine search criteria or check menu configuration.
+                  Refine search criteria or check Menu Catalog Master configuration.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
                 {filteredItems.map((item) => {
                   const { remaining } = getItemRemainingSellable(item);
-                  const isOutOfStock = remaining !== null && remaining <= 0;
                   const resolvedStation = getEffectiveItemStation(item);
                   const hasModifiers =
                     !item.isCombo && (itemModifierGroupsMap[Number(item.id)]?.length ?? 0) > 0;
 
                   return (
-                    <button
+                    <PosCatalogCard
                       key={item.id}
-                      type="button"
-                      onClick={() => addToCart(item)}
-                      disabled={isOutOfStock}
-                      className={`flex flex-col text-left p-3 rounded-xl border shadow-xs transition-all h-32 justify-between group ${
-                        isOutOfStock
-                          ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
-                          : item.isCombo
-                            ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-97 cursor-pointer'
-                            : 'bg-white border-gray-200 hover:border-servora-core/40 hover:shadow-md active:scale-97 cursor-pointer'
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-1 mb-1">
-                          <span
-                            className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md truncate inline-flex items-center gap-1 ${
-                              item.isCombo
-                                ? 'bg-servora-core text-white'
-                                : 'text-servora-deepTeal bg-slate-100'
-                            }`}
-                          >
-                            {item.isCombo ? (
-                              <>
-                                <ShoppingBasket size={9} /> Combo
-                              </>
-                            ) : (
-                              item.category
-                            )}
-                          </span>
-                          {isOutOfStock ? (
-                            <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded-md shrink-0">
-                              Out of Stock
-                            </span>
-                          ) : remaining !== null && remaining <= 5 ? (
-                            <span className="text-[9px] font-bold bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-md shrink-0">
-                              {remaining} left
-                            </span>
-                          ) : remaining !== null ? (
-                            <span className="text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded-md shrink-0">
-                              {remaining} avail
-                            </span>
-                          ) : null}
-                        </div>
-                        <span className="text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
-                          {item.name}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1 pt-1 border-t border-gray-50">
-                        <div className="flex items-center justify-between gap-1 text-[9.5px] font-mono text-gray-500">
-                          <div className="flex items-center gap-1 truncate">
-                            {item.isCombo && item.comboItems ? (
-                              <span className="truncate text-servora-deepTeal font-sans">
-                                {item.comboItems
-                                  .map((c) => `${c.quantity}x ${c.itemName}`)
-                                  .join(' + ')}
-                              </span>
-                            ) : (
-                              <>
-                                <ChefHat size={10} className="text-servora-core shrink-0" />
-                                <span className="truncate">{resolvedStation.stationName}</span>
-                              </>
-                            )}
-                          </div>
-                          {hasModifiers && (
-                            <span
-                              title="Customizable options available"
-                              className="inline-flex items-center gap-0.5 text-[9px] font-sans font-bold text-purple-700 bg-purple-50 px-1 py-0.2 rounded shrink-0"
-                            >
-                              <SlidersHorizontal size={8} /> Opts
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex justify-between items-center gap-1">
-                          <div className="flex items-baseline gap-1.5 min-w-0">
-                            <span className="text-xs font-mono font-bold text-servora-core">
-                              {currencySymbol} {item.price.toLocaleString()}
-                            </span>
-                            {item.activePricingRule &&
-                              item.originalPrice !== undefined &&
-                              item.originalPrice !== item.price && (
-                                <span
-                                  title={item.activePricingRule.ruleName}
-                                  className="text-[10px] font-mono text-gray-400 line-through truncate"
-                                >
-                                  {item.originalPrice.toLocaleString()}
-                                </span>
-                              )}
-                          </div>
-                          <div className="w-5 h-5 rounded-lg bg-slate-50 border border-gray-200 flex items-center justify-center text-gray-400 group-hover:bg-servora-core group-hover:text-white transition-colors shrink-0">
-                            <Plus size={11} />
-                          </div>
-                        </div>
-                      </div>
-                    </button>
+                      item={item}
+                      currencySymbol={currencySymbol}
+                      remaining={remaining}
+                      stationName={resolvedStation.stationName}
+                      hasModifiers={hasModifiers}
+                      onAdd={addToCart}
+                    />
                   );
                 })}
               </div>
@@ -2383,13 +2606,13 @@ export default function POSPage() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: ACTIVE CHECK, STATION ROUTING, CRM LOYALTY & FISCAL LEDGER */}
+        {/* RIGHT COLUMN: ACTIVE ORDER, KDS ROUTING, CRM & FISCAL LEDGER */}
         <div
-          className={`w-full lg:w-[450px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
+          className={`w-full lg:w-[440px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
             mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
           }`}
         >
-          {/* Dynamic Service Model Revenue Center Selectors */}
+          {/* Service Model Selector */}
           <div className="flex p-1.5 bg-slate-50 border-b border-gray-200 shrink-0 gap-1 overflow-x-auto scrollbar-hide">
             {serviceModels.length > 0 ? (
               serviceModels.map((model) => {
@@ -2416,13 +2639,14 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Order-Wide KDS Prep Station Routing Bar */}
+          {/* KDS Prep Station Routing Bar */}
           {kitchenStations.length > 0 && (
             <div className="px-3 py-2 bg-blue-50/40 border-b border-gray-200 flex items-center justify-between gap-2 text-xs shrink-0">
               <span className="font-bold text-servora-navy flex items-center gap-1.5">
                 <ChefHat size={13} className="text-servora-core" /> KDS Routing:
               </span>
               <select
+                aria-label="Order KDS routing"
                 value={orderTargetStation}
                 onChange={(e) => setOrderTargetStation(e.target.value)}
                 className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
@@ -2528,6 +2752,7 @@ export default function POSPage() {
                   <div className="flex items-center gap-1.5">
                     <Gift size={13} className="text-amber-700 shrink-0" />
                     <select
+                      aria-label="Redeem loyalty reward"
                       value={selectedReward?.id || ''}
                       onChange={(e) => {
                         const rId = parseInt(e.target.value, 10);
@@ -2586,6 +2811,7 @@ export default function POSPage() {
                     type="number"
                     min={1}
                     max={50}
+                    aria-label="Guest count"
                     value={guestCount}
                     onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
                     className="w-8 bg-transparent text-xs font-bold text-servora-navy focus:outline-none font-mono text-center"
@@ -2596,16 +2822,21 @@ export default function POSPage() {
 
               <div
                 className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2"
-                title={`Custodian Max Discount: ${maxAllowedDiscount}%`}
+                title={
+                  appliedPromo
+                    ? 'Manual discount disabled while promo code is active'
+                    : `Custodian Max Discount: ${maxAllowedDiscount}%`
+                }
               >
-                {maxAllowedDiscount === 0 ? (
+                {maxAllowedDiscount === 0 || appliedPromo ? (
                   <Lock size={11} className="text-gray-400" />
                 ) : (
                   <Percent size={11} className="text-gray-400" />
                 )}
                 <select
+                  aria-label="Manual discount percentage"
                   value={orderDiscountPercent}
-                  disabled={maxAllowedDiscount === 0}
+                  disabled={maxAllowedDiscount === 0 || Boolean(appliedPromo)}
                   onChange={(e) => setOrderDiscountPercent(Number(e.target.value))}
                   className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-50"
                 >
@@ -2637,7 +2868,12 @@ export default function POSPage() {
                   <button
                     type="button"
                     onClick={handleApplyPromoCode}
-                    disabled={!promoCodeInput.trim() || cart.length === 0 || isValidatingPromo || !isOnline}
+                    disabled={
+                      !promoCodeInput.trim() ||
+                      cart.length === 0 ||
+                      isValidatingPromo ||
+                      !isOnline
+                    }
                     className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-servora-navy font-bold rounded-lg text-[11px] disabled:opacity-40 cursor-pointer"
                   >
                     {isValidatingPromo ? '...' : 'Apply'}
@@ -2662,7 +2898,7 @@ export default function POSPage() {
             {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
           </div>
 
-          {/* Cart Itemized List with Selected Modifiers & Stock-Guarded Controls */}
+          {/* Cart Itemized List */}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {cart.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -2734,7 +2970,7 @@ export default function POSPage() {
                           type="button"
                           onClick={() => updateQuantity(item.cartItemId, -1)}
                           aria-label={`Decrease quantity of ${item.name}`}
-                          className="p-1 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
+                          className="p-1.5 text-gray-500 hover:text-rose-600 rounded-lg transition-colors cursor-pointer"
                         >
                           {item.quantity === 1 ? <Trash2 size={12} /> : <Minus size={12} />}
                         </button>
@@ -2747,7 +2983,7 @@ export default function POSPage() {
                           disabled={atStockLimit}
                           title={atStockLimit ? 'Maximum available stock reached' : 'Add one more'}
                           aria-label={`Increase quantity of ${item.name}`}
-                          className="p-1 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="p-1.5 text-gray-500 hover:text-servora-core rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <Plus size={12} />
                         </button>
@@ -2756,6 +2992,7 @@ export default function POSPage() {
 
                     <div className="flex items-center gap-1.5 pt-1 border-t border-gray-100">
                       <select
+                        aria-label={`Station routing for ${item.name}`}
                         value={
                           orderTargetStation !== 'AUTO'
                             ? orderTargetStation
@@ -2770,7 +3007,6 @@ export default function POSPage() {
                             )
                           );
                         }}
-                        title="Redirect this item to a specific kitchen/bar station"
                         className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${
                           resolvedSt.isRedirected
                             ? 'bg-amber-50 border-amber-300 text-amber-800'
@@ -2809,7 +3045,7 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Dynamic Financial Summary & Action Buttons */}
+          {/* Dynamic Financial Summary & Touch-Safe Action Buttons */}
           <div className="p-3.5 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2">
             <div className="space-y-1 text-xs">
               <div className="flex justify-between text-gray-500">
@@ -2903,17 +3139,21 @@ export default function POSPage() {
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
-                onClick={clearCart}
+                onClick={handleClearTicket}
                 disabled={cart.length === 0}
-                className="py-2.5 text-xs font-bold text-gray-600 bg-white border border-gray-200 rounded-xl hover:bg-gray-100 hover:text-rose-600 transition-colors disabled:opacity-40 cursor-pointer"
+                className={`py-2.5 text-xs font-bold rounded-xl border transition-colors disabled:opacity-40 cursor-pointer ${
+                  confirmClearArmed
+                    ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
+                    : 'text-gray-600 bg-white border-gray-200 hover:bg-gray-100 hover:text-rose-600'
+                }`}
               >
-                Clear Ticket
+                {confirmClearArmed ? 'Tap Again to Clear' : 'Clear Ticket'}
               </button>
               <button
                 type="button"
                 onClick={handleOpenPayment}
                 disabled={cart.length === 0}
-                className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-97 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
               >
                 <CreditCard size={14} />
                 Charge {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
@@ -3105,7 +3345,7 @@ export default function POSPage() {
               <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs font-semibold flex items-center gap-2">
                 <WifiOff size={14} className="text-amber-700 shrink-0" />
                 <span>
-                  Offline Survivability Active — Order will be queued locally and reconciled automatically on reconnect.
+                  Offline Survivability Active — Order will queue locally and reconcile automatically on reconnect.
                 </span>
               </div>
             )}
@@ -3162,7 +3402,10 @@ export default function POSPage() {
                 <button
                   key={method}
                   type="button"
-                  onClick={() => setPaymentMethod(method)}
+                  onClick={() => {
+                    setCheckoutError(null);
+                    setPaymentMethod(method);
+                  }}
                   className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                     paymentMethod === method
                       ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
@@ -3204,7 +3447,7 @@ export default function POSPage() {
                 <span className="font-bold text-emerald-800 flex items-center gap-1.5">
                   <Smartphone size={13} />
                   {isOnline
-                    ? 'Instant Daraja STK Push Validation'
+                    ? 'Daraja STK Push Initiation (Awaits Guest PIN)'
                     : 'Offline M-Pesa Confirmation Reference'}
                 </span>
                 {isOnline ? (
@@ -3224,6 +3467,17 @@ export default function POSPage() {
                     className="w-full px-3 py-2 bg-white border border-emerald-300 rounded-lg font-mono uppercase font-bold text-xs focus:outline-none"
                   />
                 )}
+              </div>
+            )}
+
+            {paymentMethod === 'Card' && (
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs text-servora-navy space-y-1">
+                <span className="font-bold flex items-center gap-1.5">
+                  <CreditCard size={13} className="text-servora-core" /> Card Terminal (PDQ) Settlement
+                </span>
+                <p className="text-[11px] text-gray-600">
+                  Confirm approval on your physical PDQ terminal before authorizing the receipt.
+                </p>
               </div>
             )}
 
@@ -3256,10 +3510,22 @@ export default function POSPage() {
                     />
                   </div>
                 </div>
+                <div className="flex justify-between text-[11px] font-mono">
+                  <span className="text-gray-600">Combined Tender:</span>
+                  <span
+                    className={`font-bold ${
+                      splitTotalCovered >= calculations.grandTotal
+                        ? 'text-emerald-700'
+                        : 'text-rose-600'
+                    }`}
+                  >
+                    {currencySymbol} {splitTotalCovered.toLocaleString()}
+                  </span>
+                </div>
                 {isOnline ? (
                   <input
                     type="text"
-                    placeholder="M-Pesa Mobile Number"
+                    placeholder="M-Pesa Mobile Number (07...)"
                     value={mpesaPhone}
                     onChange={(e) => setMpesaPhone(e.target.value)}
                     className="w-full px-2.5 py-1.5 bg-white border border-purple-300 rounded-lg font-mono text-xs focus:outline-none"
@@ -3279,10 +3545,7 @@ export default function POSPage() {
             <button
               type="button"
               onClick={handleCompleteCheckout}
-              disabled={
-                isCheckingOut ||
-                (paymentMethod === 'Cash' && parseFloat(cashTendered) < calculations.grandTotal)
-              }
+              disabled={!canSubmitPayment}
               className="w-full py-3 bg-servora-core hover:bg-blue-700 text-white font-bold rounded-xl shadow-xs transition-all flex justify-center items-center gap-2 text-xs disabled:opacity-40 cursor-pointer"
             >
               {isCheckingOut ? (
@@ -3306,9 +3569,31 @@ export default function POSPage() {
           <div
             id="thermal-receipt-printable"
             className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
-              receiptTemplate?.paperWidth === '58MM' ? 'max-w-[280px]' : 'max-w-[340px]'
+              receiptTemplate?.paperWidth === '58MM'
+                ? 'max-w-[280px]'
+                : receiptTemplate?.paperWidth === 'A4_INVOICE'
+                  ? 'max-w-[460px]'
+                  : 'max-w-[340px]'
             }`}
           >
+            {/* Non-printable payment status alert (M-Pesa pending / STK failed / Loyalty warning) */}
+            {completedOrder.paymentStatusMessage && (
+              <div
+                className={`p-2.5 rounded-xl border font-sans text-[11px] font-semibold print:hidden ${
+                  completedOrder.paymentConfirmationStatus === 'STK_FAILED'
+                    ? 'bg-rose-50 border-rose-200 text-rose-800'
+                    : 'bg-amber-50 border-amber-200 text-amber-900'
+                }`}
+              >
+                {completedOrder.paymentStatusMessage}
+              </div>
+            )}
+            {completedOrder.loyaltyWarning && (
+              <div className="p-2.5 rounded-xl border bg-amber-50 border-amber-200 text-amber-900 font-sans text-[11px] font-semibold print:hidden">
+                {completedOrder.loyaltyWarning}
+              </div>
+            )}
+
             <div ref={receiptPrintRef} className="space-y-1 w-full text-black">
               <div className="text-center space-y-0.5">
                 {receiptTemplate?.showLogo !== false && (
@@ -3380,6 +3665,7 @@ export default function POSPage() {
                     <div className="flex-between text-[11px]">
                       <span className="font-bold max-w-[70%] break-words">
                         {i.quantity}x {i.name}
+                        {receiptTemplate?.showItemSku && i.sku ? ` [${i.sku}]` : ''}
                       </span>
                       <span className="font-bold whitespace-nowrap">
                         {(i.price * i.quantity).toLocaleString()}
@@ -3506,7 +3792,12 @@ export default function POSPage() {
               <div className="space-y-0.5 text-[11px]">
                 <div className="flex-between font-bold">
                   <span>Tender:</span>
-                  <span className="uppercase">{completedOrder.paymentMethod}</span>
+                  <span className="uppercase">
+                    {completedOrder.paymentMethod}
+                    {completedOrder.paymentConfirmationStatus === 'PENDING_MPESA'
+                      ? ' (PENDING)'
+                      : ''}
+                  </span>
                 </div>
                 {completedOrder.cashChangeDue > 0 && (
                   <div className="flex-between font-bold">
@@ -3536,7 +3827,7 @@ export default function POSPage() {
                 )}
               </div>
 
-              {receiptTemplate?.showEtimsQrCode !== false && (
+              {receiptTemplate?.showEtimsQrCode !== false && completedOrder.etimsDeviceSerial && (
                 <div className="text-center pt-2 space-y-1">
                   <div className="w-16 h-16 mx-auto bg-gray-100 border border-gray-300 rounded flex items-center justify-center">
                     <QrCode size={48} className="text-black" />
@@ -3546,11 +3837,9 @@ export default function POSPage() {
                       ? 'PENDING KRA eTIMS SYNC'
                       : 'KRA eTIMS FISCAL INVOICE'}
                   </p>
-                  {completedOrder.etimsDeviceSerial && (
-                    <p className="text-[8px] text-gray-700">
-                      SCU: {completedOrder.etimsDeviceSerial}
-                    </p>
-                  )}
+                  <p className="text-[8px] text-gray-700">
+                    SCU: {completedOrder.etimsDeviceSerial}
+                  </p>
                 </div>
               )}
 
@@ -3568,10 +3857,11 @@ export default function POSPage() {
             <div className="flex gap-2 pt-2 font-sans print:hidden">
               <button
                 type="button"
+                disabled={isPrinting}
                 onClick={handlePrintReceipt}
-                className="flex-1 py-2.5 bg-servora-navy text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                className="flex-1 py-2.5 bg-servora-navy text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
               >
-                <Printer size={14} /> Print Receipt
+                <Printer size={14} /> {isPrinting ? 'Printing...' : 'Print Receipt'}
               </button>
               <button
                 type="button"

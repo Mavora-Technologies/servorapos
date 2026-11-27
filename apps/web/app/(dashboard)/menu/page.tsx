@@ -23,6 +23,8 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
+import MenuItemImageUploader from '@/components/menu/MenuItemImageUploader';
+import { getOptimizedMenuImageUrl, cleanupOrphanedUpload } from '@/lib/cloudinary';
 
 type StockTrackingType = 'RECIPE' | 'STOCKED_PRODUCT' | 'COMPOSITE' | 'NON_TRACKED';
 
@@ -90,6 +92,10 @@ interface MenuItemRecord {
   isTaxInclusive: boolean;
   isAvailable: boolean;
   imageUrl: string | null;
+  imagePublicId?: string | null;
+  imageOriginalFilename?: string | null;
+  imageMimeType?: string | null;
+  imageFileSize?: number | null;
 }
 
 interface InventoryOption {
@@ -155,6 +161,14 @@ export default function AdvancedMenuManagementPage() {
   const [kitchenStation, setKitchenStation] = useState('MAIN_KITCHEN');
   const [prepTimeMinutes, setPrepTimeMinutes] = useState('15');
   const [isAvailable, setIsAvailable] = useState(true);
+
+  // Cloudinary Image Metadata State
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imagePublicId, setImagePublicId] = useState<string | null>(null);
+  const [imageOriginalFilename, setImageOriginalFilename] = useState<string | null>(null);
+  const [imageMimeType, setImageMimeType] = useState<string | null>(null);
+  const [imageFileSize, setImageFileSize] = useState<number | null>(null);
+  const [unsavedUploadedPublicIds, setUnsavedUploadedPublicIds] = useState<string[]>([]);
 
   // Inventory, Raw Material & Modifier Linkage Fields
   const [stockTrackingType, setStockTrackingType] = useState<StockTrackingType>('RECIPE');
@@ -260,6 +274,8 @@ export default function AdvancedMenuManagementPage() {
 
   const openItemModal = (item?: MenuItemRecord) => {
     setModalError(null);
+    setUnsavedUploadedPublicIds([]);
+
     if (item) {
       setEditingItem(item);
       setItemName(item.name);
@@ -270,6 +286,11 @@ export default function AdvancedMenuManagementPage() {
       setKitchenStation(item.kitchenStation || 'MAIN_KITCHEN');
       setPrepTimeMinutes(String(item.prepTimeMinutes ?? 15));
       setIsAvailable(item.isAvailable);
+      setImageUrl(item.imageUrl ?? null);
+      setImagePublicId(item.imagePublicId ?? null);
+      setImageOriginalFilename(item.imageOriginalFilename ?? null);
+      setImageMimeType(item.imageMimeType ?? null);
+      setImageFileSize(item.imageFileSize ?? null);
       setStockTrackingType(item.stockTrackingType || 'RECIPE');
       setDirectInventoryItemId(
         item.directInventoryItemId ? String(item.directInventoryItemId) : ''
@@ -295,12 +316,25 @@ export default function AdvancedMenuManagementPage() {
       setKitchenStation('MAIN_KITCHEN');
       setPrepTimeMinutes('15');
       setIsAvailable(true);
+      setImageUrl(null);
+      setImagePublicId(null);
+      setImageOriginalFilename(null);
+      setImageMimeType(null);
+      setImageFileSize(null);
       setStockTrackingType('RECIPE');
       setDirectInventoryItemId('');
       setRecipeLines([]);
       setSelectedModifierGroupIds([]);
     }
     setIsItemModalOpen(true);
+  };
+
+  const handleCloseItemModal = () => {
+    unsavedUploadedPublicIds.forEach((pid) => {
+      void cleanupOrphanedUpload(pid);
+    });
+    setUnsavedUploadedPublicIds([]);
+    setIsItemModalOpen(false);
   };
 
   const addRecipeLine = () => {
@@ -390,6 +424,11 @@ export default function AdvancedMenuManagementPage() {
         recipeIngredients: sanitizedRecipeLines,
         modifierGroupIds: selectedModifierGroupIds,
         isAvailable,
+        imageUrl,
+        imagePublicId,
+        imageOriginalFilename,
+        imageMimeType,
+        imageFileSize,
       };
 
       if (editingItem) {
@@ -397,7 +436,7 @@ export default function AdvancedMenuManagementPage() {
           method: 'PUT',
           body: JSON.stringify(payload),
         });
-        setStatusBanner(`Updated menu item "${itemName.trim()}", inventory, and modifier links.`);
+        setStatusBanner(`Updated menu item "${itemName.trim()}", image, inventory, and modifier links.`);
       } else {
         await fetchApi('/api/v1/menu/items', {
           method: 'POST',
@@ -405,6 +444,14 @@ export default function AdvancedMenuManagementPage() {
         });
         setStatusBanner(`Published menu item "${itemName.trim()}" to POS catalog.`);
       }
+
+      // Clean up any intermediate uploads from this modal session that were replaced before saving
+      unsavedUploadedPublicIds
+        .filter((pid) => pid !== imagePublicId)
+        .forEach((pid) => {
+          void cleanupOrphanedUpload(pid);
+        });
+      setUnsavedUploadedPublicIds([]);
 
       setIsItemModalOpen(false);
       await loadMenuData();
@@ -567,7 +614,7 @@ export default function AdvancedMenuManagementPage() {
         <div>
           <h1 className="text-xl font-bold text-servora-navy">Advanced Menu &amp; POS Catalog</h1>
           <p className="text-servora-deepTeal text-xs mt-1">
-            Configure POS pricing, kitchen station routing, raw-material BOMs, and attached modifier groups.
+            Configure POS pricing, product photography, kitchen station routing, raw-material BOMs, and attached modifier groups.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -726,6 +773,7 @@ export default function AdvancedMenuManagementPage() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50 text-servora-deepTeal uppercase tracking-wider border-b border-gray-100 text-[11px] font-bold">
+                    <th scope="col" className="p-4 w-16">Image</th>
                     <th scope="col" className="p-4">Item Name</th>
                     <th scope="col" className="p-4">Category &amp; Station</th>
                     <th scope="col" className="p-4">Inventory &amp; Modifiers</th>
@@ -735,59 +783,82 @@ export default function AdvancedMenuManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-servora-navy">
-                  {filteredItems.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-4">
-                        <div className="font-bold text-servora-navy">{item.name}</div>
-                        {item.sku && (
-                          <div className="text-[10px] text-gray-400 font-mono">SKU: {item.sku}</div>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <div className="text-servora-deepTeal font-semibold">{item.category}</div>
-                        <span className="inline-block mt-0.5 bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-mono">
-                          {item.kitchenStation || 'MAIN_KITCHEN'}
-                        </span>
-                      </td>
-                      <td className="p-4">{renderInventoryLinkCell(item)}</td>
-                      <td className="p-4 text-right font-mono font-bold text-servora-core">
-                        KES {item.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="p-4">
-                        {item.isAvailable ? (
-                          <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
-                            <CheckCircle2 size={11} /> Active
+                  {filteredItems.map((item) => {
+                    const thumbSrc = getOptimizedMenuImageUrl(item.imageUrl, 'thumb');
+
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-4 w-16">
+                          <div className="w-12 h-12 rounded-xl overflow-hidden bg-servora-pale border border-gray-200 flex items-center justify-center shrink-0">
+                            {thumbSrc ? (
+                              <img
+                                src={thumbSrc}
+                                alt={item.name}
+                                loading="lazy"
+                                decoding="async"
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <UtensilsCrossed size={16} className="text-servora-deepTeal/40" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <div className="font-bold text-servora-navy">{item.name}</div>
+                          {item.sku && (
+                            <div className="text-[10px] text-gray-400 font-mono">
+                              SKU: {item.sku}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <div className="text-servora-deepTeal font-semibold">
+                            {item.category}
+                          </div>
+                          <span className="inline-block mt-0.5 bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[10px] font-mono">
+                            {item.kitchenStation || 'MAIN_KITCHEN'}
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
-                            <XCircle size={11} /> Hidden
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => openItemModal(item)}
-                            title="Edit Menu Item, Inventory & Modifiers"
-                            aria-label={`Edit ${item.name}`}
-                            className="p-1.5 text-gray-500 hover:text-servora-core hover:bg-servora-pale rounded-lg transition-colors"
-                          >
-                            <Edit3 size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPendingDeleteItem(item)}
-                            title="Delete Menu Item"
-                            aria-label={`Delete ${item.name}`}
-                            className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="p-4">{renderInventoryLinkCell(item)}</td>
+                        <td className="p-4 text-right font-mono font-bold text-servora-core">
+                          KES {item.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="p-4">
+                          {item.isAvailable ? (
+                            <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
+                              <CheckCircle2 size={11} /> Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-semibold">
+                              <XCircle size={11} /> Hidden
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => openItemModal(item)}
+                              title="Edit Menu Item, Image, Inventory & Modifiers"
+                              aria-label={`Edit ${item.name}`}
+                              className="p-1.5 text-gray-500 hover:text-servora-core hover:bg-servora-pale rounded-lg transition-colors"
+                            >
+                              <Edit3 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingDeleteItem(item)}
+                              title="Delete Menu Item"
+                              aria-label={`Delete ${item.name}`}
+                              className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -795,7 +866,7 @@ export default function AdvancedMenuManagementPage() {
         </div>
       </div>
 
-      {/* CREATE / EDIT MENU ITEM MODAL WITH INVENTORY & MODIFIER GROUP LINKAGE */}
+      {/* CREATE / EDIT MENU ITEM MODAL WITH IMAGE UPLOAD, INVENTORY & MODIFIER GROUP LINKAGE */}
       {isItemModalOpen && (
         <div
           role="dialog"
@@ -810,12 +881,12 @@ export default function AdvancedMenuManagementPage() {
                   {editingItem ? `Edit POS Menu Item: ${editingItem.name}` : 'Add POS Menu Item'}
                 </h3>
                 <p className="text-[11px] text-servora-deepTeal">
-                  Configure selling price, kitchen routing, raw-material BOM, and POS modifier groups
+                  Configure product photo, selling price, kitchen routing, raw-material BOM, and POS modifier groups
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setIsItemModalOpen(false)}
+                onClick={handleCloseItemModal}
                 aria-label="Close modal"
                 className="text-gray-400 hover:text-servora-navy"
               >
@@ -868,6 +939,29 @@ export default function AdvancedMenuManagementPage() {
                   </select>
                 </div>
               </div>
+
+              {/* MENU ITEM PHOTOGRAPH UPLOADER (CLOUDINARY SIGNED DIRECT UPLOAD) */}
+              <MenuItemImageUploader
+                imageUrl={imageUrl}
+                imagePublicId={imagePublicId}
+                imageOriginalFilename={imageOriginalFilename}
+                disabled={isSubmitting}
+                onUploaded={(meta) => {
+                  setImageUrl(meta.imageUrl);
+                  setImagePublicId(meta.imagePublicId);
+                  setImageOriginalFilename(meta.imageOriginalFilename);
+                  setImageMimeType(meta.imageMimeType);
+                  setImageFileSize(meta.imageFileSize);
+                  setUnsavedUploadedPublicIds((prev) => [...prev, meta.imagePublicId]);
+                }}
+                onRemoved={() => {
+                  setImageUrl(null);
+                  setImagePublicId(null);
+                  setImageOriginalFilename(null);
+                  setImageMimeType(null);
+                  setImageFileSize(null);
+                }}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -1187,7 +1281,7 @@ export default function AdvancedMenuManagementPage() {
               <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
                 <button
                   type="button"
-                  onClick={() => setIsItemModalOpen(false)}
+                  onClick={handleCloseItemModal}
                   className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl"
                 >
                   Cancel

@@ -4,12 +4,31 @@ import {
   isRuleCurrentlyActive,
   computeRuleAdjustedPrice,
 } from './pricing.service';
+import {
+  generateMenuImageUploadSignature,
+  destroyTenantCloudinaryImage,
+  assertPublicIdBelongsToTenant,
+  buildOptimizedCloudinaryUrl,
+} from '../utils/cloudinary';
 import type {
   CreateCategoryInput,
   UpdateCategoryInput,
   CreateMenuItemInput,
   UpdateMenuItemInput,
 } from '../validators/menu.validator';
+
+export const requestMenuImageUploadSignature = (tenantId: number) => {
+  return generateMenuImageUploadSignature(tenantId);
+};
+
+export const cleanupOrphanedMenuImage = async (tenantId: number, publicId: string) => {
+  assertPublicIdBelongsToTenant(tenantId, publicId);
+  const stillUsed = await menuRepo.isImagePublicIdReferenced(tenantId, publicId);
+  if (stillUsed) {
+    return { ok: true, result: 'in_use_skipped' };
+  }
+  return await destroyTenantCloudinaryImage(tenantId, publicId);
+};
 
 export const addCategory = async (tenantId: number, data: CreateCategoryInput) => {
   return await menuRepo.createCategory(tenantId, data);
@@ -36,11 +55,38 @@ export const modifyMenuItem = async (
   itemId: number,
   data: UpdateMenuItemInput
 ) => {
-  return await menuRepo.updateMenuItemTransaction(tenantId, itemId, data);
+  const result = await menuRepo.updateMenuItemTransaction(tenantId, itemId, data);
+  if (!result) return null;
+
+  const { item: updated, previousImagePublicId } = result;
+
+  if (previousImagePublicId && previousImagePublicId !== updated.imagePublicId) {
+    const stillUsed = await menuRepo.isImagePublicIdReferenced(
+      tenantId,
+      previousImagePublicId
+    );
+    if (!stillUsed) {
+      void destroyTenantCloudinaryImage(tenantId, previousImagePublicId);
+    }
+  }
+
+  return updated;
 };
 
 export const removeMenuItem = async (tenantId: number, itemId: number) => {
-  return await menuRepo.deleteMenuItemRecord(tenantId, itemId);
+  const deleted = await menuRepo.deleteMenuItemRecord(tenantId, itemId);
+
+  if (deleted?.imagePublicId) {
+    const stillUsed = await menuRepo.isImagePublicIdReferenced(
+      tenantId,
+      deleted.imagePublicId
+    );
+    if (!stillUsed) {
+      void destroyTenantCloudinaryImage(tenantId, deleted.imagePublicId);
+    }
+  }
+
+  return deleted;
 };
 
 export const fetchMenuCatalog = async (tenantId: number, branchId?: number) => {
@@ -75,6 +121,9 @@ export const fetchActiveMenu = async (tenantId: number, branchId?: number) => {
         ? computeRuleAdjustedPrice(basePrice, activeRule.ruleType, parseFloat(activeRule.value) || 0)
         : basePrice;
 
+      const optimizedCardUrl = buildOptimizedCloudinaryUrl(i.imageUrl, 400, 300);
+      const optimizedThumbUrl = buildOptimizedCloudinaryUrl(i.imageUrl, 96, 96);
+
       return {
         id: i.id.toString(),
         categoryId: i.categoryId,
@@ -94,7 +143,11 @@ export const fetchActiveMenu = async (tenantId: number, branchId?: number) => {
         directInventoryItemId: i.directInventoryItemId,
         kitchenStation: i.kitchenStation,
         isAvailable: i.isAvailable,
-        image: i.imageUrl,
+        image: optimizedCardUrl,
+        imageUrl: i.imageUrl,
+        imageCardUrl: optimizedCardUrl,
+        imageThumbUrl: optimizedThumbUrl,
+        imagePublicId: i.imagePublicId,
         category: categories.find((c) => c.id === i.categoryId)?.name || 'Uncategorized',
       };
     }),
