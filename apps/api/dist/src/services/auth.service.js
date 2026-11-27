@@ -30,6 +30,7 @@ exports.DEFAULT_ROLE_PERMISSIONS = {
     WAITER: [
         'pos.access', 'orders.view', 'tables.view', 'reservations.view', 'kitchen.view', 'help.view',
     ],
+    POS_KIOSK: ['pos.kiosk', 'pos.access'],
     CHEF: [
         'kitchen.view', 'kitchen.manage', 'recipes.view', 'inventory.view', 'menu.view', 'help.view',
     ],

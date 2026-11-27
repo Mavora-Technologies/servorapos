@@ -34,7 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postSettleInvoice = exports.postSetDefaultPaymentMethod = exports.deletePaymentMethod = exports.postPaymentMethod = exports.getInvoices = exports.putSubscription = exports.getBillingDetails = void 0;
-const billingRepo = __importStar(require("../repositories/billing.repository"));
+const zod_1 = require("zod");
+const billingService = __importStar(require("../services/billing.service"));
 const billing_validator_1 = require("../validators/billing.validator");
 const getBillingDetails = async (req, res) => {
     try {
@@ -43,11 +44,12 @@ const getBillingDetails = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const overview = await billingRepo.getBillingOverview(tenantId);
+        const overview = await billingService.fetchTenantBillingOverview(tenantId);
         res.status(200).json({ status: 'success', data: overview });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch billing details' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch billing details';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getBillingDetails = getBillingDetails;
@@ -59,20 +61,27 @@ const putSubscription = async (req, res) => {
             return;
         }
         const input = billing_validator_1.updateSubscriptionPlanSchema.parse(req.body);
-        const updated = await billingRepo.updateTenantSubscription(tenantId, input);
+        const result = await billingService.saveTenantSubscription(tenantId, input);
         res.status(200).json({
             status: 'success',
-            data: updated,
-            message: 'Subscription plan and licensing allocation updated.',
+            data: result.subscription,
+            invoice: result.invoice,
+            message: result.invoice
+                ? `Subscription updated and invoice ${result.invoice.invoiceNumber} issued.`
+                : 'Subscription plan and licensing allocation updated.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to update subscription' });
+        const message = error instanceof Error ? error.message : 'Failed to update subscription';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.putSubscription = putSubscription;
@@ -84,7 +93,7 @@ const getInvoices = async (req, res) => {
             return;
         }
         const query = billing_validator_1.listInvoicesQuerySchema.parse(req.query);
-        const result = await billingRepo.listTenantInvoices(tenantId, query);
+        const result = await billingService.fetchTenantInvoices(tenantId, query);
         res.status(200).json({
             status: 'success',
             data: result.invoices,
@@ -92,12 +101,16 @@ const getInvoices = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid invoice filter query',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve invoices' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve invoices';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getInvoices = getInvoices;
@@ -109,52 +122,78 @@ const postPaymentMethod = async (req, res) => {
             return;
         }
         const input = billing_validator_1.addPaymentMethodSchema.parse(req.body);
-        const method = await billingRepo.addPaymentMethod(tenantId, input);
+        const method = await billingService.registerPaymentMethod(tenantId, input);
         res.status(201).json({
             status: 'success',
             data: method,
-            message: 'Payment method authorization token saved.',
+            message: 'Payment mandate registered successfully.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to add payment method' });
+        const message = error instanceof Error ? error.message : 'Failed to add payment method';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postPaymentMethod = postPaymentMethod;
 const deletePaymentMethod = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const methodId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(methodId)) {
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const methodId = Number(req.params.id);
+        if (!Number.isInteger(methodId) || methodId <= 0) {
             res.status(400).json({ status: 'error', message: 'Valid payment method ID required' });
             return;
         }
-        await billingRepo.deletePaymentMethod(tenantId, methodId);
+        const deleted = await billingService.removePaymentMethod(tenantId, methodId);
+        if (!deleted) {
+            res.status(404).json({ status: 'error', message: 'Payment method mandate not found' });
+            return;
+        }
         res.status(200).json({ status: 'success', message: 'Payment method removed.' });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to delete payment method' });
+        const message = error instanceof Error ? error.message : 'Failed to delete payment method';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.deletePaymentMethod = deletePaymentMethod;
 const postSetDefaultPaymentMethod = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const methodId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(methodId)) {
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const methodId = Number(req.params.id);
+        if (!Number.isInteger(methodId) || methodId <= 0) {
             res.status(400).json({ status: 'error', message: 'Valid payment method ID required' });
             return;
         }
-        const updated = await billingRepo.setDefaultPaymentMethod(tenantId, methodId);
-        res.status(200).json({ status: 'success', data: updated, message: 'Default payment method set.' });
+        const updated = await billingService.markDefaultPaymentMethod(tenantId, methodId);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Payment method mandate not found' });
+            return;
+        }
+        res.status(200).json({
+            status: 'success',
+            data: updated,
+            message: 'Primary payment mandate updated.',
+        });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to set default payment method' });
+        const message = error instanceof Error ? error.message : 'Failed to update default payment method';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postSetDefaultPaymentMethod = postSetDefaultPaymentMethod;
@@ -166,7 +205,11 @@ const postSettleInvoice = async (req, res) => {
             return;
         }
         const input = billing_validator_1.settleInvoiceSchema.parse(req.body);
-        const settled = await billingRepo.settleInvoice(tenantId, input);
+        const settled = await billingService.processInvoiceSettlement(tenantId, input);
+        if (!settled) {
+            res.status(404).json({ status: 'error', message: 'Invoice not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: settled,
@@ -174,12 +217,16 @@ const postSettleInvoice = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to settle invoice' });
+        const message = error instanceof Error ? error.message : 'Failed to settle invoice';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postSettleInvoice = postSettleInvoice;

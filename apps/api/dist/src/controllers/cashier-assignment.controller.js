@@ -34,60 +34,71 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.postRevoke = exports.putAssignment = exports.postAssignment = exports.getContext = exports.getAssignments = void 0;
-const assignmentRepo = __importStar(require("../repositories/cashier-assignment.repository"));
+const zod_1 = require("zod");
+const assignmentService = __importStar(require("../services/cashier-assignment.service"));
 const cashier_assignment_validator_1 = require("../validators/cashier-assignment.validator");
+function getActor(req) {
+    const user = req.user;
+    if (!user?.tenantId || !user?.userId)
+        return null;
+    return {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        role: user.role,
+        ipAddress: req.ip || null,
+    };
+}
 const getAssignments = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { startDate, endDate, branchId, status, userId } = req.query;
-        const branchIdStr = typeof branchId === 'string' ? branchId : undefined;
-        const branchIdNum = branchIdStr && branchIdStr !== 'ALL' ? parseInt(branchIdStr, 10) : undefined;
-        const userIdNum = typeof userId === 'string' && userId !== 'ALL' ? parseInt(userId, 10) : undefined;
-        const records = await assignmentRepo.listCashierAssignments(tenantId, {
-            startDate: typeof startDate === 'string' ? startDate : undefined,
-            endDate: typeof endDate === 'string' ? endDate : undefined,
-            branchId: branchIdNum && !isNaN(branchIdNum) ? branchIdNum : undefined,
-            userId: userIdNum && !isNaN(userIdNum) ? userIdNum : undefined,
-            status: typeof status === 'string' ? status : undefined,
-        });
+        const query = cashier_assignment_validator_1.listCashierAssignmentsQuerySchema.parse(req.query);
+        const records = await assignmentService.fetchAssignments(actor, query);
         res.status(200).json({ status: 'success', data: records });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch cashier assignments' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid filter parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to fetch cashier assignments';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getAssignments = getAssignments;
 const getContext = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { branchId } = req.query;
-        const branchIdNum = typeof branchId === 'string' && branchId !== 'ALL' ? parseInt(branchId, 10) : undefined;
-        const context = await assignmentRepo.getAssignmentContext(tenantId, branchIdNum);
+        const query = cashier_assignment_validator_1.assignmentContextQuerySchema.parse(req.query);
+        const context = await assignmentService.fetchAssignmentContext(actor, query);
         res.status(200).json({ status: 'success', data: context });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve assignment context' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve assignment context';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getContext = getContext;
 const postAssignment = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const supervisorId = req.user?.userId;
-        if (!tenantId || !supervisorId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = cashier_assignment_validator_1.createCashierAssignmentSchema.parse(req.body);
-        const assignment = await assignmentRepo.assignCashier(tenantId, supervisorId, input);
+        const assignment = await assignmentService.createCustodyAssignment(actor, input);
         res.status(201).json({
             status: 'success',
             data: assignment,
@@ -95,61 +106,96 @@ const postAssignment = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to assign cashier' });
+        const message = error instanceof Error ? error.message : 'Failed to assign cashier';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postAssignment = postAssignment;
 const putAssignment = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const assignmentId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(assignmentId)) {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const assignmentId = Number(req.params.id);
+        if (!Number.isInteger(assignmentId) || assignmentId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid assignment identifier' });
             return;
         }
         const input = cashier_assignment_validator_1.updateCashierAssignmentSchema.parse(req.body);
-        const updated = await assignmentRepo.updateAssignment(tenantId, assignmentId, input);
+        const updated = await assignmentService.modifyCustodyAssignment(actor, assignmentId, input);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Cashier assignment not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: updated,
-            message: 'Cashier assignment updated successfully.',
+            message: input.status === 'ACTIVE'
+                ? 'Cashier till activated and shift opened.'
+                : input.status === 'RELEASED'
+                    ? 'Cash drawer custody released.'
+                    : 'Cashier assignment updated successfully.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to update assignment' });
+        const message = error instanceof Error ? error.message : 'Failed to update assignment';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.putAssignment = putAssignment;
 const postRevoke = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const assignmentId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(assignmentId)) {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const assignmentId = Number(req.params.id);
+        if (!Number.isInteger(assignmentId) || assignmentId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid assignment identifier' });
             return;
         }
         const { reason } = cashier_assignment_validator_1.revokeAssignmentSchema.parse(req.body);
-        const revoked = await assignmentRepo.revokeAssignment(tenantId, assignmentId, reason);
+        const revoked = await assignmentService.revokeCustodyAssignment(actor, assignmentId, reason);
+        if (!revoked) {
+            res.status(404).json({ status: 'error', message: 'Cashier assignment not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: revoked,
-            message: 'Cash drawer custody revoked and terminal access restricted.',
+            message: 'Cash drawer custody revoked and compliance alert dispatched.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Revocation reason is required',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to revoke custody' });
+        const message = error instanceof Error ? error.message : 'Failed to revoke custody';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postRevoke = postRevoke;

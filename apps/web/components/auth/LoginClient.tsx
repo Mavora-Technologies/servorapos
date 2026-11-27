@@ -9,7 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
 import { fetchApi } from '@/lib/api';
-import { resolveSafeRedirectPath } from '@/lib/rbac';
+import { resolveSafeRedirectPath, isKioskOnlySession } from '@/lib/rbac';
 
 const loginSchema = z.object({
   email: z.string().trim().email('Please enter a valid email address'),
@@ -78,6 +78,9 @@ function getFriendlyErrorMessage(error: unknown): string {
 
 function clearPreviousTerminalSession(): void {
   localStorage.removeItem('servora_token');
+  localStorage.removeItem('token');
+  localStorage.removeItem('servora_kiosk_mode');
+  localStorage.removeItem('servora_kiosk_station_token');
   localStorage.removeItem('servora_active_branch_id');
   localStorage.removeItem('servora_active_branch_name');
   localStorage.removeItem('servora_cached_workspace');
@@ -103,7 +106,7 @@ export default function LoginClient() {
     mode: 'onBlur',
   });
 
-  // If an operator is already signed in, route them directly to their authorized workspace
+  // If an operator or kiosk station is already signed in, route directly to the authorized workspace
   useEffect(() => {
     const existingToken = localStorage.getItem('servora_token');
     if (!existingToken) return;
@@ -117,6 +120,20 @@ export default function LoginClient() {
 
         if (meRes?.data?.user) {
           localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
+
+          const kioskAccount =
+            localStorage.getItem('servora_kiosk_mode') === 'true' ||
+            isKioskOnlySession(meRes.data.user.permissions, meRes.data.user.role);
+
+          if (kioskAccount) {
+            localStorage.setItem('servora_kiosk_mode', 'true');
+            if (!localStorage.getItem('servora_kiosk_station_token')) {
+              localStorage.setItem('servora_kiosk_station_token', existingToken);
+            }
+            router.replace('/pos');
+            return;
+          }
+
           const destination = resolveSafeRedirectPath(
             requestedRedirect,
             meRes.data.user.permissions,
@@ -142,7 +159,7 @@ export default function LoginClient() {
     setServerError(null);
 
     try {
-      // Clear any previous operator's cached workspace/branch context on shared POS terminals
+      // Clear any previous operator's cached workspace, kiosk flag, and branch context
       clearPreviousTerminalSession();
 
       const result = (await fetchApi('/api/v1/auth/login', {
@@ -179,6 +196,17 @@ export default function LoginClient() {
       } catch {
         // Fallback to login payload role/permissions if /me temporarily fails
       }
+
+      // Initialize Dual-Token Kiosk Mode strictly via `pos.kiosk` permission (SaaS-safe, no hardcoded role names)
+      if (isKioskOnlySession(userPermissions, userRole)) {
+        localStorage.setItem('servora_kiosk_mode', 'true');
+        localStorage.setItem('servora_kiosk_station_token', token);
+        router.replace('/pos');
+        return;
+      }
+
+      localStorage.removeItem('servora_kiosk_mode');
+      localStorage.removeItem('servora_kiosk_station_token');
 
       const targetRoute = resolveSafeRedirectPath(
         requestedRedirect,
@@ -321,7 +349,7 @@ export default function LoginClient() {
               Welcome Back
             </h2>
             <p className="text-xs sm:text-sm text-servora-deepTeal mt-1.5 leading-relaxed">
-              Sign in to open your role-authorized Servora workspace.
+              Sign in to open your role-authorized Servora workspace or shared POS kiosk station.
             </p>
           </div>
 

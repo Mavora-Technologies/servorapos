@@ -1,9 +1,41 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.updateItemAvailability = exports.getAvailabilityOverview = void 0;
-const drizzle_orm_1 = require("drizzle-orm");
-const db_1 = require("../config/db");
-const schema_1 = require("../config/schema");
+exports.bulkUpdateItemAvailability = exports.updateItemAvailability = exports.getAvailabilityOverview = void 0;
+const zod_1 = require("zod");
+const availabilityService = __importStar(require("../services/availability.service"));
 const availability_validator_1 = require("../validators/availability.validator");
 const getAvailabilityOverview = async (req, res) => {
     try {
@@ -12,117 +44,84 @@ const getAvailabilityOverview = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const items = await db_1.db
-            .select({
-            id: schema_1.menuItems.id,
-            name: schema_1.menuItems.name,
-            price: schema_1.menuItems.price,
-            categoryId: schema_1.menuItems.categoryId,
-            categoryName: schema_1.menuCategories.name,
-            isAvailable: schema_1.menuItems.isAvailable,
-        })
-            .from(schema_1.menuItems)
-            .leftJoin(schema_1.menuCategories, (0, drizzle_orm_1.eq)(schema_1.menuItems.categoryId, schema_1.menuCategories.id))
-            .where((0, drizzle_orm_1.eq)(schema_1.menuItems.tenantId, tenantId))
-            .orderBy((0, drizzle_orm_1.desc)(schema_1.menuItems.id));
-        const records = await db_1.db
-            .select()
-            .from(schema_1.menuItemAvailability)
-            .where((0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.tenantId, tenantId));
-        const recordMap = new Map(records.map((r) => [r.menuItemId, r]));
-        let availableCount = 0;
-        let outOfStockCount = 0;
-        let lowStockCount = 0;
-        const formattedItems = items.map((item) => {
-            const avail = recordMap.get(item.id);
-            const is86ed = avail ? avail.is86ed : !item.isAvailable;
-            const remainingCount = avail?.remainingCount ?? null;
-            if (is86ed) {
-                outOfStockCount++;
-            }
-            else {
-                availableCount++;
-                if (remainingCount !== null && remainingCount <= 5) {
-                    lowStockCount++;
-                }
-            }
-            return {
-                ...item,
-                is86ed,
-                reason: avail?.reason ?? null,
-                remainingCount,
-                autoResetAt: avail?.autoResetAt ?? null,
-            };
-        });
-        res.status(200).json({
-            status: 'success',
-            data: {
-                summary: {
-                    total: items.length,
-                    available: availableCount,
-                    outOfStock: outOfStockCount,
-                    lowStock: lowStockCount,
-                },
-                items: formattedItems,
-            },
-        });
+        const parsedQuery = availability_validator_1.availabilityQuerySchema.safeParse(req.query);
+        const branchId = parsedQuery.success
+            ? parsedQuery.data.branchId ?? req.user?.defaultBranchId ?? undefined
+            : req.user?.defaultBranchId ?? undefined;
+        const data = await availabilityService.fetchTenantAvailabilityOverview(tenantId, branchId);
+        res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        console.error('[Availability Overview Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch availability' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch menu availability';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getAvailabilityOverview = getAvailabilityOverview;
 const updateItemAvailability = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const branchId = req.user?.defaultBranchId;
         if (!tenantId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
         const payload = availability_validator_1.updateAvailabilitySchema.parse(req.body);
-        const autoResetDate = payload.autoResetTomorrow
-            ? new Date(Date.now() + 24 * 60 * 60 * 1000)
-            : null;
-        // Sync menu_items table
-        await db_1.db
-            .update(schema_1.menuItems)
-            .set({ isAvailable: !payload.is86ed, updatedAt: new Date() })
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.menuItems.id, payload.menuItemId), (0, drizzle_orm_1.eq)(schema_1.menuItems.tenantId, tenantId)));
-        // Upsert menuItemAvailability table
-        const existing = await db_1.db
-            .select()
-            .from(schema_1.menuItemAvailability)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.menuItemId, payload.menuItemId), (0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.tenantId, tenantId)))
-            .limit(1);
-        if (existing.length > 0) {
-            await db_1.db
-                .update(schema_1.menuItemAvailability)
-                .set({
-                is86ed: payload.is86ed,
-                reason: payload.reason,
-                remainingCount: payload.remainingCount,
-                autoResetAt: autoResetDate,
-                updatedAt: new Date(),
-            })
-                .where((0, drizzle_orm_1.eq)(schema_1.menuItemAvailability.id, existing[0].id));
+        const defaultBranchId = req.user?.defaultBranchId ?? null;
+        const updated = await availabilityService.toggleSingleItemAvailability(tenantId, defaultBranchId, payload);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Menu item not found' });
+            return;
         }
-        else {
-            await db_1.db.insert(schema_1.menuItemAvailability).values({
-                tenantId,
-                branchId: branchId || null,
-                menuItemId: payload.menuItemId,
-                is86ed: payload.is86ed,
-                reason: payload.reason,
-                remainingCount: payload.remainingCount,
-                autoResetAt: autoResetDate,
-            });
-        }
-        res.status(200).json({ status: 'success', message: 'Item stock availability updated' });
+        res.status(200).json({
+            status: 'success',
+            message: payload.is86ed
+                ? 'Item marked 86 (Out of Stock).'
+                : 'Item availability updated.',
+            data: updated,
+        });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to update item availability';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.updateItemAvailability = updateItemAvailability;
+const bulkUpdateItemAvailability = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized' });
+            return;
+        }
+        const payload = availability_validator_1.bulkAvailabilityToggleSchema.parse(req.body);
+        const defaultBranchId = req.user?.defaultBranchId ?? null;
+        const result = await availabilityService.bulkToggleItemAvailability(tenantId, defaultBranchId, payload);
+        res.status(200).json({
+            status: 'success',
+            message: payload.is86ed
+                ? `Marked ${result.updatedCount} item(s) as 86'd.`
+                : `Restocked ${result.updatedCount} item(s).`,
+            data: result,
+        });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to bulk update availability';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.bulkUpdateItemAvailability = bulkUpdateItemAvailability;

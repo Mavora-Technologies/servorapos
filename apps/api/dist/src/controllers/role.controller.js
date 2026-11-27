@@ -34,7 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteRole = exports.updateRole = exports.createRole = exports.getRolesDirectory = void 0;
-const roleRepo = __importStar(require("../repositories/role.repository"));
+const zod_1 = require("zod");
+const roleService = __importStar(require("../services/role.service"));
 const role_validator_1 = require("../validators/role.validator");
 const getRolesDirectory = async (req, res) => {
     try {
@@ -43,24 +44,12 @@ const getRolesDirectory = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const data = await roleRepo.listRolesWithMetrics(tenantId);
-        const metrics = {
-            totalRoles: data.roles.length,
-            systemRoles: data.roles.filter((r) => r.isSystemRole).length,
-            customRoles: data.roles.filter((r) => !r.isSystemRole).length,
-            totalPermissions: data.availablePermissions.length,
-        };
-        res.status(200).json({
-            status: 'success',
-            data: {
-                metrics,
-                roles: data.roles,
-                availablePermissions: data.availablePermissions,
-            },
-        });
+        const data = await roleService.fetchTenantRolesDirectory(tenantId);
+        res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch roles' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch roles';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getRolesDirectory = getRolesDirectory;
@@ -72,71 +61,90 @@ const createRole = async (req, res) => {
             return;
         }
         const payload = role_validator_1.createRoleSchema.parse(req.body);
-        const newRole = await roleRepo.createCustomRole(tenantId, payload);
+        const newRole = await roleService.provisionCustomRole(tenantId, payload);
         res.status(201).json({
             status: 'success',
             data: newRole,
-            message: 'Role security clearance provisioned successfully',
+            message: 'Role security clearance provisioned successfully.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message });
+        const message = error instanceof Error ? error.message : 'Failed to create role';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.createRole = createRole;
 const updateRole = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const roleId = parseInt(String(req.params.id), 10);
         if (!tenantId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        if (isNaN(roleId)) {
+        const roleId = Number(req.params.id);
+        if (!Number.isInteger(roleId) || roleId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid role identifier' });
             return;
         }
         const payload = role_validator_1.updateRoleSchema.parse(req.body);
-        const updated = await roleRepo.updateCustomRole(tenantId, roleId, payload);
+        const updated = await roleService.modifyCustomRole(tenantId, roleId, payload);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Custom role not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: updated,
-            message: 'Role security matrix updated successfully',
+            message: 'Role security matrix updated successfully.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message });
+        const message = error instanceof Error ? error.message : 'Failed to update role';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.updateRole = updateRole;
 const deleteRole = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const roleId = parseInt(String(req.params.id), 10);
         if (!tenantId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        if (isNaN(roleId)) {
+        const roleId = Number(req.params.id);
+        if (!Number.isInteger(roleId) || roleId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid role identifier' });
             return;
         }
-        await roleRepo.deleteCustomRole(tenantId, roleId);
+        const deleted = await roleService.removeCustomRole(tenantId, roleId);
+        if (!deleted) {
+            res.status(404).json({ status: 'error', message: 'Role not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
-            message: 'Custom role security profile deleted successfully',
+            message: 'Custom role security profile deleted successfully.',
         });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message });
+        const message = error instanceof Error ? error.message : 'Failed to delete role';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.deleteRole = deleteRole;

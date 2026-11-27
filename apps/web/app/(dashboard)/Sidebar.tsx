@@ -6,7 +6,11 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { fetchApi } from '@/lib/api';
-import { canAccessRoute, getDefaultLandingRoute } from '@/lib/rbac';
+import {
+  canAccessRoute,
+  getDefaultLandingRoute,
+  isKioskOnlySession,
+} from '@/lib/rbac';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -338,8 +342,34 @@ export default function Sidebar({
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+  const [isKioskFlag, setIsKioskFlag] = useState(false);
 
-  // Enterprise Pinned Favorites & Recent History
+  // Defense-in-depth: detect shared POS kiosk mode via active flag or `pos.kiosk` permission
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncKioskFlag = () => {
+      setIsKioskFlag(localStorage.getItem('servora_kiosk_mode') === 'true');
+    };
+    syncKioskFlag();
+    window.addEventListener('servora:kiosk-mode-changed', syncKioskFlag);
+    return () => window.removeEventListener('servora:kiosk-mode-changed', syncKioskFlag);
+  }, []);
+
+  const isKioskMode = useMemo(
+    () => isKioskFlag || isKioskOnlySession(allowedPermissions, userRole),
+    [isKioskFlag, allowedPermissions, userRole]
+  );
+
+  // Fail-closed until RBAC permissions have hydrated (unless Admin/Super Admin)
+  const isPermissionsReady = useMemo(() => {
+    if (userRole === 'SUPER_ADMIN' || userRole === 'ADMIN') return true;
+    return Array.isArray(allowedPermissions);
+  }, [allowedPermissions, userRole]);
+
+  // Role-scoped storage keys prevent admin pins/recents leaking into floor staff views
+  const pinnedStorageKey = `servora_pinned_nav_${userRole}`;
+  const recentStorageKey = `servora_recent_nav_${userRole}`;
+
   const [pinnedHrefs, setPinnedHrefs] = useState<string[]>(['/pos', '/orders/open', '/kitchen']);
   const [recentHrefs, setRecentHrefs] = useState<string[]>([]);
 
@@ -357,14 +387,12 @@ export default function Sidebar({
   // System latency state
   const [latency, setLatency] = useState<number | null>(null);
 
-  // Keep prop-driven branch name in sync
   useEffect(() => {
     if (activeBranch && activeBranch !== 'Loading Branch...') {
       setCurrentBranchName(activeBranch);
     }
   }, [activeBranch]);
 
-  // Track live browser connectivity
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setIsOnline(navigator.onLine);
@@ -381,14 +409,24 @@ export default function Sidebar({
     };
   }, []);
 
-  // Load persisted pins, recents & cached branches
+  // Load role-scoped pins, recents & cached branches
   useEffect(() => {
     try {
-      const savedPins = localStorage.getItem('servora_pinned_nav');
-      if (savedPins) setPinnedHrefs(JSON.parse(savedPins));
+      const savedPins = localStorage.getItem(pinnedStorageKey);
+      if (savedPins) {
+        const parsed = JSON.parse(savedPins);
+        if (Array.isArray(parsed)) setPinnedHrefs(parsed);
+      } else {
+        setPinnedHrefs(['/pos', '/orders/open', '/kitchen']);
+      }
 
-      const savedRecents = localStorage.getItem('servora_recent_nav');
-      if (savedRecents) setRecentHrefs(JSON.parse(savedRecents));
+      const savedRecents = localStorage.getItem(recentStorageKey);
+      if (savedRecents) {
+        const parsed = JSON.parse(savedRecents);
+        if (Array.isArray(parsed)) setRecentHrefs(parsed);
+      } else {
+        setRecentHrefs([]);
+      }
 
       const cachedBranches = localStorage.getItem('servora_cached_branches');
       if (cachedBranches) {
@@ -403,9 +441,8 @@ export default function Sidebar({
     } catch {
       // Ignore storage errors
     }
-  }, []);
+  }, [pinnedStorageKey, recentStorageKey]);
 
-  // Listen for branch switches triggered from Header or POS Terminal
   useEffect(() => {
     const handleExternalBranchSwitch = (e: Event) => {
       const detail = (e as CustomEvent<BranchSwitchedDetail>).detail;
@@ -419,27 +456,39 @@ export default function Sidebar({
     return () => window.removeEventListener('servora:branch-switched', handleExternalBranchSwitch);
   }, []);
 
-  // Track recently visited pages
+  // Track recently visited pages only if user is authorized for that route
   useEffect(() => {
-    if (!pathname || pathname === '/dashboard' || pathname === '/') return;
+    if (
+      isKioskMode ||
+      !isPermissionsReady ||
+      !pathname ||
+      pathname === '/dashboard' ||
+      pathname === '/'
+    ) {
+      return;
+    }
+    if (!canAccessRoute(pathname, allowedPermissions, userRole)) return;
+
     setRecentHrefs((prev) => {
       const updated = [pathname, ...prev.filter((h) => h !== pathname)].slice(0, 4);
       try {
-        localStorage.setItem('servora_recent_nav', JSON.stringify(updated));
+        localStorage.setItem(recentStorageKey, JSON.stringify(updated));
       } catch {
         // Ignore storage errors
       }
       return updated;
     });
-  }, [pathname]);
+  }, [pathname, isKioskMode, isPermissionsReady, allowedPermissions, userRole, recentStorageKey]);
 
   const togglePinFavorite = (e: React.MouseEvent, href: string) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!canAccessRoute(href, allowedPermissions, userRole)) return;
+
     setPinnedHrefs((prev) => {
       const updated = prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href];
       try {
-        localStorage.setItem('servora_pinned_nav', JSON.stringify(updated));
+        localStorage.setItem(pinnedStorageKey, JSON.stringify(updated));
       } catch {
         // Ignore storage errors
       }
@@ -462,16 +511,18 @@ export default function Sidebar({
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [isBranchDropdownOpen]);
 
-  // Offline-safe branch list & operational telemetry loader
   const canPollDashboardTelemetry = useMemo(
     () =>
-      canAccessRoute('/dashboard', allowedPermissions, userRole) ||
-      canAccessRoute('/kitchen', allowedPermissions, userRole) ||
-      canAccessRoute('/inventory', allowedPermissions, userRole),
-    [allowedPermissions, userRole]
+      !isKioskMode &&
+      isPermissionsReady &&
+      (canAccessRoute('/dashboard', allowedPermissions, userRole) ||
+        canAccessRoute('/kitchen', allowedPermissions, userRole) ||
+        canAccessRoute('/inventory', allowedPermissions, userRole)),
+    [isKioskMode, isPermissionsReady, allowedPermissions, userRole]
   );
 
   const loadBranchesAndTelemetry = useCallback(async () => {
+    if (isKioskMode || !isPermissionsReady) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
     try {
@@ -502,8 +553,7 @@ export default function Sidebar({
             localStorage.setItem('servora_active_branch_name', activeOnly[0].name);
           }
         } else {
-          const defaultBranch =
-            activeOnly.find((b) => b.isMainBranch) || activeOnly[0];
+          const defaultBranch = activeOnly.find((b) => b.isMainBranch) || activeOnly[0];
           if (defaultBranch) {
             setCurrentBranchName(defaultBranch.name);
             setCurrentBranchId(defaultBranch.id);
@@ -522,9 +572,10 @@ export default function Sidebar({
     } catch {
       // Silent fallback on degraded network
     }
-  }, [canPollDashboardTelemetry]);
+  }, [isKioskMode, isPermissionsReady, canPollDashboardTelemetry]);
 
   useEffect(() => {
+    if (isKioskMode || !isPermissionsReady) return;
     loadBranchesAndTelemetry();
     const interval = setInterval(loadBranchesAndTelemetry, 30000);
     window.addEventListener('online', loadBranchesAndTelemetry);
@@ -532,9 +583,10 @@ export default function Sidebar({
       clearInterval(interval);
       window.removeEventListener('online', loadBranchesAndTelemetry);
     };
-  }, [loadBranchesAndTelemetry]);
+  }, [isKioskMode, isPermissionsReady, loadBranchesAndTelemetry]);
 
   const handleSelectBranch = (branch: BranchNode) => {
+    if (isKioskMode) return;
     setCurrentBranchName(branch.name);
     setCurrentBranchId(branch.id);
     localStorage.setItem('servora_active_branch_id', String(branch.id));
@@ -552,6 +604,7 @@ export default function Sidebar({
   };
 
   useEffect(() => {
+    if (isKioskMode || !isPermissionsReady) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -563,10 +616,10 @@ export default function Sidebar({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isCollapsed, toggleCollapse]);
+  }, [isKioskMode, isPermissionsReady, isCollapsed, toggleCollapse]);
 
-  // Offline-safe API latency check
   useEffect(() => {
+    if (isKioskMode) return;
     const fetchLatency = async () => {
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         setLatency(null);
@@ -587,10 +640,12 @@ export default function Sidebar({
       clearInterval(interval);
       window.removeEventListener('online', fetchLatency);
     };
-  }, []);
+  }, [isKioskMode]);
 
   // Unified RBAC filtering via @/lib/rbac (fail-closed until permissions hydrate)
   const enrichedGroups = useMemo(() => {
+    if (isKioskMode || !isPermissionsReady) return [];
+
     return navigationGroups
       .map((group) => ({
         ...group,
@@ -611,12 +666,18 @@ export default function Sidebar({
           }),
       }))
       .filter((group) => group.items.length > 0);
-  }, [allowedPermissions, liveCounts, userRole]);
+  }, [isKioskMode, isPermissionsReady, allowedPermissions, liveCounts, userRole]);
 
-  const visibleStandaloneItems = useMemo(
-    () =>
-      standaloneItems.filter((item) => canAccessRoute(item.href, allowedPermissions, userRole)),
-    [allowedPermissions, userRole]
+  const visibleStandaloneItems = useMemo(() => {
+    if (isKioskMode || !isPermissionsReady) return [];
+    return standaloneItems.filter((item) =>
+      canAccessRoute(item.href, allowedPermissions, userRole)
+    );
+  }, [isKioskMode, isPermissionsReady, allowedPermissions, userRole]);
+
+  const canAccessHelp = useMemo(
+    () => !isKioskMode && isPermissionsReady && canAccessRoute('/help', allowedPermissions, userRole),
+    [isKioskMode, isPermissionsReady, allowedPermissions, userRole]
   );
 
   const allAccessibleItems = useMemo(() => {
@@ -626,7 +687,6 @@ export default function Sidebar({
     return map;
   }, [visibleStandaloneItems, enrichedGroups]);
 
-  // Compute single deepest-matching active href so parent routes don't double-highlight
   const activeHref = useMemo(() => {
     if (!pathname) return '';
     const hrefs = Array.from(allAccessibleItems.keys()).sort((a, b) => b.length - a.length);
@@ -671,9 +731,11 @@ export default function Sidebar({
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && firstSearchMatch) {
       e.preventDefault();
-      router.push(firstSearchMatch.href);
-      setSearchQuery('');
-      closeMobileMenu();
+      if (canAccessRoute(firstSearchMatch.href, allowedPermissions, userRole)) {
+        router.push(firstSearchMatch.href);
+        setSearchQuery('');
+        closeMobileMenu();
+      }
     } else if (e.key === 'Escape') {
       setSearchQuery('');
       searchInputRef.current?.blur();
@@ -707,10 +769,17 @@ export default function Sidebar({
     }
   };
 
+  // Defense-in-depth: never render the back-office sidebar on shared POS Kiosk terminals
+  if (isKioskMode) {
+    return null;
+  }
+
   const defaultHomeRoute = getDefaultLandingRoute(allowedPermissions, userRole);
   const canSwitchBranches = branchNodes.length > 1;
-  const canManageBranches = canAccessRoute('/settings/branches', allowedPermissions, userRole);
-  const canViewTransfers = canAccessRoute('/inventory/transfers', allowedPermissions, userRole);
+  const canManageBranches =
+    isPermissionsReady && canAccessRoute('/settings/branches', allowedPermissions, userRole);
+  const canViewTransfers =
+    isPermissionsReady && canAccessRoute('/inventory/transfers', allowedPermissions, userRole);
 
   const getBadgeStyle = (type?: NavItem['badgeType'], active?: boolean) => {
     if (active) return 'bg-white/25 text-white';
@@ -779,7 +848,9 @@ export default function Sidebar({
                 title={isPinned ? 'Unpin from Favorites' : 'Pin to Favorites'}
                 className={[
                   'opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5 rounded transition-opacity shrink-0 cursor-pointer',
-                  isPinned ? 'opacity-100 text-amber-400' : 'text-servora-pale/40 hover:text-amber-300',
+                  isPinned
+                    ? 'opacity-100 text-amber-400'
+                    : 'text-servora-pale/40 hover:text-amber-300',
                 ].join(' ')}
               >
                 <Star size={11} fill={isPinned ? 'currentColor' : 'none'} />
@@ -857,7 +928,7 @@ export default function Sidebar({
           </button>
         </div>
 
-        {/* Multi-Branch Context Selector (Interactive for Multi-Branch, Read-Only for Single-Branch) */}
+        {/* Multi-Branch Context Selector */}
         {!isCollapsed ? (
           <div ref={branchDropdownRef} className="relative px-3 pt-3 pb-1">
             {canSwitchBranches ? (
@@ -978,7 +1049,7 @@ export default function Sidebar({
         )}
 
         {/* Quick Jump Search (Filtered strictly by RBAC) */}
-        {!isCollapsed && (
+        {!isCollapsed && isPermissionsReady && allAccessibleItems.size > 1 && (
           <div className="px-3 py-2 shrink-0 space-y-1">
             <div className="relative">
               <Search
@@ -1030,198 +1101,213 @@ export default function Sidebar({
             isCollapsed ? 'px-2' : 'px-3',
           ].join(' ')}
         >
-          {!searchQuery && visibleStandaloneItems.length > 0 && (
-            <div className="mb-2.5">
-              {!isCollapsed && (
-                <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
-                  Quick Terminals
-                </p>
-              )}
-              <div className="space-y-0.5">
-                {visibleStandaloneItems.map((item) => renderNavItem(item, false, false))}
-              </div>
+          {!isPermissionsReady ? (
+            <div className="space-y-2 px-1 py-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-8 rounded-lg bg-white/[0.05] animate-pulse"
+                />
+              ))}
             </div>
-          )}
-
-          {!searchQuery && !isCollapsed && pinnedItems.length > 0 && (
-            <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
-              <div className="mb-1 px-2.5 flex items-center justify-between">
-                <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-400/80 flex items-center gap-1">
-                  <Star size={10} fill="currentColor" /> Pinned Favorites
-                </span>
-                <span className="text-[9px] font-mono text-servora-pale/35">
-                  {pinnedItems.length}
-                </span>
-              </div>
-              <div className="space-y-0.5">
-                {pinnedItems.map((item) => renderNavItem(item, false, true))}
-              </div>
-            </div>
-          )}
-
-          {!searchQuery && !isCollapsed && recentItems.length > 0 && (
-            <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
-              <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
-                Recently Visited
-              </p>
-              <div className="space-y-0.5">
-                {recentItems.slice(0, 3).map((item) => renderNavItem(item, false, false))}
-              </div>
-            </div>
-          )}
-
-          {!searchQuery && !isCollapsed && enrichedGroups.length > 0 && (
-            <div className="pt-2 mb-1 px-2.5 flex items-center justify-between border-t border-white/[0.06]">
-              <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
-                Navigation Modules
-              </p>
-              <button
-                type="button"
-                onClick={toggleExpandAll}
-                title={
-                  expandedGroups.length === enrichedGroups.length ? 'Collapse All' : 'Expand All'
-                }
-                className="text-[10px] font-semibold text-servora-pale/40 hover:text-servora-teal flex items-center gap-1 transition-colors cursor-pointer"
-              >
-                {expandedGroups.length === enrichedGroups.length ? (
-                  <>
-                    <ChevronsDownUp size={11} /> Collapse
-                  </>
-                ) : (
-                  <>
-                    <ExpandAllIcon size={11} /> Expand
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          <div className="space-y-1">
-            {filteredGroups.map((group, idx) => {
-              const GroupIcon = group.icon;
-              const expanded =
-                searchQuery.trim().length > 0 || expandedGroups.includes(group.label);
-              const active = group.items.some((item) => item.href === activeHref);
-              const prevDomain = idx > 0 ? filteredGroups[idx - 1].domain : null;
-              const showDomainDivider =
-                !searchQuery && !isCollapsed && group.domain !== prevDomain;
-
-              const groupBadgeCount = group.items.reduce((acc, item) => {
-                const numeric = parseInt(item.badge || '0', 10);
-                return acc + (Number.isNaN(numeric) ? 0 : numeric);
-              }, 0);
-
-              return (
-                <div key={group.label}>
-                  {showDomainDivider && (
-                    <div className="pt-2.5 pb-1 px-2.5">
-                      <span className="text-[9px] font-bold uppercase tracking-widest text-servora-teal/70">
-                        {domainHeaders[group.domain]}
-                      </span>
-                    </div>
+          ) : (
+            <>
+              {!searchQuery && visibleStandaloneItems.length > 0 && (
+                <div className="mb-2.5">
+                  {!isCollapsed && (
+                    <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
+                      Quick Terminals
+                    </p>
                   )}
+                  <div className="space-y-0.5">
+                    {visibleStandaloneItems.map((item) => renderNavItem(item, false, false))}
+                  </div>
+                </div>
+              )}
 
-                  <section
-                    className="relative rounded-lg transition-colors"
-                    onMouseEnter={() => isCollapsed && setHoveredGroup(group.label)}
-                    onMouseLeave={() => isCollapsed && setHoveredGroup(null)}
+              {!searchQuery && !isCollapsed && pinnedItems.length > 0 && (
+                <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
+                  <div className="mb-1 px-2.5 flex items-center justify-between">
+                    <span className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-amber-400/80 flex items-center gap-1">
+                      <Star size={10} fill="currentColor" /> Pinned Favorites
+                    </span>
+                    <span className="text-[9px] font-mono text-servora-pale/35">
+                      {pinnedItems.length}
+                    </span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {pinnedItems.map((item) => renderNavItem(item, false, true))}
+                  </div>
+                </div>
+              )}
+
+              {!searchQuery && !isCollapsed && recentItems.length > 0 && (
+                <div className="mb-2.5 pt-1.5 border-t border-white/[0.06]">
+                  <p className="mb-1 px-2.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
+                    Recently Visited
+                  </p>
+                  <div className="space-y-0.5">
+                    {recentItems.slice(0, 3).map((item) => renderNavItem(item, false, false))}
+                  </div>
+                </div>
+              )}
+
+              {!searchQuery && !isCollapsed && enrichedGroups.length > 0 && (
+                <div className="pt-2 mb-1 px-2.5 flex items-center justify-between border-t border-white/[0.06]">
+                  <p className="text-[9.5px] font-bold uppercase tracking-[0.14em] text-servora-pale/40">
+                    Navigation Modules
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleExpandAll}
+                    title={
+                      expandedGroups.length === enrichedGroups.length
+                        ? 'Collapse All'
+                        : 'Expand All'
+                    }
+                    className="text-[10px] font-semibold text-servora-pale/40 hover:text-servora-teal flex items-center gap-1 transition-colors cursor-pointer"
                   >
-                    <button
-                      type="button"
-                      onClick={() => toggleGroup(group.label)}
-                      title={isCollapsed ? group.label : undefined}
-                      aria-expanded={expanded}
-                      className={[
-                        'group flex w-full items-center gap-2.5 rounded-lg text-left text-xs font-semibold transition-all duration-150 cursor-pointer',
-                        isCollapsed ? 'justify-center p-2.5' : 'px-2.5 py-2',
-                        active && (!expanded || isCollapsed)
-                          ? 'text-white bg-white/[0.06]'
-                          : 'text-servora-pale/80 hover:bg-white/[0.05] hover:text-white',
-                      ].join(' ')}
-                    >
-                      <GroupIcon
-                        size={16}
-                        className={[
-                          'shrink-0 transition-colors',
-                          active
-                            ? 'text-servora-teal'
-                            : 'text-servora-pale/50 group-hover:text-servora-teal',
-                        ].join(' ')}
-                      />
-                      {!isCollapsed && (
-                        <>
-                          <span className="min-w-0 flex-1 truncate tracking-tight">
-                            {group.label}
+                    {expandedGroups.length === enrichedGroups.length ? (
+                      <>
+                        <ChevronsDownUp size={11} /> Collapse
+                      </>
+                    ) : (
+                      <>
+                        <ExpandAllIcon size={11} /> Expand
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                {filteredGroups.map((group, idx) => {
+                  const GroupIcon = group.icon;
+                  const expanded =
+                    searchQuery.trim().length > 0 || expandedGroups.includes(group.label);
+                  const active = group.items.some((item) => item.href === activeHref);
+                  const prevDomain = idx > 0 ? filteredGroups[idx - 1].domain : null;
+                  const showDomainDivider =
+                    !searchQuery && !isCollapsed && group.domain !== prevDomain;
+
+                  const groupBadgeCount = group.items.reduce((acc, item) => {
+                    const numeric = parseInt(item.badge || '0', 10);
+                    return acc + (Number.isNaN(numeric) ? 0 : numeric);
+                  }, 0);
+
+                  return (
+                    <div key={group.label}>
+                      {showDomainDivider && (
+                        <div className="pt-2.5 pb-1 px-2.5">
+                          <span className="text-[9px] font-bold uppercase tracking-widest text-servora-teal/70">
+                            {domainHeaders[group.domain]}
                           </span>
-                          {!expanded && groupBadgeCount > 0 && (
-                            <span className="px-1.5 py-0.2 text-[9px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              {groupBadgeCount}
-                            </span>
-                          )}
-                          <ChevronDown
-                            size={13}
+                        </div>
+                      )}
+
+                      <section
+                        className="relative rounded-lg transition-colors"
+                        onMouseEnter={() => isCollapsed && setHoveredGroup(group.label)}
+                        onMouseLeave={() => isCollapsed && setHoveredGroup(null)}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(group.label)}
+                          title={isCollapsed ? group.label : undefined}
+                          aria-expanded={expanded}
+                          className={[
+                            'group flex w-full items-center gap-2.5 rounded-lg text-left text-xs font-semibold transition-all duration-150 cursor-pointer',
+                            isCollapsed ? 'justify-center p-2.5' : 'px-2.5 py-2',
+                            active && (!expanded || isCollapsed)
+                              ? 'text-white bg-white/[0.06]'
+                              : 'text-servora-pale/80 hover:bg-white/[0.05] hover:text-white',
+                          ].join(' ')}
+                        >
+                          <GroupIcon
+                            size={16}
                             className={[
-                              'shrink-0 text-servora-pale/40 transition-transform duration-200 group-hover:text-white',
-                              expanded ? 'rotate-180 text-servora-teal' : '',
+                              'shrink-0 transition-colors',
+                              active
+                                ? 'text-servora-teal'
+                                : 'text-servora-pale/50 group-hover:text-servora-teal',
                             ].join(' ')}
                           />
-                        </>
-                      )}
-                    </button>
+                          {!isCollapsed && (
+                            <>
+                              <span className="min-w-0 flex-1 truncate tracking-tight">
+                                {group.label}
+                              </span>
+                              {!expanded && groupBadgeCount > 0 && (
+                                <span className="px-1.5 py-0.2 text-[9px] font-bold rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                  {groupBadgeCount}
+                                </span>
+                              )}
+                              <ChevronDown
+                                size={13}
+                                className={[
+                                  'shrink-0 text-servora-pale/40 transition-transform duration-200 group-hover:text-white',
+                                  expanded ? 'rotate-180 text-servora-teal' : '',
+                                ].join(' ')}
+                              />
+                            </>
+                          )}
+                        </button>
 
-                    {expanded && !isCollapsed && (
-                      <div className="mt-0.5 space-y-0.5 border-l border-white/[0.08] ml-4 pl-1 transition-all">
-                        {group.items.map((item) => renderNavItem(item, true, true))}
-                      </div>
-                    )}
+                        {expanded && !isCollapsed && (
+                          <div className="mt-0.5 space-y-0.5 border-l border-white/[0.08] ml-4 pl-1 transition-all">
+                            {group.items.map((item) => renderNavItem(item, true, true))}
+                          </div>
+                        )}
 
-                    {isCollapsed && hoveredGroup === group.label && (
-                      <div className="absolute left-full top-0 ml-2 z-50 w-60 rounded-xl bg-[#071739] border border-white/10 shadow-2xl p-2 space-y-1">
-                        <div className="px-2.5 py-1 text-[11px] font-bold text-white border-b border-white/10 mb-1 flex items-center justify-between">
-                          <span>{group.label}</span>
-                          <span className="text-[9px] font-mono text-servora-pale/40">
-                            {group.items.length}
-                          </span>
-                        </div>
-                        <div className="space-y-0.5 max-h-72 overflow-y-auto custom-scrollbar">
-                          {group.items.map((item) => (
-                            <Link
-                              key={item.href}
-                              href={item.href}
-                              onClick={closeMobileMenu}
-                              className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-servora-pale/80 hover:bg-white/10 hover:text-white transition-colors"
-                            >
-                              <div className="flex items-center gap-2 min-w-0">
-                                <item.icon size={13} className="text-servora-teal shrink-0" />
-                                <span className="truncate">{item.label}</span>
-                              </div>
-                            </Link>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </section>
+                        {isCollapsed && hoveredGroup === group.label && (
+                          <div className="absolute left-full top-0 ml-2 z-50 w-60 rounded-xl bg-[#071739] border border-white/10 shadow-2xl p-2 space-y-1">
+                            <div className="px-2.5 py-1 text-[11px] font-bold text-white border-b border-white/10 mb-1 flex items-center justify-between">
+                              <span>{group.label}</span>
+                              <span className="text-[9px] font-mono text-servora-pale/40">
+                                {group.items.length}
+                              </span>
+                            </div>
+                            <div className="space-y-0.5 max-h-72 overflow-y-auto custom-scrollbar">
+                              {group.items.map((item) => (
+                                <Link
+                                  key={item.href}
+                                  href={item.href}
+                                  onClick={closeMobileMenu}
+                                  className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-servora-pale/80 hover:bg-white/10 hover:text-white transition-colors"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <item.icon size={13} className="text-servora-teal shrink-0" />
+                                    <span className="truncate">{item.label}</span>
+                                  </div>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </section>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!searchQuery && canAccessHelp && (
+                <div
+                  className={`pt-3 border-t border-white/[0.08] mt-3 ${
+                    isCollapsed ? 'flex justify-center' : ''
+                  }`}
+                >
+                  {renderNavItem(
+                    {
+                      label: 'Help & Knowledgebase',
+                      href: '/help',
+                      icon: CircleHelp,
+                    },
+                    false,
+                    false
+                  )}
                 </div>
-              );
-            })}
-          </div>
-
-          {!searchQuery && (
-            <div
-              className={`pt-3 border-t border-white/[0.08] mt-3 ${
-                isCollapsed ? 'flex justify-center' : ''
-              }`}
-            >
-              {renderNavItem(
-                {
-                  label: 'Help & Knowledgebase',
-                  href: '/help',
-                  icon: CircleHelp,
-                },
-                false,
-                false
               )}
-            </div>
+            </>
           )}
         </nav>
 

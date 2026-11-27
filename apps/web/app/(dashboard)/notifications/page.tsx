@@ -1,6 +1,7 @@
+// apps/web/app/(dashboard)/notifications/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import {
   Bell,
@@ -11,7 +12,6 @@ import {
   Check,
   RefreshCw,
   ExternalLink,
-  Filter,
   Layers,
   ChevronRight,
   Clock,
@@ -21,9 +21,11 @@ import {
   Package,
   DollarSign,
   ShieldCheck,
-  ArrowUpRight,
   Sparkles,
   SlidersHorizontal,
+  ChefHat,
+  ShoppingCart,
+  type LucideIcon,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
 
@@ -61,17 +63,21 @@ interface TelemetryMetrics {
 type TabCategory = 'ALL' | 'ACTION_REQUIRED' | 'FYI_STREAM' | 'COMPLIANCE_AUDIT';
 type SeverityFilter = 'ALL' | 'CRITICAL' | 'WARNING' | 'INFO' | 'SUCCESS';
 
-const MODULE_ICONS: Record<string, any> = {
-  WORKFORCE_HCM: Users,
-  INVENTORY_SCM: Package,
-  FINANCE: DollarSign,
-  GUEST_CRM: Sparkles,
-  SECURITY: ShieldCheck,
-  SYSTEM: SlidersHorizontal,
+const MODULE_META: Record<string, { label: string; icon: LucideIcon }> = {
+  KDS: { label: 'Kitchen & Food Ready (KDS)', icon: ChefHat },
+  POS: { label: 'Point of Sale (POS)', icon: ShoppingCart },
+  WORKFORCE_HCM: { label: 'Workforce & HCM', icon: Users },
+  INVENTORY_SCM: { label: 'Inventory & SCM', icon: Package },
+  GUEST_CRM: { label: 'Guest & CRM', icon: Sparkles },
+  FINANCE: { label: 'Finance & Treasury', icon: DollarSign },
+  TREASURY: { label: 'Cash & Treasury', icon: DollarSign },
+  SECURITY: { label: 'Security & Auth', icon: ShieldCheck },
+  SYSTEM: { label: 'System Operations', icon: SlidersHorizontal },
 };
 
 export default function NotificationsPage() {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+  const [allowedModules, setAllowedModules] = useState<string[]>([]);
   const [telemetry, setTelemetry] = useState<TelemetryMetrics>({
     total: 0,
     unread: 0,
@@ -81,8 +87,8 @@ export default function NotificationsPage() {
   });
   const [isLoading, setIsLoading] = useState(true);
 
-  // Filters & State
-  const [activeTab, setActiveTab] = useState<TabCategory>('ACTION_REQUIRED');
+  // Filters & State (default to ALL so KDS food-ready FYI alerts are immediately visible)
+  const [activeTab, setActiveTab] = useState<TabCategory>('ALL');
   const [selectedSeverity, setSelectedSeverity] = useState<SeverityFilter>('ALL');
   const [selectedModule, setSelectedModule] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -99,14 +105,21 @@ export default function NotificationsPage() {
       if (showUnreadOnly) params.set('isRead', 'FALSE');
       if (searchQuery.trim()) params.set('search', searchQuery.trim());
 
+      const activeBranchId =
+        typeof window !== 'undefined' ? localStorage.getItem('servora_active_branch_id') : null;
+      if (activeBranchId) params.set('branchId', activeBranchId);
+
       const res = await fetchApi(`/api/v1/notifications?${params.toString()}`);
       if (res?.data) {
         setNotifications(res.data.notifications || []);
+        if (Array.isArray(res.data.allowedModules)) {
+          setAllowedModules(res.data.allowedModules);
+        }
         if (res.data.telemetry) {
           setTelemetry(res.data.telemetry);
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load notifications stream:', err);
     } finally {
       setIsLoading(false);
@@ -122,12 +135,11 @@ export default function NotificationsPage() {
   const handleMarkAsRead = async (id: number) => {
     try {
       await fetchApi(`/api/v1/notifications/${id}/read`, { method: 'PATCH' });
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true } : n))
-      );
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
       setTelemetry((prev) => ({ ...prev, unread: Math.max(0, prev.unread - 1) }));
-    } catch (err: any) {
-      alert(err.message || 'Failed to acknowledge notification');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to acknowledge notification';
+      alert(msg);
     }
   };
 
@@ -149,8 +161,9 @@ export default function NotificationsPage() {
       setToastMessage(res.message || `Action executed: ${item.title}`);
       setTimeout(() => setToastMessage(null), 4000);
       fetchNotifications();
-    } catch (err: any) {
-      alert(err.message || 'Failed to resolve task');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to resolve task';
+      alert(msg);
     }
   };
 
@@ -159,10 +172,11 @@ export default function NotificationsPage() {
       await fetchApi('/api/v1/notifications/read-all', { method: 'PATCH' });
       setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
       setTelemetry((prev) => ({ ...prev, unread: 0, critical: 0, warnings: 0 }));
-      setToastMessage('All pending operational notifications marked as read.');
+      setToastMessage('All authorized notifications marked as read.');
       setTimeout(() => setToastMessage(null), 3000);
-    } catch (err: any) {
-      alert(err.message || 'Failed to batch acknowledge alerts');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to batch acknowledge alerts';
+      alert(msg);
     }
   };
 
@@ -183,7 +197,7 @@ export default function NotificationsPage() {
       case 'SUCCESS':
         return (
           <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md font-bold text-[10px] uppercase flex items-center gap-1">
-            <CheckCircle2 size={11} /> Success
+            <CheckCircle2 size={11} /> Ready / Success
           </span>
         );
       default:
@@ -202,24 +216,25 @@ export default function NotificationsPage() {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Link
-              href="/dashboard"
+              href="/pos"
               className="text-xs font-semibold text-servora-deepTeal hover:text-servora-core flex items-center gap-1 transition-colors"
             >
-              Enterprise Control <ChevronRight size={12} />
+              Operations <ChevronRight size={12} />
             </Link>
-            <span className="text-xs font-bold text-servora-navy">Action & Escalation Bus</span>
+            <span className="text-xs font-bold text-servora-navy">Action &amp; Escalation Bus</span>
           </div>
           <h1 className="text-xl font-bold text-servora-navy flex items-center gap-2">
             <Bell className="text-servora-core" size={24} />
-            Enterprise Alert Inbox & Actionable Orchestration Feed
+            Operational Alert Inbox
           </h1>
           <p className="text-xs text-servora-deepTeal mt-0.5">
-            Workday-style intelligent inbox routing overtime exceptions, autonomous replenishment PO authorizations, and compliance telemetry.
+            Role-scoped real-time notifications filtered strictly to your branch and operational clearances.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 w-full sm:w-auto justify-between sm:justify-end">
           <button
+            type="button"
             onClick={handleMarkAllAsRead}
             disabled={telemetry.unread === 0}
             className="px-3.5 py-2 bg-servora-navy text-white text-xs font-bold rounded-xl hover:bg-slate-800 transition-colors shadow-xs disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
@@ -227,6 +242,7 @@ export default function NotificationsPage() {
             <Check size={14} /> Acknowledge All ({telemetry.unread})
           </button>
           <button
+            type="button"
             onClick={fetchNotifications}
             title="Refresh Feed"
             className="p-2 bg-slate-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-servora-navy transition-colors cursor-pointer shadow-xs"
@@ -247,7 +263,9 @@ export default function NotificationsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Action Required</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Action Required
+            </span>
             <p className="text-xl font-bold font-mono text-servora-core mt-0.5">
               {telemetry.actionRequired} Tasks
             </p>
@@ -260,11 +278,13 @@ export default function NotificationsPage() {
 
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Critical Alerts</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Critical Alerts
+            </span>
             <p className="text-xl font-bold font-mono text-rose-700 mt-0.5">
               {telemetry.critical} Urgent
             </p>
-            <span className="text-[10px] text-rose-600 font-medium">Overtime & Stockout Risks</span>
+            <span className="text-[10px] text-rose-600 font-medium">Immediate Attention</span>
           </div>
           <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl">
             <ShieldAlert size={18} />
@@ -273,7 +293,9 @@ export default function NotificationsPage() {
 
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Warnings</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Warnings
+            </span>
             <p className="text-xl font-bold font-mono text-amber-600 mt-0.5">
               {telemetry.warnings} Active
             </p>
@@ -286,11 +308,13 @@ export default function NotificationsPage() {
 
         <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex items-center justify-between">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Total Unread</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Total Unread
+            </span>
             <p className="text-xl font-bold font-mono text-servora-navy mt-0.5">
               {telemetry.unread}
             </p>
-            <span className="text-[10px] text-gray-500 font-medium">Across all outlets</span>
+            <span className="text-[10px] text-gray-500 font-medium">In your scope</span>
           </div>
           <div className="p-2.5 bg-slate-100 text-gray-700 rounded-xl">
             <Layers size={18} />
@@ -298,12 +322,37 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* 3. WORKDAY / JOULE INBOX TABS & CONTROLS */}
+      {/* 3. INBOX TABS & CONTROLS */}
       <div className="bg-white p-4 rounded-2xl border border-gray-200 shadow-xs space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3">
-          {/* Functional Categorization Tabs */}
-          <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold">
+          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-xl text-xs font-bold">
             <button
+              type="button"
+              onClick={() => setActiveTab('ALL')}
+              className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer ${
+                activeTab === 'ALL'
+                  ? 'bg-white text-servora-navy shadow-xs'
+                  : 'text-gray-500 hover:text-black'
+              }`}
+            >
+              All Alerts ({telemetry.total})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('FYI_STREAM')}
+              className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+                activeTab === 'FYI_STREAM'
+                  ? 'bg-white text-servora-navy shadow-xs'
+                  : 'text-gray-500 hover:text-black'
+              }`}
+            >
+              <ChefHat size={13} className="text-emerald-600" />
+              <span>Kitchen &amp; Activity Feed</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setActiveTab('ACTION_REQUIRED')}
               className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'ACTION_REQUIRED'
@@ -316,18 +365,7 @@ export default function NotificationsPage() {
             </button>
 
             <button
-              onClick={() => setActiveTab('FYI_STREAM')}
-              className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
-                activeTab === 'FYI_STREAM'
-                  ? 'bg-white text-servora-navy shadow-xs'
-                  : 'text-gray-500 hover:text-black'
-              }`}
-            >
-              <Info size={13} className="text-blue-600" />
-              <span>FYI Activity Feed</span>
-            </button>
-
-            <button
+              type="button"
               onClick={() => setActiveTab('COMPLIANCE_AUDIT')}
               className={`px-3.5 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                 activeTab === 'COMPLIANCE_AUDIT'
@@ -336,18 +374,7 @@ export default function NotificationsPage() {
               }`}
             >
               <ShieldCheck size={13} className="text-emerald-600" />
-              <span>Compliance & Audit</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('ALL')}
-              className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                activeTab === 'ALL'
-                  ? 'bg-white text-servora-navy shadow-xs'
-                  : 'text-gray-500 hover:text-black'
-              }`}
-            >
-              All Stream Logs
+              <span>Compliance &amp; Audit</span>
             </button>
           </div>
 
@@ -362,40 +389,45 @@ export default function NotificationsPage() {
           </label>
         </div>
 
-        {/* Secondary Filters */}
+        {/* Secondary Filters (Module dropdown dynamically scoped to authorized modules) */}
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={selectedSeverity}
-              onChange={(e) => setSelectedSeverity(e.target.value as any)}
+              onChange={(e) => setSelectedSeverity(e.target.value as SeverityFilter)}
               className="px-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-bold text-servora-navy focus:outline-none cursor-pointer"
             >
               <option value="ALL">All Severities</option>
               <option value="CRITICAL">Critical Only</option>
               <option value="WARNING">Warnings Only</option>
               <option value="INFO">Informational Only</option>
-              <option value="SUCCESS">Success Only</option>
+              <option value="SUCCESS">Ready / Success Only</option>
             </select>
 
-            <select
-              value={selectedModule}
-              onChange={(e) => setSelectedModule(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-bold text-servora-navy focus:outline-none cursor-pointer"
-            >
-              <option value="ALL">All Modules</option>
-              <option value="WORKFORCE_HCM">Workforce & HCM</option>
-              <option value="INVENTORY_SCM">Inventory & SCM</option>
-              <option value="GUEST_CRM">Guest & CRM</option>
-              <option value="FINANCE">Finance & Treasury</option>
-              <option value="SECURITY">Security & Auth</option>
-            </select>
+            {allowedModules.length > 1 && (
+              <select
+                value={selectedModule}
+                onChange={(e) => setSelectedModule(e.target.value)}
+                className="px-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-bold text-servora-navy focus:outline-none cursor-pointer"
+              >
+                <option value="ALL">All Authorized Modules</option>
+                {allowedModules.map((mod) => (
+                  <option key={mod} value={mod}>
+                    {MODULE_META[mod]?.label || mod.replace(/_/g, ' ')}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" size={13} />
+            <Search
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+              size={13}
+            />
             <input
               type="text"
-              placeholder="Search notifications or entity ID..."
+              placeholder="Search notifications or order #..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-7 pr-3 py-1.5 bg-slate-50 border border-gray-200 rounded-xl text-xs font-medium focus:outline-none focus:border-servora-core w-44 sm:w-64"
@@ -408,7 +440,7 @@ export default function NotificationsPage() {
       <div className="space-y-3">
         {isLoading && notifications.length === 0 ? (
           <div className="bg-white p-12 rounded-2xl border border-gray-200 text-center text-xs text-servora-deepTeal animate-pulse">
-            Querying system alert bus...
+            Querying authorized alert stream...
           </div>
         ) : notifications.length === 0 ? (
           <div className="bg-white rounded-2xl border border-dashed border-gray-200 p-16 text-center space-y-3">
@@ -418,13 +450,14 @@ export default function NotificationsPage() {
             <div className="max-w-sm mx-auto space-y-1">
               <h3 className="text-sm font-bold text-servora-navy">No Active Notifications</h3>
               <p className="text-xs text-gray-500 leading-relaxed">
-                All operational metrics, labor compliance, and inventory levels are within normal limits. Real-time events will be routed here as they occur.
+                You are all caught up. Authorized real-time updates for your branch and role will appear here automatically.
               </p>
             </div>
           </div>
         ) : (
           notifications.map((n) => {
-            const ModuleIcon = MODULE_ICONS[n.module] || SlidersHorizontal;
+            const ModuleIcon = MODULE_META[n.module]?.icon || SlidersHorizontal;
+            const moduleLabel = MODULE_META[n.module]?.label || n.module.replace(/_/g, ' ');
             const hasAction = n.category === 'ACTION_REQUIRED' && !n.isResolved;
 
             return (
@@ -442,7 +475,7 @@ export default function NotificationsPage() {
 
                     <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-slate-100 text-gray-700 px-2 py-0.5 rounded-md flex items-center gap-1 border border-gray-200">
                       <ModuleIcon size={11} className="text-servora-core" />
-                      {n.module.replace(/_/g, ' ')}
+                      {moduleLabel}
                     </span>
 
                     {n.branchName && (
@@ -452,7 +485,12 @@ export default function NotificationsPage() {
                     )}
 
                     <span className="text-[11px] text-gray-400 font-mono flex items-center gap-1">
-                      <Clock size={11} /> {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} &bull; {new Date(n.createdAt).toLocaleDateString()}
+                      <Clock size={11} />{' '}
+                      {new Date(n.createdAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}{' '}
+                      &bull; {new Date(n.createdAt).toLocaleDateString()}
                     </span>
                   </div>
 
@@ -472,7 +510,8 @@ export default function NotificationsPage() {
                     <div className="text-[10px] text-emerald-700 font-mono flex items-center gap-1 pt-0.5">
                       <CheckCircle2 size={11} />
                       <span>
-                        Resolved {new Date(n.resolvedAt).toLocaleDateString()} by {n.resolvedByName || 'Operator'}
+                        Resolved {new Date(n.resolvedAt).toLocaleDateString()} by{' '}
+                        {n.resolvedByName || 'Operator'}
                       </span>
                     </div>
                   )}
@@ -492,6 +531,7 @@ export default function NotificationsPage() {
 
                   {hasAction ? (
                     <button
+                      type="button"
                       onClick={() => handleResolveAction(n)}
                       className="px-3.5 py-2 bg-servora-core text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
                     >
@@ -499,6 +539,7 @@ export default function NotificationsPage() {
                     </button>
                   ) : !n.isRead ? (
                     <button
+                      type="button"
                       onClick={() => handleMarkAsRead(n.id)}
                       className="px-3.5 py-2 bg-slate-100 text-servora-navy text-xs font-bold rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
                     >

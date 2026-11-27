@@ -28,6 +28,7 @@ import {
   getRequiredPermissionsForPath,
   getDefaultLandingRoute,
   getLandingRouteLabel,
+  isKioskOnlySession,
 } from '@/lib/rbac';
 
 interface UserProfile {
@@ -73,6 +74,9 @@ interface BranchSwitchedDetail {
 
 function clearSessionStorage(): void {
   localStorage.removeItem('servora_token');
+  localStorage.removeItem('token');
+  localStorage.removeItem('servora_kiosk_mode');
+  localStorage.removeItem('servora_kiosk_station_token');
   localStorage.removeItem('servora_active_branch_id');
   localStorage.removeItem('servora_active_branch_name');
   localStorage.removeItem('servora_cached_workspace');
@@ -85,6 +89,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [, startTransition] = useTransition();
 
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isKioskModeFlag, setIsKioskModeFlag] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -125,7 +130,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, []);
 
-  // Listen for branch changes from sidebar or child terminals (e.g. POS)
+  // Listen for branch switches, POS PIN operator switches, and kiosk state updates
   useEffect(() => {
     const handleBranchSwitched = (e: Event) => {
       const detail = (e as CustomEvent<BranchSwitchedDetail>).detail;
@@ -135,8 +140,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       }
     };
 
+    const handleOperatorSwitched = (e: Event) => {
+      const nextUser = (e as CustomEvent<UserProfile>).detail;
+      if (nextUser?.id) {
+        setWorkspace((prev) => (prev ? { ...prev, user: nextUser } : prev));
+      }
+    };
+
+    const handleKioskModeChanged = () => {
+      setIsKioskModeFlag(localStorage.getItem('servora_kiosk_mode') === 'true');
+    };
+
     window.addEventListener('servora:branch-switched', handleBranchSwitched);
-    return () => window.removeEventListener('servora:branch-switched', handleBranchSwitched);
+    window.addEventListener('servora:operator-switched', handleOperatorSwitched);
+    window.addEventListener('servora:kiosk-mode-changed', handleKioskModeChanged);
+    return () => {
+      window.removeEventListener('servora:branch-switched', handleBranchSwitched);
+      window.removeEventListener('servora:operator-switched', handleOperatorSwitched);
+      window.removeEventListener('servora:kiosk-mode-changed', handleKioskModeChanged);
+    };
   }, []);
 
   // Offline-resilient session & branch bootstrap with reconnect listener
@@ -151,9 +173,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       return;
     }
 
+    setIsKioskModeFlag(localStorage.getItem('servora_kiosk_mode') === 'true');
     setIsAuthorized(true);
 
-    // 1. Hydrate immediately from cached workspace so offline reloads keep RBAC & branch context
+    // 1. Hydrate immediately from cached workspace
     try {
       const cachedWorkspace = localStorage.getItem('servora_cached_workspace');
       if (cachedWorkspace) {
@@ -176,7 +199,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
 
     const loadSessionAndBranches = async () => {
-      // Pause background polling while disconnected
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         return;
       }
@@ -191,6 +213,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         if (meRes?.data) {
           setWorkspace(meRes.data);
           localStorage.setItem('servora_cached_workspace', JSON.stringify(meRes.data));
+
+          // Capability-based (SaaS-safe) check via `pos.kiosk` permission — never hardcoded role names
+          const meIsKiosk = isKioskOnlySession(
+            meRes.data.user?.permissions,
+            meRes.data.user?.role
+          );
+
+          if (meIsKiosk) {
+            localStorage.setItem('servora_kiosk_mode', 'true');
+            if (!localStorage.getItem('servora_kiosk_station_token')) {
+              const currentTok = localStorage.getItem('servora_token');
+              if (currentTok) localStorage.setItem('servora_kiosk_station_token', currentTok);
+            }
+            setIsKioskModeFlag(true);
+            window.dispatchEvent(new CustomEvent('servora:kiosk-mode-changed'));
+          }
+
           if (!localStorage.getItem('servora_active_branch_id') && meRes.data.branch?.id) {
             localStorage.setItem('servora_active_branch_id', String(meRes.data.branch.id));
             localStorage.setItem('servora_active_branch_name', meRes.data.branch.name);
@@ -238,7 +277,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setNotifications(notifRes.data.notifications);
         }
       } catch (error: unknown) {
-        // Force logout only on a genuine 401 unauthorized response
         if (error instanceof ApiError && error.status === 401) {
           clearSessionStorage();
           const currentPath =
@@ -249,7 +287,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           return;
         }
 
-        // Suppress Next.js dev error overlay during Wi-Fi drops or upstream DB outages
         if (
           error instanceof ApiError &&
           (error.isNetworkError || error.status === 0 || error.status >= 500)
@@ -272,7 +309,42 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     };
   }, [router]);
 
+  const userPerms = workspace?.user.permissions;
+  const userRole = workspace?.user.role;
+
+  // Dedicated Kiosk Shell Detection: strictly permission-driven (`pos.kiosk`) or active kiosk flag
+  const isDedicatedKioskShell =
+    isKioskModeFlag || isKioskOnlySession(userPerms, userRole);
+
+  // Hard route lock: Kiosk stations can ONLY operate on /pos
+  useEffect(() => {
+    if (isAuthorized && isDedicatedKioskShell && pathname && pathname !== '/pos') {
+      router.replace('/pos');
+    }
+  }, [isAuthorized, isDedicatedKioskShell, pathname, router]);
+
   if (!isAuthorized) return null;
+
+  // Render Dedicated Full-Screen Kiosk Shell (Zero Back-Office Sidebar / Header)
+  if (isDedicatedKioskShell) {
+    if (pathname !== '/pos') {
+      return (
+        <div className="h-screen w-full flex items-center justify-center bg-servora-pale text-xs font-semibold text-servora-deepTeal">
+          Loading POS Kiosk Terminal...
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-screen w-full flex flex-col bg-servora-pale text-servora-navy font-sans text-sm overflow-hidden">
+        <main className="flex-1 h-full w-full overflow-hidden p-2.5 lg:p-4">
+          <div key={activeBranchId ?? 'kiosk'} className="h-full w-full">
+            {children}
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   const handleLogout = () => {
     clearSessionStorage();
@@ -377,10 +449,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const unreadCount = notifications.filter((n) => !n.isRead).length;
-
-  const userPerms = workspace?.user.permissions;
-  const userRole = workspace?.user.role;
-
   const requiredPermissions = getRequiredPermissionsForPath(pathname);
   const isWorkspaceHydrated = workspace !== null;
   const isPageAuthorized = isWorkspaceHydrated
@@ -394,6 +462,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const canManageBranches = canAccessRoute('/settings/branches', userPerms, userRole);
   const canViewTransfers = canAccessRoute('/inventory/transfers', userPerms, userRole);
   const canViewBusiness = canAccessRoute('/settings/business', userPerms, userRole);
+  const canViewHelp = canAccessRoute('/help', userPerms, userRole);
+  const canViewNotifications = canAccessRoute('/notifications', userPerms, userRole);
 
   return (
     <div className="h-screen w-full flex bg-servora-pale text-servora-navy font-sans text-sm overflow-hidden">
@@ -412,7 +482,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       <div className="flex-1 flex flex-col min-w-0 h-full">
         {/* Top Header Shell */}
         <header className="h-16 shrink-0 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6 z-20 shadow-xs">
-          {/* Left section: Mobile Toggle, Desktop Collapse, Dynamic Title */}
           <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
@@ -440,7 +509,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
 
-          {/* Right section: Action Buttons, Branch Context, Alerts, Profile */}
           <div className="flex items-center gap-2 lg:gap-3 shrink-0">
             {pathname !== '/pos' && canAccessRoute('/pos', userPerms, userRole) && (
               <Link
@@ -452,7 +520,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               </Link>
             )}
 
-            {/* Active Operating Branch Context (Interactive Switcher for Multi-Branch, Read-Only Badge for Single-Branch) */}
             <div ref={branchRef} className="relative">
               {canSwitchBranches ? (
                 <>
@@ -540,84 +607,84 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               )}
             </div>
 
-            {/* Notification Center Popover */}
-            <div ref={notifRef} className="relative">
-              <button
-                type="button"
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="relative p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
-                title="Notifications & Operational Alerts"
-              >
-                <Bell size={17} />
-                {unreadCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
-                )}
-              </button>
+            {canViewNotifications && (
+              <div ref={notifRef} className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                  className="relative p-2 text-servora-navy/70 hover:text-servora-navy hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
+                  title="Notifications & Operational Alerts"
+                >
+                  <Bell size={17} />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
+                  )}
+                </button>
 
-              {isNotificationsOpen && (
-                <div className="absolute right-0 top-11 w-80 bg-white border border-gray-100 rounded-2xl shadow-xl p-3 z-30 animate-in fade-in zoom-in-95">
-                  <div className="flex items-center justify-between pb-2 border-b border-gray-100 mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-servora-navy">
-                        Operational Alerts
-                      </span>
-                      <span className="px-1.5 py-0.2 bg-servora-pale text-servora-core text-[10px] font-bold rounded-full">
-                        {unreadCount}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleMarkAllRead}
-                      className="text-[10px] font-semibold text-gray-400 hover:text-servora-navy cursor-pointer"
-                    >
-                      Mark all read
-                    </button>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                    {notifications.length === 0 ? (
-                      <div className="py-6 text-center text-xs text-gray-400 italic">
-                        No pending alerts
+                {isNotificationsOpen && (
+                  <div className="absolute right-0 top-11 w-80 bg-white border border-gray-100 rounded-2xl shadow-xl p-3 z-30 animate-in fade-in zoom-in-95">
+                    <div className="flex items-center justify-between pb-2 border-b border-gray-100 mb-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-servora-navy">
+                          Operational Alerts
+                        </span>
+                        <span className="px-1.5 py-0.2 bg-servora-pale text-servora-core text-[10px] font-bold rounded-full">
+                          {unreadCount}
+                        </span>
                       </div>
-                    ) : (
-                      notifications.map((notif) => (
-                        <div
-                          key={notif.id}
-                          className={`p-2.5 rounded-xl border text-xs transition-colors ${
-                            notif.isRead
-                              ? 'bg-white border-gray-100'
-                              : 'bg-slate-50 border-gray-200'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="font-bold text-servora-navy">{notif.title}</span>
-                            <span className="text-[10px] text-gray-400 font-mono">
-                              {new Date(notif.createdAt).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-600 leading-snug">{notif.detail}</p>
+                      <button
+                        type="button"
+                        onClick={handleMarkAllRead}
+                        className="text-[10px] font-semibold text-gray-400 hover:text-servora-navy cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <div className="py-6 text-center text-xs text-gray-400 italic">
+                          No pending alerts
                         </div>
-                      ))
-                    )}
-                  </div>
+                      ) : (
+                        notifications.map((notif) => (
+                          <div
+                            key={notif.id}
+                            className={`p-2.5 rounded-xl border text-xs transition-colors ${
+                              notif.isRead
+                                ? 'bg-white border-gray-100'
+                                : 'bg-slate-50 border-gray-200'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="font-bold text-servora-navy">{notif.title}</span>
+                              <span className="text-[10px] text-gray-400 font-mono">
+                                {new Date(notif.createdAt).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-gray-600 leading-snug">{notif.detail}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
 
-                  <div className="pt-2 mt-2 border-t border-gray-100 text-center">
-                    <Link
-                      href="/notifications"
-                      onClick={() => setIsNotificationsOpen(false)}
-                      className="text-xs font-bold text-servora-core hover:underline"
-                    >
-                      View All System Activity &rarr;
-                    </Link>
+                    <div className="pt-2 mt-2 border-t border-gray-100 text-center">
+                      <Link
+                        href="/notifications"
+                        onClick={() => setIsNotificationsOpen(false)}
+                        className="text-xs font-bold text-servora-core hover:underline"
+                      >
+                        View All System Activity &rarr;
+                      </Link>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
 
-            {/* User Profile Popover */}
             <div ref={userRef} className="relative pl-1 border-l border-gray-200">
               <button
                 type="button"
@@ -675,14 +742,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     </Link>
                   )}
 
-                  <Link
-                    href="/help"
-                    onClick={() => setIsUserMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
-                  >
-                    <HelpCircle size={14} className="text-gray-400" />
-                    <span>Documentation &amp; Support</span>
-                  </Link>
+                  {canViewHelp && (
+                    <Link
+                      href="/help"
+                      onClick={() => setIsUserMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold text-servora-navy hover:bg-gray-50 transition-colors"
+                    >
+                      <HelpCircle size={14} className="text-gray-400" />
+                      <span>Documentation &amp; Support</span>
+                    </Link>
+                  )}
 
                   <div className="pt-1 border-t border-gray-100">
                     <button
@@ -700,7 +769,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
         </header>
 
-        {/* Content Viewport with Fail-Closed RBAC Interception & Clean Branch Remount */}
+        {/* Content Viewport with Fail-Closed RBAC Interception */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6 bg-servora-pale">
           {!isWorkspaceHydrated && requiredPermissions.length > 0 ? (
             <div className="min-h-[65vh] flex items-center justify-center text-xs font-semibold text-servora-deepTeal animate-pulse">

@@ -315,11 +315,10 @@ export default function RolesClearancePage() {
                   <button
                     key={role.id}
                     onClick={() => setSelectedRole(role)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
+                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${isSelected
                         ? 'bg-blue-50/70 border-blue-200 shadow-xs'
                         : 'bg-white border-gray-100 hover:bg-slate-50'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-start justify-between">
                       <div className="min-w-0 flex-1">
@@ -442,9 +441,8 @@ export default function RolesClearancePage() {
                           return (
                             <div
                               key={perm.id}
-                              className={`p-3 flex items-start justify-between gap-3 transition-colors ${
-                                isGranted ? 'bg-blue-50/10' : 'opacity-60'
-                              }`}
+                              className={`p-3 flex items-start justify-between gap-3 transition-colors ${isGranted ? 'bg-blue-50/10' : 'opacity-60'
+                                }`}
                             >
                               <div className="space-y-0.5">
                                 <div className="flex items-center gap-2">
@@ -535,7 +533,10 @@ export default function RolesClearancePage() {
                     onChange={(e) =>
                       setFormData({
                         ...formData,
-                        slug: e.target.value.toUpperCase().replace(/\s+/g, '_'),
+                        slug: e.target.value
+                          .toUpperCase()
+                          .replace(/[\s-]+/g, '_')
+                          .replace(/[^A-Z0-9_]/g, ''),
                       })
                     }
                     className="w-full px-3 py-2 bg-slate-50 border border-gray-200 rounded-xl font-mono uppercase font-bold focus:outline-none focus:border-servora-core disabled:opacity-50"
@@ -589,9 +590,8 @@ export default function RolesClearancePage() {
                           return (
                             <label
                               key={perm.id}
-                              className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
-                                checked ? 'bg-blue-50/40 border-blue-200' : 'bg-white border-gray-100 hover:bg-gray-50'
-                              }`}
+                              className={`flex items-start gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${checked ? 'bg-blue-50/40 border-blue-200' : 'bg-white border-gray-100 hover:bg-gray-50'
+                                }`}
                             >
                               <input
                                 type="checkbox"

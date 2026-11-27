@@ -44,8 +44,11 @@ import {
   Wifi,
   WifiOff,
   UploadCloud,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { fetchApi } from '@/lib/api';
+import { isKioskOnlySession } from '@/lib/rbac';
 import { getOptimizedMenuImageUrl } from '@/lib/cloudinary';
 import { syncPosMenuImagesCache } from '@/lib/pos-image-cache';
 import {
@@ -70,6 +73,7 @@ interface UserProfile {
   fullName: string;
   email: string;
   role: string;
+  permissions?: string[];
 }
 
 interface BusinessProfile {
@@ -327,6 +331,13 @@ interface ReceiptTemplate {
   wifiDetails: string | null;
 }
 
+interface ReadyFoodNotification {
+  id: number;
+  title: string;
+  detail: string;
+  createdAt: string;
+}
+
 type PaymentMethod = 'Cash' | 'M-Pesa' | 'Card' | 'Split';
 type MobileTab = 'menu' | 'cart';
 
@@ -375,6 +386,7 @@ const PosCatalogCard = memo(function PosCatalogCard({
   remaining,
   stationName,
   hasModifiers,
+  cartQty,
   onAdd,
 }: {
   item: MenuItem;
@@ -382,6 +394,7 @@ const PosCatalogCard = memo(function PosCatalogCard({
   remaining: number | null;
   stationName: string;
   hasModifiers: boolean;
+  cartQty: number;
   onAdd: (item: MenuItem) => void;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -394,12 +407,14 @@ const PosCatalogCard = memo(function PosCatalogCard({
       type="button"
       onClick={() => onAdd(item)}
       disabled={isOutOfStock}
-      className={`flex flex-col text-left rounded-2xl border overflow-hidden shadow-xs transition-all justify-between group ${
+      className={`flex flex-col text-left rounded-2xl border overflow-hidden shadow-xs transition-all justify-between group min-w-0 ${
         isOutOfStock
           ? 'bg-gray-100 border-gray-200 opacity-60 cursor-not-allowed'
-          : item.isCombo
-            ? 'bg-blue-50/30 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-[0.98] cursor-pointer'
-            : 'bg-white border-gray-200 hover:border-servora-core/50 hover:shadow-md active:scale-[0.98] cursor-pointer'
+          : cartQty > 0
+            ? 'bg-blue-50/40 border-servora-core ring-1 ring-servora-core/20 hover:shadow-md active:scale-[0.98] cursor-pointer'
+            : item.isCombo
+              ? 'bg-blue-50/20 border-blue-200 hover:border-servora-core hover:shadow-md active:scale-[0.98] cursor-pointer'
+              : 'bg-white border-gray-200 hover:border-servora-core/50 hover:shadow-md active:scale-[0.98] cursor-pointer'
       }`}
     >
       {/* Fixed 4:3 Image Container */}
@@ -421,7 +436,7 @@ const PosCatalogCard = memo(function PosCatalogCard({
 
         {/* Top-Left Category / Combo Pill */}
         <span
-          className={`absolute top-2 left-2 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md max-w-[62%] truncate inline-flex items-center gap-1 shadow-xs ${
+          className={`absolute top-1.5 left-1.5 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md max-w-[56%] truncate inline-flex items-center gap-0.5 shadow-xs ${
             item.isCombo
               ? 'bg-servora-core text-white'
               : 'bg-white/90 text-servora-navy backdrop-blur-xs'
@@ -429,7 +444,7 @@ const PosCatalogCard = memo(function PosCatalogCard({
         >
           {item.isCombo ? (
             <>
-              <ShoppingBasket size={9} /> Combo
+              <ShoppingBasket size={9} className="shrink-0" /> Combo
             </>
           ) : (
             item.category
@@ -437,17 +452,17 @@ const PosCatalogCard = memo(function PosCatalogCard({
         </span>
 
         {/* Top-Right Stock / 86ed / Modifier Badge */}
-        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+        <div className="absolute top-1.5 right-1.5 flex flex-col items-end gap-1">
           {isOutOfStock ? (
-            <span className="text-[9px] font-bold uppercase bg-rose-600 text-white px-1.5 py-0.5 rounded-md shadow-xs">
-              Out of Stock
+            <span className="text-[8.5px] font-bold uppercase bg-rose-600 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+              Out
             </span>
           ) : remaining !== null && remaining <= 5 ? (
-            <span className="text-[9px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+            <span className="text-[8.5px] font-bold bg-amber-500 text-white px-1.5 py-0.5 rounded-md shadow-xs">
               {remaining} left
             </span>
           ) : remaining !== null ? (
-            <span className="text-[9px] font-mono font-bold bg-emerald-600/90 text-white px-1.5 py-0.5 rounded-md shadow-xs">
+            <span className="text-[8.5px] font-mono font-bold bg-emerald-600/90 text-white px-1.5 py-0.5 rounded-md shadow-xs">
               {remaining}
             </span>
           ) : null}
@@ -455,18 +470,25 @@ const PosCatalogCard = memo(function PosCatalogCard({
           {hasModifiers && !isOutOfStock && (
             <span
               title="Customizable options"
-              className="inline-flex items-center gap-0.5 text-[9px] font-bold text-white bg-servora-navy/85 px-1.5 py-0.5 rounded-md backdrop-blur-xs"
+              className="inline-flex items-center gap-0.5 text-[8.5px] font-bold text-white bg-servora-navy/85 px-1.5 py-0.5 rounded-md backdrop-blur-xs"
             >
               <SlidersHorizontal size={8} /> Opts
             </span>
           )}
         </div>
+
+        {/* Bottom-Right In-Cart Quantity Indicator */}
+        {cartQty > 0 && (
+          <span className="absolute bottom-1.5 right-1.5 min-w-[22px] h-[22px] px-1.5 rounded-full bg-servora-core text-white text-[10px] font-mono font-bold flex items-center justify-center shadow-md ring-2 ring-white">
+            {cartQty}
+          </span>
+        )}
       </div>
 
       {/* Card Body */}
-      <div className="p-2.5 flex-1 flex flex-col justify-between gap-1.5 w-full">
-        <div>
-          <span className="text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
+      <div className="p-2 sm:p-2.5 flex-1 flex flex-col justify-between gap-1.5 w-full min-w-0">
+        <div className="min-w-0">
+          <span className="text-[11.5px] sm:text-xs font-bold text-servora-navy line-clamp-2 leading-tight group-hover:text-servora-core transition-colors">
             {item.name}
           </span>
           <div className="flex items-center gap-1 text-[9.5px] font-mono text-gray-500 mt-0.5 truncate">
@@ -483,9 +505,9 @@ const PosCatalogCard = memo(function PosCatalogCard({
           </div>
         </div>
 
-        <div className="flex justify-between items-center gap-1 pt-1 border-t border-gray-100">
-          <div className="flex items-baseline gap-1.5 min-w-0">
-            <span className="text-xs font-mono font-bold text-servora-core">
+        <div className="flex justify-between items-center gap-1 pt-1 border-t border-gray-100 min-w-0">
+          <div className="flex items-baseline gap-1 min-w-0">
+            <span className="text-[11.5px] sm:text-xs font-mono font-bold text-servora-core truncate">
               {currencySymbol} {item.price.toLocaleString()}
             </span>
             {item.activePricingRule &&
@@ -493,7 +515,7 @@ const PosCatalogCard = memo(function PosCatalogCard({
               item.originalPrice !== item.price && (
                 <span
                   title={item.activePricingRule.ruleName}
-                  className="text-[10px] font-mono text-gray-400 line-through truncate"
+                  className="text-[9.5px] font-mono text-gray-400 line-through truncate"
                 >
                   {item.originalPrice.toLocaleString()}
                 </span>
@@ -514,17 +536,25 @@ export default function POSPage() {
   const receiptPrintRef = useRef<HTMLDivElement>(null);
   const loadRequestIdRef = useRef(0);
 
+  // Responsive UI Collapsible Toggles
+  const [isTerminalControlsOpen, setIsTerminalControlsOpen] = useState(false);
+  const [isOrderMetaExpanded, setIsOrderMetaExpanded] = useState(false);
+
   // Dynamic Workspace, Branch & Auth User States
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [branches, setBranches] = useState<BranchProfile[]>([]);
   const [activeBranch, setActiveBranch] = useState<BranchProfile | null>(null);
 
-  // Shared Kiosk PIN Operator Switching & Lockout States
+  // Shared Kiosk PIN Operator Switching & Dual-Token Lockout States
   const [kioskOperators, setKioskOperators] = useState<KioskOperatorOption[]>([]);
   const [isPinKioskOpen, setIsPinKioskOpen] = useState(false);
   const [isTerminalLocked, setIsTerminalLocked] = useState(false);
   const [autoLockAfterSale, setAutoLockAfterSale] = useState(false);
+  const [isDedicatedKiosk, setIsDedicatedKiosk] = useState(false);
+
+  // Live KDS "Food Ready at Pass" Alerts for Active Waiter/Cashier
+  const [readyFoodAlerts, setReadyFoodAlerts] = useState<ReadyFoodNotification[]>([]);
 
   // Cash Drawers, Active Shift & Custodian Guardrails
   const [drawers, setDrawers] = useState<CashDrawerOption[]>([]);
@@ -615,6 +645,17 @@ export default function POSPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [completedOrder, setCompletedOrder] = useState<any | null>(null);
 
+  // Detect dedicated kiosk mode flag on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const kioskFlag = localStorage.getItem('servora_kiosk_mode') === 'true';
+      setIsDedicatedKiosk(kioskFlag);
+      if (kioskFlag) {
+        setAutoLockAfterSale(true);
+      }
+    }
+  }, []);
+
   const hydrateFromSnapshot = useCallback((cached: CachedPosSnapshot) => {
     setBusiness((cached.business as BusinessProfile | null) ?? null);
     setCurrentUser((cached.currentUser as UserProfile | null) ?? null);
@@ -697,7 +738,6 @@ export default function POSPage() {
           fetchApi('/api/v1/settings/offline').catch(() => null),
         ]);
 
-        // Discard stale response if user switched branches or operators mid-flight
         if (requestId !== loadRequestIdRef.current) return;
 
         if (!authRes && !posContextRes && !(menuRes?.data?.items?.length > 0)) {
@@ -744,7 +784,17 @@ export default function POSPage() {
           resolvedBusiness = authRes.data.business ?? null;
           resolvedUser = authRes.data.user ?? null;
           setBusiness(resolvedBusiness);
-          if (resolvedUser) setCurrentUser(resolvedUser);
+          if (resolvedUser) {
+            setCurrentUser(resolvedUser);
+
+            // Auto-lock shared kiosk station whenever sitting on the idle station account (`pos.kiosk`)
+            if (isKioskOnlySession(resolvedUser.permissions, resolvedUser.role)) {
+              setIsDedicatedKiosk(true);
+              setAutoLockAfterSale(true);
+              setIsTerminalLocked(true);
+              setIsPinKioskOpen(true);
+            }
+          }
         }
 
         if (posContextRes?.data) {
@@ -794,7 +844,6 @@ export default function POSPage() {
           setActiveBranch(resolvedActiveBranch);
         }
 
-        // Load branch-scoped PIN kiosk operators in the background
         if (resolvedActiveBranch) {
           fetchApi(`/api/v1/pos/kiosk-operators?branchId=${resolvedActiveBranch.id}`)
             .then((res) => {
@@ -807,7 +856,6 @@ export default function POSPage() {
           setKioskOperators([]);
         }
 
-        // 1. Base Menu Items (preserving Cloudinary imageUrl / imageCardUrl / imagePublicId)
         let baseItems: MenuItem[] = [];
         let baseCategories: string[] = [];
 
@@ -844,7 +892,6 @@ export default function POSPage() {
           }
         }
 
-        // 2. Active Combos & Meal Bundles
         const rawCombos = Array.isArray(combosRes?.data) ? combosRes.data : [];
         const comboMenuItems: MenuItem[] = rawCombos
           .filter(
@@ -906,7 +953,6 @@ export default function POSPage() {
         setMenuItems(mergedItems);
         setCategories(mergedCategories);
 
-        // Warm-cache optimized Cloudinary menu images in Cache Storage for offline POS
         void syncPosMenuImagesCache(
           mergedItems.map((m) => m.imageCardUrl || m.imageUrl || m.image)
         );
@@ -942,7 +988,6 @@ export default function POSPage() {
           if (resolvedTemplate) setReceiptTemplate(resolvedTemplate);
         }
 
-        // Persist complete POS snapshot (including image URLs) to IndexedDB
         if (mergedItems.length > 0) {
           void cachePosSnapshot({
             branchId: resolvedActiveBranch?.id,
@@ -986,14 +1031,69 @@ export default function POSPage() {
     loadInitialData();
   }, [loadInitialData]);
 
+  // Live 15s Poller for KDS "Food Ready at Pass" Notifications
+  useEffect(() => {
+    if (!isOnline || !activeBranch?.id || !currentUser?.id || isTerminalLocked) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollKdsFoodReady = async () => {
+      try {
+        const res = await fetchApi(
+          `/api/v1/notifications?module=KDS&isRead=FALSE&branchId=${activeBranch.id}&limit=5`
+        );
+        if (!cancelled && Array.isArray(res?.data?.notifications)) {
+          setReadyFoodAlerts(res.data.notifications);
+        }
+      } catch {
+        // Silent fallback on degraded network
+      }
+    };
+
+    void pollKdsFoodReady();
+    const timer = setInterval(pollKdsFoodReady, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [isOnline, activeBranch?.id, currentUser?.id, isTerminalLocked]);
+
+  const handleAcknowledgeFoodReady = useCallback(async (notifId: number) => {
+    setReadyFoodAlerts((prev) => prev.filter((a) => a.id !== notifId));
+    try {
+      await fetchApi(`/api/v1/notifications/${notifId}/read`, { method: 'PATCH' });
+    } catch {
+      // Non-blocking acknowledgement
+    }
+  }, []);
+
+  // Dual-Token Lock: Reverts active Bearer token back to the powerless Kiosk Station JWT
+  const lockTerminalToKioskPin = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      const stationToken = localStorage.getItem('servora_kiosk_station_token');
+      if (stationToken) {
+        localStorage.setItem('servora_token', stationToken);
+        localStorage.removeItem('token');
+      }
+    }
+    setCart([]);
+    setReadyFoodAlerts([]);
+    setOrderDiscountPercent(0);
+    setAppliedPromo(null);
+    setSelectedReward(null);
+    setIsPaymentModalOpen(false);
+    setIsTerminalLocked(true);
+    setIsPinKioskOpen(true);
+  }, []);
+
   // Authoritative PIN Kiosk Operator Session Swap
   const handleOperatorSwitched = useCallback(
     async (session: SwitchedOperatorSession) => {
       if (typeof window !== 'undefined') {
-        if (localStorage.getItem('servora_token') !== null) {
-          localStorage.setItem('servora_token', session.token);
-        }
-        localStorage.setItem('token', session.token);
+        localStorage.setItem('servora_token', session.token);
 
         try {
           const cached = localStorage.getItem('servora_cached_workspace');
@@ -1005,9 +1105,14 @@ export default function POSPage() {
         } catch {
           // Ignore malformed workspace cache
         }
+
+        window.dispatchEvent(
+          new CustomEvent('servora:operator-switched', { detail: session.user })
+        );
       }
 
       setCurrentUser(session.user);
+      setReadyFoodAlerts([]);
       setOrderDiscountPercent(0);
       setIsPinKioskOpen(false);
       setIsTerminalLocked(false);
@@ -1082,6 +1187,15 @@ export default function POSPage() {
 
     return () => clearTimeout(timer);
   }, [customerSearchQuery, isOnline]);
+
+  // Aggregate direct cart counts by catalog card id (for visual card badges)
+  const cartQtyByCardId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const line of cart) {
+      map[line.id] = (map[line.id] ?? 0) + line.quantity;
+    }
+    return map;
+  }, [cart]);
 
   // Aggregate total units of each menuItemId currently in cart
   const cartMenuItemQuantities = useMemo(() => {
@@ -1245,6 +1359,7 @@ export default function POSPage() {
     setSelectedDrawerId('');
     setSelectedStationFilter('ALL');
     setOrderTargetStation('AUTO');
+    setReadyFoodAlerts([]);
     setStockAlert(null);
     setCart([]);
     setConfirmClearArmed(false);
@@ -1356,7 +1471,6 @@ export default function POSPage() {
     [orderTargetStation, itemStationMap]
   );
 
-  // Search across name, SKU, category, and combo components
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesCategory = selectedCategory === 'All' || item.category === selectedCategory;
@@ -1578,7 +1692,6 @@ export default function POSPage() {
     setConfirmClearArmed(false);
   };
 
-  // Expand combos into constituent menu items & attach selectedModifiers
   const expandCartForOrderApi = useCallback(
     (cartLines: CartItem[]) => {
       const expanded: Array<{
@@ -1706,7 +1819,6 @@ export default function POSPage() {
     return Object.values(grouped);
   }, [cart, getEffectiveItemStation]);
 
-  // Precision-rounded financial calculations
   const calculations = useMemo(() => {
     const rawSubtotal = roundMoney(
       cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -1803,6 +1915,11 @@ export default function POSPage() {
     [drawers, selectedDrawerId]
   );
 
+  const selectedTableObj = useMemo(
+    () => tables.find((t) => String(t.id) === selectedTableId) || null,
+    [tables, selectedTableId]
+  );
+
   const splitTotalCovered = useMemo(() => {
     const c = parseFloat(splitCashAmount) || 0;
     const m = parseFloat(splitMpesaAmount) || 0;
@@ -1841,6 +1958,7 @@ export default function POSPage() {
     if (cart.length === 0) return;
     if (activeServiceModel?.requiresTable && !selectedTableId) {
       setStockAlert('This service model requires assigning a dining table before settlement.');
+      setIsOrderMetaExpanded(true);
       return;
     }
     setCheckoutError(null);
@@ -1994,7 +2112,6 @@ export default function POSPage() {
         return;
       }
 
-      // 1. Authoritative live database stock verification
       await fetchApi('/api/v1/pos/validate-stock', {
         method: 'POST',
         body: JSON.stringify({
@@ -2006,7 +2123,6 @@ export default function POSPage() {
         }),
       });
 
-      // 2. Commit Order FIRST with stable idempotencyKey (prevents duplicates on retry)
       const idempKey =
         checkoutIdempotencyKey || `POS-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -2052,7 +2168,6 @@ export default function POSPage() {
         throw new Error('Server did not return an authoritative order reference.');
       }
 
-      // 3. Redeem Loyalty Reward ONLY AFTER order is safely persisted
       let loyaltyWarning: string | null = null;
       if (selectedCustomer && selectedReward) {
         try {
@@ -2079,7 +2194,6 @@ export default function POSPage() {
         );
       }
 
-      // 4. Trigger M-Pesa STK Push and report explicit pending/failed state
       let paymentConfirmationStatus: 'PAID' | 'PENDING_MPESA' | 'STK_FAILED' | 'CARD_PENDING' =
         paymentMethod === 'Card' ? 'CARD_PENDING' : 'PAID';
       let paymentStatusMessage: string | null = null;
@@ -2303,74 +2417,96 @@ export default function POSPage() {
     }, 250);
   };
 
+  // Count active metadata customizations for the compact order drawer pill
+  const activeMetaCount =
+    (selectedCustomer ? 1 : 0) +
+    (appliedPromo ? 1 : 0) +
+    (selectedReward ? 1 : 0) +
+    (orderDiscountPercent > 0 ? 1 : 0) +
+    (buyerKraPin.trim() ? 1 : 0) +
+    (orderTargetStation !== 'AUTO' ? 1 : 0);
+
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)] lg:h-[calc(100vh-8rem)] gap-3 font-sans">
-      {/* 1. ENTERPRISE TERMINAL HEADER */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-2.5 bg-white px-4 py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0">
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Branch Outlet Switcher */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl">
-            <Building2 size={15} className="text-servora-core shrink-0" />
-            <div>
-              <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
-                {business?.name || 'Active Outlet'}
-              </span>
-              {branches.length > 1 ? (
-                <select
-                  aria-label="Active Branch"
-                  value={activeBranch?.id || ''}
-                  onChange={(e) => handleBranchSwitch(e.target.value)}
-                  disabled={!isOnline}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-60"
-                >
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.code})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="text-xs font-bold text-servora-navy">
-                  {activeBranch?.name || 'Main Outlet'}
-                </span>
-              )}
-            </div>
-          </div>
+    <div
+      className={`flex flex-col gap-2 sm:gap-3 font-sans w-full min-w-0 overflow-hidden ${
+        isDedicatedKiosk
+          ? 'h-full'
+          : 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.75rem)]'
+      }`}
+    >
+      {/* 1. ADAPTIVE COMPACT TERMINAL HEADER */}
+      <div className="bg-white px-3 py-2 sm:px-4 sm:py-2.5 rounded-2xl border border-gray-200 shadow-xs shrink-0 w-full min-w-0">
+        {/* Primary Compact Row (Always visible on all screen sizes, zero overflow) */}
+        <div className="flex items-center justify-between gap-2 min-w-0">
+          {/* Left: Operator Switcher + Desktop Outlet/Drawer Pills */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {/* Desktop Outlet & Drawer (Hidden on < xl; revealed via Terminal drawer toggle) */}
+            <div className="hidden xl:flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl min-w-0 max-w-[210px]">
+                <Building2 size={14} className="text-servora-core shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <span className="text-[8.5px] font-bold uppercase text-gray-400 block leading-none truncate">
+                    {business?.name || 'Active Outlet'}
+                  </span>
+                  {branches.length > 1 && !isDedicatedKiosk ? (
+                    <select
+                      aria-label="Active Branch"
+                      value={activeBranch?.id || ''}
+                      onChange={(e) => handleBranchSwitch(e.target.value)}
+                      disabled={!isOnline}
+                      className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-60 w-full truncate"
+                    >
+                      {branches.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.code})
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="text-xs font-bold text-servora-navy block truncate">
+                      {activeBranch?.name || 'Main Outlet'}
+                    </span>
+                  )}
+                </div>
+              </div>
 
-          {/* Physical Cash Drawer Register Selector */}
-          <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl">
-            <Wallet size={15} className="text-servora-core shrink-0" />
-            <div>
-              <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
-                Cash Drawer Register
-              </span>
-              {drawers.length > 0 ? (
-                <select
-                  aria-label="Cash Drawer"
-                  value={selectedDrawerId}
-                  onChange={(e) => setSelectedDrawerId(e.target.value)}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
-                >
-                  {drawers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} [{d.drawerCode}] &bull; {d.status}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <Link
-                  href="/cash-management/drawers"
-                  className="text-xs font-bold text-amber-700 hover:underline"
-                >
-                  No Drawers Configured &rarr;
-                </Link>
-              )}
+              <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl min-w-0 max-w-[250px]">
+                <Wallet size={14} className="text-servora-core shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <span className="text-[8.5px] font-bold uppercase text-gray-400 block leading-none">
+                    Cash Drawer
+                  </span>
+                  {drawers.length > 0 ? (
+                    <select
+                      aria-label="Cash Drawer"
+                      value={selectedDrawerId}
+                      onChange={(e) => setSelectedDrawerId(e.target.value)}
+                      className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer w-full truncate"
+                    >
+                      {drawers.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} [{d.drawerCode}] &bull; {d.status}
+                        </option>
+                      ))}
+                    </select>
+                  ) : isDedicatedKiosk ? (
+                    <span className="text-xs font-bold text-gray-500 block truncate">
+                      Shared Register
+                    </span>
+                  ) : (
+                    <Link
+                      href="/cash-management/drawers"
+                      className="text-xs font-bold text-amber-700 hover:underline block truncate"
+                    >
+                      Configure Drawer &rarr;
+                    </Link>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
 
-          {/* Active Operator PIN Switcher & Shared Kiosk Auto-Lock */}
-          {currentUser && (
-            <div className="flex items-center gap-1.5">
+            {/* Active Operator PIN Switcher (Always visible, cleanly truncated on phones) */}
+            {currentUser && (
               <button
                 type="button"
                 disabled={!isOnline}
@@ -2379,23 +2515,43 @@ export default function POSPage() {
                   setIsPinKioskOpen(true);
                 }}
                 title="Switch Waiter / Cashier via POS PIN"
-                className="flex items-center gap-1.5 bg-servora-pale hover:bg-blue-100 border border-servora-core/25 px-3 py-1.5 rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50"
+                className="flex items-center gap-1.5 bg-servora-pale hover:bg-blue-100 border border-servora-core/25 px-2.5 py-1.5 rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50 min-w-0 max-w-[190px] sm:max-w-[240px]"
               >
                 <UserCheck size={14} className="text-servora-core shrink-0" />
-                <span className="font-bold text-servora-navy">
+                <span className="font-bold text-servora-navy truncate">
                   {currentUser.fullName || currentUser.firstName}
                 </span>
-                <span className="text-[10px] font-mono uppercase text-servora-deepTeal">
+                <span className="hidden sm:inline text-[10px] font-mono uppercase text-servora-deepTeal shrink-0">
                   ({currentUser.role})
                 </span>
-                <Lock size={11} className="text-servora-core ml-0.5" />
+                <Lock size={11} className="text-servora-core shrink-0" />
               </button>
+            )}
 
+            {/* Mobile / Tablet Terminal Controls Drawer Toggle (< xl) */}
+            <button
+              type="button"
+              onClick={() => setIsTerminalControlsOpen((prev) => !prev)}
+              className={`xl:hidden inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border transition-colors cursor-pointer shrink-0 ${
+                isTerminalControlsOpen
+                  ? 'bg-servora-navy text-white border-servora-navy'
+                  : 'bg-slate-50 text-servora-navy border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              <Wallet size={12} />
+              <span className="hidden sm:inline">Terminal</span>
+              {isTerminalControlsOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+          </div>
+
+          {/* Right: Compact Action Controls */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {!isDedicatedKiosk && (
               <button
                 type="button"
                 onClick={() => setAutoLockAfterSale((v) => !v)}
-                title="Auto-lock terminal to PIN keypad after each completed sale (shared waiter kiosk mode)"
-                className={`hidden md:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10.5px] font-bold border transition-colors cursor-pointer ${
+                title="Auto-lock terminal to PIN keypad after each completed sale"
+                className={`hidden xl:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10.5px] font-bold border transition-colors cursor-pointer ${
                   autoLockAfterSale
                     ? 'bg-servora-navy text-white border-servora-navy'
                     : 'bg-slate-50 text-gray-500 border-gray-200 hover:bg-gray-100'
@@ -2404,152 +2560,273 @@ export default function POSPage() {
                 <Lock size={10} />
                 <span>{autoLockAfterSale ? 'Auto-Lock ON' : 'Auto-Lock'}</span>
               </button>
-            </div>
-          )}
-        </div>
+            )}
 
-        {/* Right Side: Network Pill, Offline Queue Sync, Shift Status, Lock & Refresh */}
-        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
-          <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
-              isOnline
-                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                : 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
-            }`}
-          >
-            {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
-            <span>{isOnline ? 'Online' : 'Offline Mode'}</span>
-          </span>
+            <span
+              title={isOnline ? 'Connected to Servora Cloud' : 'Offline Mode Active'}
+              className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-xl text-[11px] font-bold border ${
+                isOnline
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  : 'bg-rose-50 text-rose-800 border-rose-200 animate-pulse'
+              }`}
+            >
+              {isOnline ? <Wifi size={13} /> : <WifiOff size={13} />}
+              <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline'}</span>
+            </span>
 
-          {pendingOfflineCount > 0 && (
+            {pendingOfflineCount > 0 && (
+              <button
+                type="button"
+                onClick={handleSyncOfflineQueue}
+                disabled={!isOnline || isSyncingOffline}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 cursor-pointer"
+              >
+                <UploadCloud size={13} />
+                <span>{isSyncingOffline ? '...' : pendingOfflineCount}</span>
+              </button>
+            )}
+
+            {isSafeDropWarning && (
+              <span
+                title="Drawer cash balance near safe-drop limit"
+                className="hidden md:inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-[11px] font-bold animate-pulse"
+              >
+                <AlertTriangle size={12} className="text-amber-600" />
+                <span>Safe Drop</span>
+              </span>
+            )}
+
+            {!isDedicatedKiosk &&
+              (!activeShift ? (
+                <Link
+                  href="/cash-management/shifts"
+                  className="hidden xl:inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1.5 rounded-xl text-[11px] font-bold hover:bg-amber-100 transition-colors"
+                >
+                  <Clock size={12} /> Open Float
+                </Link>
+              ) : (
+                <Link
+                  href="/cash-management/shifts"
+                  className="hidden xl:inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1.5 rounded-xl text-[11px] font-bold hover:bg-emerald-100 transition-colors"
+                >
+                  <Unlock size={12} className="text-emerald-600" />
+                  <span>Shift #{activeShift.id}</span>
+                </Link>
+              ))}
+
             <button
               type="button"
-              onClick={handleSyncOfflineQueue}
-              disabled={!isOnline || isSyncingOffline}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 cursor-pointer"
+              disabled={!isOnline}
+              onClick={lockTerminalToKioskPin}
+              title="Lock Terminal & Revert to PIN Screen"
+              aria-label="Lock POS Terminal"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-servora-navy text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40 text-xs font-bold"
             >
-              <UploadCloud size={13} />
-              <span>
-                {isSyncingOffline ? 'Syncing...' : `Sync Queue (${pendingOfflineCount})`}
-              </span>
+              <Lock size={13} />
+              <span className="hidden sm:inline">Lock</span>
             </button>
-          )}
 
-          {isSafeDropWarning && (
-            <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold animate-pulse">
-              <AlertTriangle size={13} className="text-amber-600" />
-              <span>Safe Drop Alert</span>
-            </div>
-          )}
-
-          {!activeShift ? (
-            <Link
-              href="/cash-management/shifts"
-              className="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors flex items-center gap-1.5"
+            <button
+              type="button"
+              onClick={() => loadInitialData(activeBranch?.id)}
+              title="Sync Workspace, Drawers & Catalog"
+              aria-label="Refresh POS Data"
+              className="p-1.5 sm:p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
             >
-              <Clock size={13} /> Open Shift Float &rarr;
-            </Link>
-          ) : (
-            <Link
-              href="/cash-management/shifts"
-              className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors"
-              title="Blind Custody Active — Manage Shift"
-            >
-              <Unlock size={13} className="text-emerald-600" />
-              <span>Shift #{activeShift.id}</span>
-            </Link>
-          )}
-
-          <button
-            type="button"
-            disabled={!isOnline}
-            onClick={() => {
-              setIsTerminalLocked(true);
-              setIsPinKioskOpen(true);
-            }}
-            title="Lock Terminal (Require Staff PIN)"
-            aria-label="Lock POS Terminal"
-            className="p-2 bg-servora-navy text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40"
-          >
-            <Lock size={14} />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => loadInitialData(activeBranch?.id)}
-            title="Sync Workspace, Drawers & Catalog"
-            className="p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
-          >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin text-servora-core' : ''} />
-          </button>
+              <RefreshCw size={14} className={isLoading ? 'animate-spin text-servora-core' : ''} />
+            </button>
+          </div>
         </div>
+
+        {/* Collapsible Mobile/Tablet Terminal Drawer (< xl) */}
+        {isTerminalControlsOpen && (
+          <div className="xl:hidden mt-2.5 pt-2.5 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Branch Selector */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl min-w-0">
+              <Building2 size={14} className="text-servora-core shrink-0" />
+              <div className="min-w-0 flex-1">
+                <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none truncate">
+                  {business?.name || 'Active Outlet'}
+                </span>
+                {branches.length > 1 && !isDedicatedKiosk ? (
+                  <select
+                    aria-label="Active Branch"
+                    value={activeBranch?.id || ''}
+                    onChange={(e) => handleBranchSwitch(e.target.value)}
+                    disabled={!isOnline}
+                    className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer w-full truncate"
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.code})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs font-bold text-servora-navy block truncate">
+                    {activeBranch?.name || 'Main Outlet'}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Cash Drawer Selector */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-gray-200 px-3 py-1.5 rounded-xl min-w-0">
+              <Wallet size={14} className="text-servora-core shrink-0" />
+              <div className="min-w-0 flex-1">
+                <span className="text-[9px] font-bold uppercase text-gray-400 block leading-none">
+                  Cash Drawer Register
+                </span>
+                {drawers.length > 0 ? (
+                  <select
+                    aria-label="Cash Drawer"
+                    value={selectedDrawerId}
+                    onChange={(e) => setSelectedDrawerId(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer w-full truncate"
+                  >
+                    {drawers.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} [{d.drawerCode}] &bull; {d.status}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-xs font-bold text-gray-500 block truncate">
+                    Shared Register
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Shift & Auto-Lock Controls */}
+            {!isDedicatedKiosk && (
+              <div className="sm:col-span-2 flex flex-wrap items-center gap-2">
+                {!activeShift ? (
+                  <Link
+                    href="/cash-management/shifts"
+                    className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1.5 rounded-xl text-xs font-bold"
+                  >
+                    <Clock size={12} /> Open Shift Float &rarr;
+                  </Link>
+                ) : (
+                  <Link
+                    href="/cash-management/shifts"
+                    className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold"
+                  >
+                    <Unlock size={12} /> Shift #{activeShift.id} Active
+                  </Link>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setAutoLockAfterSale((v) => !v)}
+                  className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                    autoLockAfterSale
+                      ? 'bg-servora-navy text-white border-servora-navy'
+                      : 'bg-slate-50 text-gray-600 border-gray-200'
+                  }`}
+                >
+                  <Lock size={11} />
+                  <span>{autoLockAfterSale ? 'Auto-Lock After Sale: ON' : 'Auto-Lock: OFF'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* OFFLINE QUEUE / OPERATOR SWITCH / RECONCILIATION STATUS BANNER */}
+      {/* STATUS / KDS FOOD READY / STOCK ALERT BANNERS */}
       {offlineSyncBanner && (
         <div
           role="status"
-          className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 px-4 py-2 rounded-xl text-xs font-semibold shrink-0"
+          className="flex items-center justify-between gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
-            <span>{offlineSyncBanner}</span>
+            <span className="truncate">{offlineSyncBanner}</span>
           </div>
           <button
             type="button"
             onClick={() => setOfflineSyncBanner(null)}
             aria-label="Dismiss notification"
-            className="text-emerald-700 hover:text-emerald-950"
+            className="text-emerald-700 hover:text-emerald-950 shrink-0"
           >
             <X size={14} />
           </button>
         </div>
       )}
 
-      {/* INLINE STOCK GUARDRAIL ALERT BANNER */}
+      {readyFoodAlerts.length > 0 && (
+        <div role="status" className="flex flex-col gap-1.5 shrink-0">
+          {readyFoodAlerts.slice(0, 2).map((alert) => (
+            <div
+              key={alert.id}
+              className="flex items-center justify-between gap-2.5 bg-emerald-600 text-white px-3.5 py-2 rounded-xl text-xs shadow-sm"
+            >
+              <div className="flex items-center gap-2 min-w-0">
+                <ChefHat size={15} className="shrink-0 animate-bounce" />
+                <div className="min-w-0">
+                  <span className="font-bold block truncate">{alert.title}</span>
+                  <span className="text-[11px] text-emerald-50 block truncate">
+                    {alert.detail}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAcknowledgeFoodReady(alert.id)}
+                className="px-2.5 py-1 bg-white text-emerald-800 hover:bg-emerald-50 rounded-lg text-[11px] font-bold shrink-0 cursor-pointer"
+              >
+                Picked Up
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {stockAlert && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 text-rose-800 px-4 py-2 rounded-xl text-xs font-semibold shrink-0"
+          className="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 text-rose-800 px-3.5 py-2 rounded-xl text-xs font-semibold shrink-0"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <AlertTriangle size={14} className="text-rose-600 shrink-0" />
-            <span>{stockAlert}</span>
+            <span className="truncate">{stockAlert}</span>
           </div>
           <button
             type="button"
             onClick={() => setStockAlert(null)}
             aria-label="Dismiss stock alert"
-            className="text-rose-600 hover:text-rose-900"
+            className="text-rose-600 hover:text-rose-900 shrink-0"
           >
             <X size={14} />
           </button>
         </div>
       )}
 
-      {/* MOBILE SCREEN NAVIGATION DOCK */}
+      {/* MOBILE / TABLET PORTRAIT TAB SWITCHER (< lg) */}
       <div className="flex lg:hidden bg-white p-1 rounded-xl border border-gray-200 shadow-xs shrink-0">
         <button
           type="button"
           onClick={() => setMobileTab('menu')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all ${
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
             mobileTab === 'menu'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
           }`}
         >
-          <Layers size={15} /> Catalog ({filteredItems.length})
+          <Layers size={14} /> Catalog ({filteredItems.length})
         </button>
         <button
           type="button"
           onClick={() => setMobileTab('cart')}
-          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-2 transition-all relative ${
+          className={`flex-1 py-2 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
             mobileTab === 'cart'
               ? 'bg-servora-navy text-white shadow-xs'
               : 'text-gray-500 hover:text-servora-navy'
           }`}
         >
-          <ShoppingCart size={15} /> Active Order
+          <ShoppingCart size={14} /> Active Order
           {totalItemsCount > 0 && (
             <span className="bg-servora-core text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full">
               {totalItemsCount}
@@ -2559,86 +2836,95 @@ export default function POSPage() {
       </div>
 
       {/* MAIN SPLIT-VIEW VIEWPORT */}
-      <div className="flex-1 flex flex-col lg:flex-row gap-4 min-h-0 overflow-hidden">
-        {/* LEFT COLUMN: VISUAL MENU CATALOG */}
+      <div className="flex-1 flex flex-col lg:flex-row gap-3 min-h-0 min-w-0 overflow-hidden">
+        {/* LEFT COLUMN: FLUID VISUAL MENU CATALOG */}
         <div
-          className={`flex-1 flex-col min-h-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
+          className={`flex-1 flex-col min-h-0 min-w-0 bg-white rounded-2xl shadow-xs border border-gray-200 overflow-hidden ${
             mobileTab === 'menu' ? 'flex' : 'hidden lg:flex'
           }`}
         >
-          <div className="p-3 border-b border-gray-200 space-y-2.5 shrink-0 bg-white">
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[200px]">
+          {/* Compact Search, Station, Table & Category Filters */}
+          <div className="p-2.5 sm:p-3 border-b border-gray-200 space-y-2 shrink-0 bg-white">
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+              <div className="relative sm:col-span-6 lg:col-span-5 xl:col-span-6 min-w-0">
                 <Search
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                  size={15}
+                  size={14}
                 />
                 <input
                   type="text"
                   aria-label="Search menu catalog"
-                  placeholder="Scan SKU or search dishes, drinks, categories, combos..."
+                  placeholder="Scan SKU or search dishes, combos..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
+                  className="w-full pl-8 pr-3 py-1.5 sm:py-2 bg-slate-50 border border-gray-200 rounded-xl text-xs focus:outline-none focus:border-servora-core transition-all"
                 />
               </div>
 
-              {availableStationNames.length > 0 && (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
-                  <ChefHat size={13} className="text-servora-core" />
-                  <select
-                    aria-label="Filter by kitchen station"
-                    value={selectedStationFilter}
-                    onChange={(e) => setSelectedStationFilter(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
-                  >
-                    <option value="ALL">All Stations</option>
-                    {availableStationNames.map((stName) => (
-                      <option key={stName} value={stName}>
-                        {stName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {activeServiceModel?.requiresTable && (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl">
-                  <Utensils size={13} className="text-servora-core" />
-                  <select
-                    aria-label="Assign dining table"
-                    value={selectedTableId}
-                    onChange={(e) => setSelectedTableId(e.target.value)}
-                    className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer"
-                  >
-                    <option value="">Assign Table *</option>
-                    {tables.map((t) => {
-                      const isCurrentlySelected = String(t.id) === selectedTableId;
-                      const isOccupied = t.status === 'Occupied';
-                      return (
-                        <option
-                          key={t.id}
-                          value={t.id}
-                          disabled={isOccupied && !isCurrentlySelected}
-                        >
-                          {t.tableLabel} ({t.status}){' '}
-                          {isOccupied && !isCurrentlySelected ? '— In Use' : ''}
+              <div className="grid grid-cols-2 sm:col-span-6 lg:col-span-7 xl:col-span-6 gap-2 min-w-0">
+                {availableStationNames.length > 0 && (
+                  <div className="flex items-center gap-1.5 bg-slate-50 border border-gray-200 px-2.5 py-1.5 rounded-xl min-w-0">
+                    <ChefHat size={13} className="text-servora-core shrink-0" />
+                    <select
+                      aria-label="Filter by kitchen station"
+                      value={selectedStationFilter}
+                      onChange={(e) => setSelectedStationFilter(e.target.value)}
+                      className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer w-full truncate"
+                    >
+                      <option value="ALL">All Stations</option>
+                      {availableStationNames.map((stName) => (
+                        <option key={stName} value={stName}>
+                          {stName}
                         </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              )}
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {activeServiceModel?.requiresTable && (
+                  <div
+                    className={`flex items-center gap-1.5 border px-2.5 py-1.5 rounded-xl min-w-0 ${
+                      selectedTableId
+                        ? 'bg-blue-50/70 border-servora-core/40'
+                        : 'bg-amber-50/60 border-amber-300'
+                    }`}
+                  >
+                    <Utensils size={13} className="text-servora-core shrink-0" />
+                    <select
+                      aria-label="Assign dining table"
+                      value={selectedTableId}
+                      onChange={(e) => setSelectedTableId(e.target.value)}
+                      className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer w-full truncate"
+                    >
+                      <option value="">Table *</option>
+                      {tables.map((t) => {
+                        const isCurrentlySelected = String(t.id) === selectedTableId;
+                        const isOccupied = t.status === 'Occupied';
+                        return (
+                          <option
+                            key={t.id}
+                            value={t.id}
+                            disabled={isOccupied && !isCurrentlySelected}
+                          >
+                            {t.tableLabel} ({t.status})
+                            {isOccupied && !isCurrentlySelected ? ' — In Use' : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Category Ribbon */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
               {categories.map((cat) => (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => setSelectedCategory(cat)}
-                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1 ${
+                  className={`whitespace-nowrap px-3 py-1.5 rounded-xl text-[11.5px] font-bold transition-all cursor-pointer inline-flex items-center gap-1 shrink-0 ${
                     selectedCategory === cat
                       ? 'bg-servora-navy text-white shadow-xs'
                       : cat === COMBOS_CATEGORY_LABEL
@@ -2646,17 +2932,17 @@ export default function POSPage() {
                         : 'bg-gray-100/80 text-gray-600 hover:bg-gray-200'
                   }`}
                 >
-                  {cat === COMBOS_CATEGORY_LABEL && <ShoppingBasket size={12} />}
+                  {cat === COMBOS_CATEGORY_LABEL && <ShoppingBasket size={11} />}
                   {cat}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Visual Menu Cards Grid */}
-          <div className="flex-1 overflow-y-auto p-3.5 bg-slate-50/50">
+          {/* Fluid Self-Adapting Menu Cards Grid */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 sm:p-3.5 bg-slate-50/50">
             {isLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(142px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(165px,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(185px,1fr))] gap-2.5 sm:gap-3">
                 {Array.from({ length: 8 }).map((_, i) => (
                   <div
                     key={i}
@@ -2672,14 +2958,14 @@ export default function POSPage() {
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-400">
-                <Utensils size={40} className="mb-2 opacity-25" />
+                <Utensils size={38} className="mb-2 opacity-25" />
                 <p className="text-sm font-bold text-servora-navy">No products available</p>
                 <p className="text-xs text-gray-400">
                   Refine search criteria or check Menu Catalog Master configuration.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(142px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(165px,1fr))] 2xl:grid-cols-[repeat(auto-fill,minmax(185px,1fr))] gap-2.5 sm:gap-3 pb-2">
                 {filteredItems.map((item) => {
                   const { remaining } = getItemRemainingSellable(item);
                   const resolvedStation = getEffectiveItemStation(item);
@@ -2694,6 +2980,7 @@ export default function POSPage() {
                       remaining={remaining}
                       stationName={resolvedStation.stationName}
                       hasModifiers={hasModifiers}
+                      cartQty={cartQtyByCardId[item.id] || 0}
                       onAdd={addToCart}
                     />
                   );
@@ -2701,11 +2988,39 @@ export default function POSPage() {
               </div>
             )}
           </div>
+
+          {/* Sticky Mobile/Tablet Quick Checkout Bar (shown when cart has items on Catalog tab) */}
+          {cart.length > 0 && (
+            <div className="lg:hidden shrink-0 p-2.5 bg-white border-t border-gray-200 flex items-center gap-2 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+              <button
+                type="button"
+                onClick={() => setMobileTab('cart')}
+                className="flex-1 py-2.5 px-3 bg-servora-navy text-white rounded-xl text-xs font-bold flex items-center justify-between cursor-pointer"
+              >
+                <span className="flex items-center gap-1.5">
+                  <ShoppingCart size={14} />
+                  <span>
+                    {totalItemsCount} {totalItemsCount === 1 ? 'Item' : 'Items'}
+                  </span>
+                </span>
+                <span className="font-mono">
+                  {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenPayment}
+                className="py-2.5 px-4 bg-servora-core hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer shrink-0"
+              >
+                <CreditCard size={14} /> Charge
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* RIGHT COLUMN: ACTIVE ORDER, KDS ROUTING, CRM & FISCAL LEDGER */}
+        {/* RIGHT COLUMN: FLUID ACTIVE ORDER PANEL (NEVER CLIPS ON ANY HEIGHT) */}
         <div
-          className={`w-full lg:w-[440px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full ${
+          className={`w-full lg:w-[350px] xl:w-[390px] 2xl:w-[425px] flex-col bg-white rounded-2xl shadow-xs border border-gray-200 shrink-0 overflow-hidden h-full min-h-0 ${
             mobileTab === 'cart' ? 'flex' : 'hidden lg:flex'
           }`}
         >
@@ -2720,13 +3035,13 @@ export default function POSPage() {
                     key={model.id}
                     type="button"
                     onClick={() => setActiveServiceModel(model)}
-                    className={`flex-1 min-w-[90px] py-1.5 px-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                    className={`flex-1 min-w-[82px] py-1.5 px-2 text-[11px] font-bold rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                       isSelected
                         ? 'bg-white text-servora-navy shadow-xs border border-gray-200'
                         : 'text-gray-500 hover:text-servora-navy'
                     }`}
                   >
-                    <Icon size={13} className={isSelected ? 'text-servora-core' : ''} />
+                    <Icon size={12} className={isSelected ? 'text-servora-core shrink-0' : 'shrink-0'} />
                     <span className="truncate">{model.name}</span>
                   </button>
                 );
@@ -2736,273 +3051,354 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* KDS Prep Station Routing Bar */}
-          {kitchenStations.length > 0 && (
-            <div className="px-3 py-2 bg-blue-50/40 border-b border-gray-200 flex items-center justify-between gap-2 text-xs shrink-0">
-              <span className="font-bold text-servora-navy flex items-center gap-1.5">
-                <ChefHat size={13} className="text-servora-core" /> KDS Routing:
-              </span>
-              <select
-                aria-label="Order KDS routing"
-                value={orderTargetStation}
-                onChange={(e) => setOrderTargetStation(e.target.value)}
-                className="bg-white border border-gray-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none focus:border-servora-core cursor-pointer"
-              >
-                <option value="AUTO">Auto-Route by Item / Category</option>
-                {kitchenStations
-                  .filter((s) => s.isActive)
-                  .map((st) => (
-                    <option key={st.id} value={st.name}>
-                      Redirect All &rarr; {st.name} ({st.code})
-                    </option>
-                  ))}
-              </select>
-            </div>
-          )}
-
-          {/* CRM Member Lookup & Guest Identity Section */}
-          <div className="p-3 border-b border-gray-200 bg-white space-y-2 shrink-0 text-xs">
-            {activeServiceModel?.requiresTable && (
-              <div className="p-2 bg-blue-50/70 border border-blue-200 rounded-xl font-bold text-servora-core flex justify-between items-center text-xs">
-                <span className="flex items-center gap-1.5">
-                  <Utensils size={13} /> Seating Assignment:
+          {/* Compact Collapsible Guest / Loyalty / Promo / KDS Header */}
+          <div className="border-b border-gray-200 bg-white shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsOrderMetaExpanded((prev) => !prev)}
+              className="w-full px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-slate-50/70 transition-colors cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                <span className="font-bold text-servora-navy flex items-center gap-1 shrink-0">
+                  <Users size={13} className="text-servora-core" />
+                  <span>Order Details</span>
                 </span>
-                <span>
-                  {tables.find((t) => String(t.id) === selectedTableId)?.tableLabel ||
-                    'Table Required'}
-                </span>
-              </div>
-            )}
 
-            {!selectedCustomer ? (
-              <div className="relative">
-                <Award
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500"
-                  size={14}
-                />
-                <input
-                  type="text"
-                  disabled={!isOnline}
-                  placeholder={
-                    isOnline
-                      ? 'Lookup CRM / Loyalty Member by phone, name, or PIN...'
-                      : 'CRM Lookup unavailable in offline mode'
-                  }
-                  value={customerSearchQuery}
-                  onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-amber-50/40 border border-amber-200/80 rounded-xl focus:outline-none focus:border-amber-400 text-xs disabled:opacity-60"
-                />
-                {customerMatches.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 max-h-48 overflow-y-auto divide-y divide-gray-100">
-                    {customerMatches.map((cust) => (
-                      <button
-                        key={cust.id}
-                        type="button"
-                        onClick={() => handleSelectLoyaltyCustomer(cust)}
-                        className="w-full text-left px-3 py-2 hover:bg-blue-50/60 flex justify-between items-center cursor-pointer"
-                      >
-                        <div>
-                          <span className="font-bold text-servora-navy block">{cust.name}</span>
-                          <span className="text-[10px] text-gray-500 font-mono">
-                            {cust.phone} {cust.kraPin ? `• PIN: ${cust.kraPin}` : ''}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold block">
-                            {cust.tierName}
-                          </span>
-                          <span className="text-[10px] font-mono font-bold text-servora-core">
-                            {cust.currentPoints.toLocaleString()} pts
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                {activeServiceModel?.requiresTable && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-bold ${
+                      selectedTableObj
+                        ? 'bg-blue-50 text-servora-core border border-blue-200'
+                        : 'bg-amber-50 text-amber-800 border border-amber-200'
+                    }`}
+                  >
+                    {selectedTableObj ? selectedTableObj.tableLabel : 'Table *'}
+                  </span>
+                )}
+
+                {selectedCustomer && (
+                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 truncate max-w-[110px]">
+                    {selectedCustomer.name}
+                  </span>
+                )}
+
+                {appliedPromo && (
+                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {appliedPromo.code}
+                  </span>
+                )}
+
+                {orderDiscountPercent > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    -{orderDiscountPercent}%
+                  </span>
+                )}
+
+                {activeMetaCount === 0 && !activeServiceModel?.requiresTable && (
+                  <span className="text-[10.5px] text-gray-400 truncate">
+                    Guest, Loyalty, Promo, KDS
+                  </span>
                 )}
               </div>
-            ) : (
-              <div className="p-2.5 bg-amber-50/70 border border-amber-200 rounded-xl space-y-2">
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-2">
-                    <UserCheck size={15} className="text-amber-700 shrink-0" />
-                    <div>
-                      <span className="font-bold text-servora-navy block leading-tight">
-                        {selectedCustomer.name}
-                      </span>
-                      <span className="text-[10px] font-mono text-gray-600">
-                        {selectedCustomer.tierName} ({selectedCustomer.earningMultiplier}x) &bull;{' '}
-                        <strong>{selectedCustomer.currentPoints.toLocaleString()} pts</strong>
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleClearLoyaltyCustomer}
-                    className="text-gray-400 hover:text-rose-600 cursor-pointer"
-                    title="Detach Member"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
 
-                {loyaltyRewards.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <Gift size={13} className="text-amber-700 shrink-0" />
+              <span className="text-gray-400 shrink-0 flex items-center gap-1 text-[10.5px] font-semibold">
+                <span>{isOrderMetaExpanded ? 'Hide' : 'Edit'}</span>
+                {isOrderMetaExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </span>
+            </button>
+
+            {isOrderMetaExpanded && (
+              <div className="px-3 pb-3 pt-1.5 space-y-2 border-t border-gray-100 text-xs max-h-[42dvh] overflow-y-auto">
+                {/* Mobile Table Assignment (convenient when on Active Order tab) */}
+                {activeServiceModel?.requiresTable && (
+                  <div className="flex items-center justify-between gap-2 p-2 bg-blue-50/70 border border-blue-200 rounded-xl">
+                    <span className="font-bold text-servora-core flex items-center gap-1.5 shrink-0">
+                      <Utensils size={12} /> Table:
+                    </span>
                     <select
-                      aria-label="Redeem loyalty reward"
-                      value={selectedReward?.id || ''}
-                      onChange={(e) => {
-                        const rId = parseInt(e.target.value, 10);
-                        setSelectedReward(loyaltyRewards.find((r) => r.id === rId) || null);
-                      }}
-                      className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none cursor-pointer"
+                      aria-label="Select dining table"
+                      value={selectedTableId}
+                      onChange={(e) => setSelectedTableId(e.target.value)}
+                      className="bg-white border border-blue-200 rounded-lg px-2 py-1 text-xs font-bold text-servora-navy focus:outline-none cursor-pointer flex-1 max-w-[200px]"
                     >
-                      <option value="">Redeem Member Reward (Optional)</option>
-                      {loyaltyRewards.map((r) => (
-                        <option
-                          key={r.id}
-                          value={r.id}
-                          disabled={selectedCustomer.currentPoints < r.pointsCost}
-                        >
-                          {r.name} (-{r.pointsCost.toLocaleString()} pts)
-                        </option>
-                      ))}
+                      <option value="">Assign Table *</option>
+                      {tables.map((t) => {
+                        const isCurrentlySelected = String(t.id) === selectedTableId;
+                        const isOccupied = t.status === 'Occupied';
+                        return (
+                          <option
+                            key={t.id}
+                            value={t.id}
+                            disabled={isOccupied && !isCurrentlySelected}
+                          >
+                            {t.tableLabel} ({t.status})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                 )}
-              </div>
-            )}
 
-            {!selectedCustomer && (
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="text"
-                  placeholder="Guest Name (Optional)"
-                  value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
-                  className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-servora-core text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="Phone (07... M-Pesa)"
-                  value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
-                  className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-servora-core text-xs"
-                />
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Buyer KRA PIN (eTIMS)"
-                value={buyerKraPin}
-                onChange={(e) => setBuyerKraPin(e.target.value.toUpperCase())}
-                className="flex-1 px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono uppercase focus:outline-none focus:border-servora-core text-xs"
-              />
-
-              {activeServiceModel?.promptGuestCount && (
-                <div className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2">
-                  <Users size={12} className="text-gray-400" />
-                  <input
-                    type="number"
-                    min={1}
-                    max={50}
-                    aria-label="Guest count"
-                    value={guestCount}
-                    onChange={(e) => setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-8 bg-transparent text-xs font-bold text-servora-navy focus:outline-none font-mono text-center"
-                    title="Guest Cover Count"
-                  />
-                </div>
-              )}
-
-              <div
-                className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2"
-                title={
-                  appliedPromo
-                    ? 'Manual discount disabled while promo code is active'
-                    : `Custodian Max Discount: ${maxAllowedDiscount}%`
-                }
-              >
-                {maxAllowedDiscount === 0 || appliedPromo ? (
-                  <Lock size={11} className="text-gray-400" />
-                ) : (
-                  <Percent size={11} className="text-gray-400" />
+                {/* KDS Routing Override */}
+                {kitchenStations.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 bg-slate-50 border border-gray-200 rounded-xl px-2.5 py-1.5">
+                    <span className="font-bold text-servora-navy flex items-center gap-1 shrink-0 text-[11px]">
+                      <ChefHat size={12} className="text-servora-core" /> KDS:
+                    </span>
+                    <select
+                      aria-label="Order KDS routing"
+                      value={orderTargetStation}
+                      onChange={(e) => setOrderTargetStation(e.target.value)}
+                      className="bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-[11px] font-bold text-servora-navy focus:outline-none cursor-pointer flex-1 min-w-0 truncate"
+                    >
+                      <option value="AUTO">Auto-Route by Item / Category</option>
+                      {kitchenStations
+                        .filter((s) => s.isActive)
+                        .map((st) => (
+                          <option key={st.id} value={st.name}>
+                            Redirect All &rarr; {st.name} ({st.code})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                 )}
-                <select
-                  aria-label="Manual discount percentage"
-                  value={orderDiscountPercent}
-                  disabled={maxAllowedDiscount === 0 || Boolean(appliedPromo)}
-                  onChange={(e) => setOrderDiscountPercent(Number(e.target.value))}
-                  className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-50"
-                >
-                  <option value="0">0%</option>
-                  {maxAllowedDiscount >= 5 && <option value="5">5%</option>}
-                  {maxAllowedDiscount >= 10 && <option value="10">10%</option>}
-                  {maxAllowedDiscount >= 15 && <option value="15">15%</option>}
-                  {maxAllowedDiscount >= 20 && <option value="20">20%</option>}
-                </select>
-              </div>
-            </div>
 
-            <div className="flex gap-1.5 items-center">
-              {!appliedPromo ? (
-                <>
-                  <div className="relative flex-1">
-                    <Tag
-                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-                      size={12}
+                {/* CRM / Loyalty Member Lookup */}
+                {!selectedCustomer ? (
+                  <div className="relative">
+                    <Award
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-amber-500"
+                      size={13}
                     />
                     <input
                       type="text"
-                      placeholder="Promo Code (e.g. BRUNCH20)"
-                      value={promoCodeInput}
-                      onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
-                      className="w-full pl-7 pr-2.5 py-1 bg-slate-50 border border-gray-200 rounded-lg font-mono uppercase text-[11px] focus:outline-none focus:border-servora-core"
+                      disabled={!isOnline}
+                      placeholder={
+                        isOnline
+                          ? 'Lookup CRM / Loyalty Member (phone, name, PIN)...'
+                          : 'CRM Lookup unavailable offline'
+                      }
+                      value={customerSearchQuery}
+                      onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-1.5 bg-amber-50/40 border border-amber-200/80 rounded-xl focus:outline-none focus:border-amber-400 text-xs disabled:opacity-60"
+                    />
+                    {customerMatches.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 max-h-44 overflow-y-auto divide-y divide-gray-100">
+                        {customerMatches.map((cust) => (
+                          <button
+                            key={cust.id}
+                            type="button"
+                            onClick={() => handleSelectLoyaltyCustomer(cust)}
+                            className="w-full text-left px-3 py-2 hover:bg-blue-50/60 flex justify-between items-center cursor-pointer"
+                          >
+                            <div className="min-w-0 pr-2">
+                              <span className="font-bold text-servora-navy block truncate">
+                                {cust.name}
+                              </span>
+                              <span className="text-[10px] text-gray-500 font-mono">
+                                {cust.phone}
+                              </span>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-bold block">
+                                {cust.tierName}
+                              </span>
+                              <span className="text-[10px] font-mono font-bold text-servora-core">
+                                {cust.currentPoints.toLocaleString()} pts
+                              </span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-2 bg-amber-50/70 border border-amber-200 rounded-xl space-y-1.5">
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <UserCheck size={14} className="text-amber-700 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-servora-navy block leading-tight truncate">
+                            {selectedCustomer.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-gray-600">
+                            {selectedCustomer.tierName} ({selectedCustomer.earningMultiplier}x) &bull;{' '}
+                            <strong>{selectedCustomer.currentPoints.toLocaleString()} pts</strong>
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleClearLoyaltyCustomer}
+                        className="text-gray-400 hover:text-rose-600 cursor-pointer shrink-0"
+                        title="Detach Member"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    {loyaltyRewards.length > 0 && (
+                      <div className="flex items-center gap-1.5">
+                        <Gift size={12} className="text-amber-700 shrink-0" />
+                        <select
+                          aria-label="Redeem loyalty reward"
+                          value={selectedReward?.id || ''}
+                          onChange={(e) => {
+                            const rId = parseInt(e.target.value, 10);
+                            setSelectedReward(loyaltyRewards.find((r) => r.id === rId) || null);
+                          }}
+                          className="flex-1 bg-white border border-amber-200 rounded-lg px-2 py-1 text-[11px] font-bold text-servora-navy focus:outline-none cursor-pointer min-w-0"
+                        >
+                          <option value="">Redeem Member Reward (Optional)</option>
+                          {loyaltyRewards.map((r) => (
+                            <option
+                              key={r.id}
+                              value={r.id}
+                              disabled={selectedCustomer.currentPoints < r.pointsCost}
+                            >
+                              {r.name} (-{r.pointsCost.toLocaleString()} pts)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {!selectedCustomer && (
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Guest Name"
+                      value={customerName}
+                      onChange={(e) => setCustomerName(e.target.value)}
+                      className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl focus:outline-none focus:border-servora-core text-xs min-w-0"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Phone (07...)"
+                      value={customerPhone}
+                      onChange={(e) => setCustomerPhone(e.target.value)}
+                      className="px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono focus:outline-none focus:border-servora-core text-xs min-w-0"
                     />
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleApplyPromoCode}
-                    disabled={
-                      !promoCodeInput.trim() ||
-                      cart.length === 0 ||
-                      isValidatingPromo ||
-                      !isOnline
+                )}
+
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    placeholder="Buyer KRA PIN (eTIMS)"
+                    value={buyerKraPin}
+                    onChange={(e) => setBuyerKraPin(e.target.value.toUpperCase())}
+                    className="flex-1 min-w-0 px-2.5 py-1.5 bg-slate-50 border border-gray-200 rounded-xl font-mono uppercase focus:outline-none focus:border-servora-core text-xs"
+                  />
+
+                  {activeServiceModel?.promptGuestCount && (
+                    <div className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2 shrink-0">
+                      <Users size={11} className="text-gray-400" />
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        aria-label="Guest count"
+                        value={guestCount}
+                        onChange={(e) =>
+                          setGuestCount(Math.max(1, parseInt(e.target.value, 10) || 1))
+                        }
+                        className="w-7 bg-transparent text-xs font-bold text-servora-navy focus:outline-none font-mono text-center"
+                      />
+                    </div>
+                  )}
+
+                  <div
+                    className="flex items-center gap-1 bg-slate-50 border border-gray-200 rounded-xl px-2 shrink-0"
+                    title={
+                      appliedPromo
+                        ? 'Manual discount disabled while promo code is active'
+                        : `Custodian Max Discount: ${maxAllowedDiscount}%`
                     }
-                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-servora-navy font-bold rounded-lg text-[11px] disabled:opacity-40 cursor-pointer"
                   >
-                    {isValidatingPromo ? '...' : 'Apply'}
-                  </button>
-                </>
-              ) : (
-                <div className="flex-1 flex justify-between items-center px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 font-bold">
-                  <span className="flex items-center gap-1 font-mono">
-                    <Tag size={11} /> {appliedPromo.code} (-{currencySymbol}{' '}
-                    {appliedPromo.calculatedDiscountKes.toLocaleString()})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setAppliedPromo(null)}
-                    className="text-emerald-700 hover:text-rose-600 cursor-pointer"
-                  >
-                    <X size={13} />
-                  </button>
+                    {maxAllowedDiscount === 0 || appliedPromo ? (
+                      <Lock size={10} className="text-gray-400" />
+                    ) : (
+                      <Percent size={10} className="text-gray-400" />
+                    )}
+                    <select
+                      aria-label="Manual discount percentage"
+                      value={orderDiscountPercent}
+                      disabled={maxAllowedDiscount === 0 || Boolean(appliedPromo)}
+                      onChange={(e) => setOrderDiscountPercent(Number(e.target.value))}
+                      className="bg-transparent text-xs font-bold text-servora-navy focus:outline-none cursor-pointer disabled:opacity-50"
+                    >
+                      <option value="0">0%</option>
+                      {maxAllowedDiscount >= 5 && <option value="5">5%</option>}
+                      {maxAllowedDiscount >= 10 && <option value="10">10%</option>}
+                      {maxAllowedDiscount >= 15 && <option value="15">15%</option>}
+                      {maxAllowedDiscount >= 20 && <option value="20">20%</option>}
+                    </select>
+                  </div>
                 </div>
-              )}
-            </div>
-            {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
+
+                {/* Promo Code Bar */}
+                <div className="flex gap-1.5 items-center">
+                  {!appliedPromo ? (
+                    <>
+                      <div className="relative flex-1 min-w-0">
+                        <Tag
+                          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                          size={12}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Promo Code (e.g. BRUNCH20)"
+                          value={promoCodeInput}
+                          onChange={(e) => setPromoCodeInput(e.target.value.toUpperCase())}
+                          className="w-full pl-7 pr-2.5 py-1 bg-slate-50 border border-gray-200 rounded-lg font-mono uppercase text-[11px] focus:outline-none focus:border-servora-core"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleApplyPromoCode}
+                        disabled={
+                          !promoCodeInput.trim() ||
+                          cart.length === 0 ||
+                          isValidatingPromo ||
+                          !isOnline
+                        }
+                        className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-servora-navy font-bold rounded-lg text-[11px] disabled:opacity-40 cursor-pointer shrink-0"
+                      >
+                        {isValidatingPromo ? '...' : 'Apply'}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex justify-between items-center px-2.5 py-1 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 font-bold">
+                      <span className="flex items-center gap-1 font-mono truncate">
+                        <Tag size={11} /> {appliedPromo.code} (-{currencySymbol}{' '}
+                        {appliedPromo.calculatedDiscountKes.toLocaleString()})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setAppliedPromo(null)}
+                        className="text-emerald-700 hover:text-rose-600 cursor-pointer shrink-0"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {promoError && <p className="text-[10px] text-rose-600 font-bold">{promoError}</p>}
+              </div>
+            )}
           </div>
 
-          {/* Cart Itemized List */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {/* Scrollable Cart Itemized List (Always guaranteed generous vertical height) */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-2.5 sm:p-3 space-y-2">
             {cart.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-gray-400">
-                <ShoppingBag size={36} className="mb-2 opacity-25" />
+              <div className="h-full min-h-[120px] flex flex-col items-center justify-center text-gray-400">
+                <ShoppingBag size={32} className="mb-1.5 opacity-25" />
                 <p className="text-xs font-bold text-servora-navy">Ticket is empty</p>
-                <p className="text-[11px] text-gray-400">
-                  Select dishes, drinks, or combos from catalog
+                <p className="text-[11px] text-gray-400 text-center px-4">
+                  Tap dishes, drinks, or combos to build an order
                 </p>
               </div>
             ) : (
@@ -3016,25 +3412,25 @@ export default function POSPage() {
                     key={item.cartItemId}
                     className="bg-slate-50/70 border border-gray-200 p-2.5 rounded-xl shadow-xs space-y-1.5"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1 pr-2">
-                        <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1">
                           {item.isCombo && (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-servora-core text-white shrink-0">
+                            <span className="text-[8.5px] font-bold uppercase px-1.5 py-0.5 rounded bg-servora-core text-white shrink-0">
                               Combo
                             </span>
                           )}
-                          <h4 className="text-xs font-bold text-servora-navy line-clamp-1">
+                          <h4 className="text-xs font-bold text-servora-navy truncate">
                             {item.name}
                           </h4>
                           {atStockLimit && (
-                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0">
-                              Max Stock
+                            <span className="text-[8.5px] font-bold uppercase px-1 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0">
+                              Max
                             </span>
                           )}
                         </div>
                         {item.isCombo && item.comboItems && (
-                          <p className="text-[10px] text-gray-500 line-clamp-1 mt-0.5">
+                          <p className="text-[10px] text-gray-500 truncate mt-0.5">
                             {item.comboItems
                               .map((c) => `${c.quantity * item.quantity}x ${c.itemName}`)
                               .join(', ')}
@@ -3062,7 +3458,7 @@ export default function POSPage() {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1.5 bg-white rounded-xl p-1 border border-gray-200 shadow-xs">
+                      <div className="flex items-center gap-1 bg-white rounded-xl p-1 border border-gray-200 shadow-xs shrink-0">
                         <button
                           type="button"
                           onClick={() => updateQuantity(item.cartItemId, -1)}
@@ -3104,13 +3500,13 @@ export default function POSPage() {
                             )
                           );
                         }}
-                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[165px] truncate ${
+                        className={`border rounded-md px-1.5 py-0.5 text-[10px] font-mono font-bold focus:outline-none cursor-pointer max-w-[135px] truncate ${
                           resolvedSt.isRedirected
                             ? 'bg-amber-50 border-amber-300 text-amber-800'
                             : 'bg-white border-gray-200 text-servora-navy'
                         }`}
                       >
-                        <option value="">Default ({resolvedSt.stationName})</option>
+                        <option value="">{resolvedSt.stationName}</option>
                         {kitchenStations
                           .filter((s) => s.isActive)
                           .map((st) => (
@@ -3133,7 +3529,7 @@ export default function POSPage() {
                             )
                           )
                         }
-                        className="flex-1 min-w-[80px] bg-white border border-gray-200 rounded-md px-2 py-0.5 text-[10px] text-gray-700 focus:outline-none focus:border-servora-core"
+                        className="flex-1 min-w-0 bg-white border border-gray-200 rounded-md px-2 py-0.5 text-[10px] text-gray-700 focus:outline-none focus:border-servora-core"
                       />
                     </div>
                   </div>
@@ -3142,42 +3538,27 @@ export default function POSPage() {
             )}
           </div>
 
-          {/* Dynamic Financial Summary & Touch-Safe Action Buttons */}
-          <div className="p-3.5 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2">
-            <div className="space-y-1 text-xs">
+          {/* Always-Visible Sticky Financial Summary & Charge Dock */}
+          <div className="p-3 bg-slate-50 border-t border-gray-200 shrink-0 space-y-2">
+            <div className="space-y-0.5 text-[11px]">
               <div className="flex justify-between text-gray-500">
-                <span>Taxable Net Base</span>
+                <span>
+                  Net Base + VAT ({financialSettings?.vatRate || '16'}%)
+                  {calculations.levyAmount > 0 ? ' + Levy' : ''}
+                </span>
                 <span className="font-mono">
                   {currencySymbol}{' '}
                   {calculations.netAmount.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
-                  })}
-                </span>
-              </div>
-              <div className="flex justify-between text-gray-500">
-                <span>KRA VAT ({financialSettings?.vatRate || '16'}%)</span>
-                <span className="font-mono">
-                  {currencySymbol}{' '}
-                  {calculations.vatAmount.toLocaleString(undefined, {
+                  })}{' '}
+                  +{' '}
+                  {(calculations.vatAmount + calculations.levyAmount).toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
                 </span>
               </div>
-
-              {calculations.levyAmount > 0 && (
-                <div className="flex justify-between text-gray-500">
-                  <span>Tourism Levy ({financialSettings?.cateringLevyRate || '2'}%)</span>
-                  <span className="font-mono">
-                    {currencySymbol}{' '}
-                    {calculations.levyAmount.toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </span>
-                </div>
-              )}
 
               {calculations.serviceChargeAmount > 0 && (
                 <div className="flex justify-between text-purple-700 font-medium">
@@ -3194,7 +3575,7 @@ export default function POSPage() {
 
               {calculations.packingChargeAmount > 0 && (
                 <div className="flex justify-between text-gray-600 font-medium">
-                  <span>Packaging Surcharge</span>
+                  <span>Packaging</span>
                   <span className="font-mono">
                     +{currencySymbol} {calculations.packingChargeAmount.toLocaleString()}
                   </span>
@@ -3203,7 +3584,7 @@ export default function POSPage() {
 
               {calculations.discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-700 font-bold">
-                  <span>Total Discounts &amp; Rewards</span>
+                  <span>Discounts &amp; Rewards</span>
                   <span className="font-mono">
                     -{currencySymbol}{' '}
                     {calculations.discountAmount.toLocaleString(undefined, {
@@ -3215,13 +3596,13 @@ export default function POSPage() {
               )}
 
               {selectedCustomer && calculations.estimatedPointsEarned > 0 && (
-                <div className="flex justify-between text-amber-700 font-bold text-[11px]">
-                  <span>Loyalty Points Earned</span>
+                <div className="flex justify-between text-amber-700 font-bold text-[10.5px]">
+                  <span>Loyalty Points</span>
                   <span className="font-mono">+{calculations.estimatedPointsEarned} pts</span>
                 </div>
               )}
 
-              <div className="flex justify-between text-sm font-bold text-servora-navy pt-1.5 border-t border-gray-200">
+              <div className="flex justify-between items-baseline text-sm font-bold text-servora-navy pt-1.5 border-t border-gray-200">
                 <span>Total Due</span>
                 <span className="font-mono text-base text-servora-core">
                   {currencySymbol}{' '}
@@ -3233,42 +3614,44 @@ export default function POSPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="grid grid-cols-5 gap-2">
               <button
                 type="button"
                 onClick={handleClearTicket}
                 disabled={cart.length === 0}
-                className={`py-2.5 text-xs font-bold rounded-xl border transition-colors disabled:opacity-40 cursor-pointer ${
+                className={`col-span-2 py-2.5 text-xs font-bold rounded-xl border transition-colors disabled:opacity-40 cursor-pointer ${
                   confirmClearArmed
                     ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700'
                     : 'text-gray-600 bg-white border-gray-200 hover:bg-gray-100 hover:text-rose-600'
                 }`}
               >
-                {confirmClearArmed ? 'Tap Again to Clear' : 'Clear Ticket'}
+                {confirmClearArmed ? 'Confirm?' : 'Clear'}
               </button>
               <button
                 type="button"
                 onClick={handleOpenPayment}
                 disabled={cart.length === 0}
-                className="py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
+                className="col-span-3 py-2.5 text-xs font-bold text-white bg-servora-core rounded-xl shadow-xs hover:bg-blue-700 active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer"
               >
                 <CreditCard size={14} />
-                Charge {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
+                <span className="truncate">
+                  Charge {currencySymbol} {Math.round(calculations.grandTotal).toLocaleString()}
+                </span>
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ITEM MODIFIER CUSTOMIZATION MODAL */}
+      {/* ITEM MODIFIER CUSTOMIZATION MODAL (Mobile Bottom Sheet / Desktop Dialog) */}
       {customizingItem && (
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="customize-item-title"
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
+          className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs"
         >
-          <div className="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl border border-gray-200 space-y-4 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 shadow-2xl border border-gray-200 space-y-4 max-h-[90dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
               <div>
                 <h3 id="customize-item-title" className="text-sm font-bold text-servora-navy">
@@ -3285,7 +3668,7 @@ export default function POSPage() {
                 type="button"
                 onClick={() => setCustomizingItem(null)}
                 aria-label="Close customization modal"
-                className="text-gray-400 hover:text-servora-navy cursor-pointer"
+                className="text-gray-400 hover:text-servora-navy cursor-pointer p-1"
               >
                 <X size={18} />
               </button>
@@ -3356,7 +3739,7 @@ export default function POSPage() {
                                 return { ...prev, [group.id]: [...cur, opt.id] };
                               });
                             }}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-xs transition-all cursor-pointer ${
+                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs transition-all cursor-pointer ${
                               active
                                 ? 'bg-blue-50 border-servora-core text-servora-navy font-bold'
                                 : 'bg-slate-50 border-gray-200 text-gray-700 hover:bg-gray-100'
@@ -3392,47 +3775,47 @@ export default function POSPage() {
               <button
                 type="button"
                 onClick={() => setCustomizingItem(null)}
-                className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
+                className="px-4 py-2.5 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmModifiers}
-                className="px-5 py-2 text-xs font-bold text-white bg-servora-core hover:bg-blue-700 rounded-xl cursor-pointer"
+                className="flex-1 sm:flex-initial px-5 py-2.5 text-xs font-bold text-white bg-servora-core hover:bg-blue-700 rounded-xl cursor-pointer"
               >
-                Add to Order ({currencySymbol} {draftCustomizedUnitPrice.toLocaleString()})
+                Add ({currencySymbol} {draftCustomizedUnitPrice.toLocaleString()})
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* TENDER SETTLEMENT & STATION ROUTING MODAL */}
+      {/* TENDER SETTLEMENT & STATION ROUTING MODAL (Mobile Bottom Sheet / Desktop Dialog) */}
       {isPaymentModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
+          className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs"
         >
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 space-y-4">
+          <div className="bg-white rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl border border-gray-200 space-y-4 max-h-[92dvh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-              <div>
+              <div className="min-w-0 pr-2">
                 <h3 className="text-sm font-bold text-servora-navy">
                   Tender Settlement &amp; KDS Routing
                 </h3>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-gray-500 truncate">
                   {activeBranch?.name || 'Outlet'} &bull;{' '}
                   {selectedDrawerObj?.name || 'Register'} &bull;{' '}
-                  {selectedTableId
-                    ? `Table ${tables.find((t) => String(t.id) === selectedTableId)?.tableLabel}`
+                  {selectedTableObj
+                    ? `Table ${selectedTableObj.tableLabel}`
                     : activeServiceModel?.name || 'Counter'}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsPaymentModalOpen(false)}
-                className="text-gray-400 hover:text-servora-navy cursor-pointer"
+                className="text-gray-400 hover:text-servora-navy cursor-pointer p-1 shrink-0"
               >
                 <X size={18} />
               </button>
@@ -3503,7 +3886,7 @@ export default function POSPage() {
                     setCheckoutError(null);
                     setPaymentMethod(method);
                   }}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
+                  className={`py-2.5 px-1 rounded-xl text-xs font-bold border transition-all text-center cursor-pointer ${
                     paymentMethod === method
                       ? 'border-servora-core bg-blue-50 text-servora-core shadow-xs'
                       : 'border-gray-200 text-gray-600 hover:bg-gray-50'
@@ -3522,6 +3905,7 @@ export default function POSPage() {
                 <input
                   type="number"
                   step="any"
+                  inputMode="decimal"
                   value={cashTendered}
                   onChange={(e) => setCashTendered(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl font-mono font-bold text-sm focus:border-servora-core focus:outline-none"
@@ -3549,7 +3933,8 @@ export default function POSPage() {
                 </span>
                 {isOnline ? (
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="tel"
                     placeholder="2547XXXXXXXX or 07XXXXXXXX"
                     value={mpesaPhone}
                     onChange={(e) => setMpesaPhone(e.target.value)}
@@ -3590,6 +3975,7 @@ export default function POSPage() {
                     </label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={splitCashAmount}
                       onChange={(e) => setSplitCashAmount(e.target.value)}
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg font-mono font-bold text-xs"
@@ -3601,6 +3987,7 @@ export default function POSPage() {
                     </label>
                     <input
                       type="number"
+                      inputMode="decimal"
                       value={splitMpesaAmount}
                       onChange={(e) => setSplitMpesaAmount(e.target.value)}
                       className="w-full px-2 py-1.5 bg-white border border-gray-200 rounded-lg font-mono font-bold text-xs"
@@ -3621,7 +4008,8 @@ export default function POSPage() {
                 </div>
                 {isOnline ? (
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="tel"
                     placeholder="M-Pesa Mobile Number (07...)"
                     value={mpesaPhone}
                     onChange={(e) => setMpesaPhone(e.target.value)}
@@ -3662,18 +4050,17 @@ export default function POSPage() {
 
       {/* DYNAMIC FISCAL THERMAL RECEIPT MODAL */}
       {completedOrder && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs overflow-y-auto">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-xs overflow-y-auto">
           <div
             id="thermal-receipt-printable"
-            className={`bg-white rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all ${
+            className={`bg-white rounded-t-3xl sm:rounded-2xl w-full p-5 shadow-2xl border border-gray-200 space-y-3 font-mono text-xs text-black transition-all max-h-[92dvh] overflow-y-auto ${
               receiptTemplate?.paperWidth === '58MM'
-                ? 'max-w-[280px]'
+                ? 'sm:max-w-[280px]'
                 : receiptTemplate?.paperWidth === 'A4_INVOICE'
-                  ? 'max-w-[460px]'
-                  : 'max-w-[340px]'
+                  ? 'sm:max-w-[460px]'
+                  : 'sm:max-w-[340px]'
             }`}
           >
-            {/* Non-printable payment status alert */}
             {completedOrder.paymentStatusMessage && (
               <div
                 className={`p-2.5 rounded-xl border font-sans text-[11px] font-semibold print:hidden ${
@@ -3964,9 +4351,8 @@ export default function POSPage() {
                 type="button"
                 onClick={() => {
                   setCompletedOrder(null);
-                  if (autoLockAfterSale && isOnline) {
-                    setIsTerminalLocked(true);
-                    setIsPinKioskOpen(true);
+                  if ((autoLockAfterSale || isDedicatedKiosk) && isOnline) {
+                    lockTerminalToKioskPin();
                   }
                 }}
                 className="px-4 py-2.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-xl hover:bg-gray-200 transition-all cursor-pointer"

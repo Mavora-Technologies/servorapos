@@ -1,6 +1,15 @@
-import { eq, and, desc, sql, or, ilike } from 'drizzle-orm';
+// apps/api/src/repositories/notification.repository.ts
+import { eq, and, desc, sql, or, ilike, isNull, inArray, type SQL } from 'drizzle-orm';
 import { db } from '../config/db';
 import { notifications, users, branches } from '../config/schema';
+
+export interface NotificationAccessScope {
+  tenantId: number;
+  userId: number;
+  allowedModules: string[] | 'ALL';
+  authorizedBranchIds: number[] | 'ALL';
+  activeBranchId?: number | null;
+}
 
 export interface NotificationQueryFilters {
   category?: 'ALL' | 'ACTION_REQUIRED' | 'FYI_STREAM' | 'COMPLIANCE_AUDIT';
@@ -12,35 +21,91 @@ export interface NotificationQueryFilters {
   limit?: number;
 }
 
-export const fetchTenantNotifications = async (tenantId: number, query: NotificationQueryFilters = {}) => {
-  const page = query.page || 1;
-  const limit = query.limit || 50;
+/**
+ * Builds the mandatory multi-tenant, multi-branch, and RBAC visibility predicate.
+ * - Users always see notifications directly addressed to them (`user_id = userId`).
+ * - Users only see broadcast notifications (`user_id IS NULL`) for modules cleared by their permissions.
+ * - Users only see notifications for their authorized branch(es) or tenant-wide (`branch_id IS NULL`).
+ */
+function buildAccessScopeConditions(scope: NotificationAccessScope): SQL[] {
+  const conditions: SQL[] = [eq(notifications.tenantId, scope.tenantId)];
+
+  // 1. User / Module RBAC Visibility
+  if (scope.allowedModules === 'ALL') {
+    conditions.push(or(eq(notifications.userId, scope.userId), isNull(notifications.userId))!);
+  } else if (scope.allowedModules.length > 0) {
+    conditions.push(
+      or(
+        eq(notifications.userId, scope.userId),
+        and(isNull(notifications.userId), inArray(notifications.module, scope.allowedModules))
+      )!
+    );
+  } else {
+    conditions.push(eq(notifications.userId, scope.userId));
+  }
+
+  // 2. Multi-Branch Isolation
+  if (scope.authorizedBranchIds === 'ALL') {
+    if (scope.activeBranchId) {
+      conditions.push(
+        or(eq(notifications.branchId, scope.activeBranchId), isNull(notifications.branchId))!
+      );
+    }
+  } else if (scope.authorizedBranchIds.length > 0) {
+    const targetBranches =
+      scope.activeBranchId && scope.authorizedBranchIds.includes(scope.activeBranchId)
+        ? [scope.activeBranchId]
+        : scope.authorizedBranchIds;
+
+    conditions.push(
+      or(inArray(notifications.branchId, targetBranches), isNull(notifications.branchId))!
+    );
+  } else {
+    conditions.push(isNull(notifications.branchId));
+  }
+
+  return conditions;
+}
+
+export const fetchScopedNotifications = async (
+  scope: NotificationAccessScope,
+  query: NotificationQueryFilters = {}
+) => {
+  const page = Math.max(1, query.page || 1);
+  const limit = Math.min(100, Math.max(1, query.limit || 50));
   const offset = (page - 1) * limit;
 
-  const conditions = [
-    eq(notifications.tenantId, tenantId),
-    query.category && query.category !== 'ALL' ? eq(notifications.category, query.category) : undefined,
-    query.severity && query.severity !== 'ALL' ? eq(notifications.severity, query.severity) : undefined,
+  const conditions: (SQL | undefined)[] = [
+    ...buildAccessScopeConditions(scope),
+    query.category && query.category !== 'ALL'
+      ? eq(notifications.category, query.category)
+      : undefined,
+    query.severity && query.severity !== 'ALL'
+      ? eq(notifications.severity, query.severity)
+      : undefined,
     query.module && query.module !== 'ALL' ? eq(notifications.module, query.module) : undefined,
     query.isRead === 'TRUE'
       ? eq(notifications.isRead, true)
       : query.isRead === 'FALSE'
-      ? eq(notifications.isRead, false)
-      : undefined,
+        ? eq(notifications.isRead, false)
+        : undefined,
     query.search
       ? or(
           ilike(notifications.title, `%${query.search}%`),
           ilike(notifications.detail, `%${query.search}%`),
-          ilike(notifications.module, `%${query.search}%`)
+          ilike(notifications.module, `%${query.search}%`),
+          ilike(notifications.entityId, `%${query.search}%`)
         )
       : undefined,
-  ].filter(Boolean);
+  ];
+
+  const whereClause = and(...conditions.filter((c): c is SQL => Boolean(c)));
 
   const [countResult, rows] = await Promise.all([
     db
-      .select({ count: sql<number>`count(*)` })
+      .select({ count: sql<number>`count(*)::int` })
       .from(notifications)
-      .where(and(...conditions)),
+      .where(whereClause),
     db
       .select({
         id: notifications.id,
@@ -58,12 +123,12 @@ export const fetchTenantNotifications = async (tenantId: number, query: Notifica
         resolvedAt: notifications.resolvedAt,
         createdAt: notifications.createdAt,
         branchName: branches.name,
-        resolvedByName: sql<string | null>`TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName}))`,
+        resolvedByName: sql<string | null>`NULLIF(TRIM(CONCAT(${users.firstName}, ' ', ${users.lastName})), '')`,
       })
       .from(notifications)
       .leftJoin(branches, eq(notifications.branchId, branches.id))
       .leftJoin(users, eq(notifications.resolvedByUserId, users.id))
-      .where(and(...conditions))
+      .where(whereClause)
       .orderBy(desc(notifications.createdAt))
       .limit(limit)
       .offset(offset),
@@ -71,7 +136,6 @@ export const fetchTenantNotifications = async (tenantId: number, query: Notifica
 
   const total = Number(countResult[0]?.count || 0);
 
-  // Clean production behavior: return real data or an empty array
   return {
     notifications: rows,
     total,
@@ -80,17 +144,19 @@ export const fetchTenantNotifications = async (tenantId: number, query: Notifica
   };
 };
 
-export const fetchNotificationTelemetrySummary = async (tenantId: number) => {
+export const fetchScopedTelemetrySummary = async (scope: NotificationAccessScope) => {
+  const whereClause = and(...buildAccessScopeConditions(scope));
+
   const [counts] = await db
     .select({
-      total: sql<number>`count(*)`,
-      unread: sql<number>`count(case when ${notifications.isRead} = false then 1 end)`,
-      critical: sql<number>`count(case when ${notifications.severity} = 'CRITICAL' and ${notifications.isRead} = false then 1 end)`,
-      actionRequired: sql<number>`count(case when ${notifications.category} = 'ACTION_REQUIRED' and ${notifications.isResolved} = false then 1 end)`,
-      warnings: sql<number>`count(case when ${notifications.severity} = 'WARNING' and ${notifications.isRead} = false then 1 end)`,
+      total: sql<number>`count(*)::int`,
+      unread: sql<number>`count(case when ${notifications.isRead} = false then 1 end)::int`,
+      critical: sql<number>`count(case when ${notifications.severity} = 'CRITICAL' and ${notifications.isRead} = false then 1 end)::int`,
+      actionRequired: sql<number>`count(case when ${notifications.category} = 'ACTION_REQUIRED' and ${notifications.isResolved} = false then 1 end)::int`,
+      warnings: sql<number>`count(case when ${notifications.severity} = 'WARNING' and ${notifications.isRead} = false then 1 end)::int`,
     })
     .from(notifications)
-    .where(eq(notifications.tenantId, tenantId));
+    .where(whereClause);
 
   return {
     total: Number(counts?.total || 0),
@@ -101,25 +167,29 @@ export const fetchNotificationTelemetrySummary = async (tenantId: number) => {
   };
 };
 
-export const markNotificationAsRead = async (tenantId: number, notificationId: number) => {
+export const markScopedNotificationAsRead = async (
+  scope: NotificationAccessScope,
+  notificationId: number
+) => {
   const [updated] = await db
     .update(notifications)
     .set({ isRead: true })
-    .where(and(eq(notifications.id, notificationId), eq(notifications.tenantId, tenantId)))
+    .where(and(eq(notifications.id, notificationId), ...buildAccessScopeConditions(scope)))
     .returning();
-  return updated;
+  return updated ?? null;
 };
 
-export const markAllNotificationsAsRead = async (tenantId: number) => {
-  await db
+export const markAllScopedNotificationsAsRead = async (scope: NotificationAccessScope) => {
+  const updated = await db
     .update(notifications)
     .set({ isRead: true })
-    .where(and(eq(notifications.tenantId, tenantId), eq(notifications.isRead, false)));
+    .where(and(eq(notifications.isRead, false), ...buildAccessScopeConditions(scope)))
+    .returning({ id: notifications.id });
+  return updated.length;
 };
 
-export const resolveActionableNotification = async (
-  tenantId: number,
-  userId: number,
+export const resolveScopedActionableNotification = async (
+  scope: NotificationAccessScope,
   notificationId: number,
   notes?: string
 ) => {
@@ -129,12 +199,12 @@ export const resolveActionableNotification = async (
       isRead: true,
       isResolved: true,
       resolvedAt: new Date(),
-      resolvedByUserId: userId,
-      actionPayload: sql`coalesce(action_payload, '{}'::jsonb) || jsonb_build_object('resolutionNotes', ${notes || 'Actioned by operator'}::text)`,
+      resolvedByUserId: scope.userId,
+      actionPayload: sql`coalesce(${notifications.actionPayload}, '{}'::jsonb) || jsonb_build_object('resolutionNotes', ${notes || 'Actioned by operator'}::text)`,
     })
-    .where(and(eq(notifications.id, notificationId), eq(notifications.tenantId, tenantId)))
+    .where(and(eq(notifications.id, notificationId), ...buildAccessScopeConditions(scope)))
     .returning();
-  return updated;
+  return updated ?? null;
 };
 
 export const createSystemNotification = async (data: {
@@ -149,7 +219,7 @@ export const createSystemNotification = async (data: {
   entityType?: string;
   entityId?: string;
   actionUrl?: string;
-  actionPayload?: Record<string, any>;
+  actionPayload?: Record<string, unknown>;
 }) => {
   const [created] = await db
     .insert(notifications)

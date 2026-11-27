@@ -34,28 +34,39 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDashboardAnalytics = void 0;
-const analyticsRepo = __importStar(require("../repositories/analytics.repository"));
+const zod_1 = require("zod");
+const analyticsService = __importStar(require("../services/analytics.service"));
+const analytics_validator_1 = require("../validators/analytics.validator");
 const getDashboardAnalytics = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
-            res.status(401).json({ status: 'error', message: 'Unauthorized' });
+        const user = req.user;
+        if (!user?.tenantId || !user?.userId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { timeframe = 'today', startDate, endDate, branchId, orderType } = req.query;
-        const parsedBranchId = branchId && branchId !== 'ALL' ? parseInt(String(branchId), 10) : null;
-        const data = await analyticsRepo.getExecutiveDashboardMetrics(tenantId, {
-            timeframe: String(timeframe),
-            startDate: startDate ? String(startDate) : undefined,
-            endDate: endDate ? String(endDate) : undefined,
-            branchId: parsedBranchId,
-            orderType: orderType ? String(orderType) : undefined,
-        });
+        const query = analytics_validator_1.dashboardAnalyticsQuerySchema.parse(req.query);
+        const data = await analyticsService.fetchExecutiveDashboard({
+            tenantId: user.tenantId,
+            userId: user.userId,
+            role: user.role,
+        }, query);
         res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        console.error('[Dashboard Analytics Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Analytics query failed' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid dashboard filter parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        if (error instanceof analyticsService.ForbiddenBranchError) {
+            res.status(403).json({ status: 'error', message: error.message });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Analytics query failed';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getDashboardAnalytics = getDashboardAnalytics;

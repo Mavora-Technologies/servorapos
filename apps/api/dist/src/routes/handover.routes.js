@@ -1,13 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+// apps/api/src/routes/handover.routes.ts
 const express_1 = require("express");
 const auth_middleware_1 = require("../middleware/auth.middleware");
+const rbac_middleware_1 = require("../middleware/rbac.middleware");
 const handover_controller_1 = require("../controllers/handover.controller");
 const router = (0, express_1.Router)();
 router.use(auth_middleware_1.requireAuth);
-router.get('/', handover_controller_1.getHandovers);
-router.get('/:id', handover_controller_1.getHandoverDetail);
-router.post('/', handover_controller_1.postHandover);
-router.put('/:id', handover_controller_1.putHandover);
-router.post('/:id/acknowledge', handover_controller_1.postAcknowledge);
+const HANDOVER_VIEW_PERMS = ['staff.view', 'cash.reconcile', 'staff.manage'];
+const HANDOVER_ACTION_PERMS = ['cash.reconcile', 'staff.manage', 'staff.view'];
+router.get('/', (0, rbac_middleware_1.requirePermission)(HANDOVER_VIEW_PERMS), handover_controller_1.getHandovers);
+router.get('/context', (0, rbac_middleware_1.requirePermission)(HANDOVER_VIEW_PERMS), handover_controller_1.getHandoverContext);
+router.get('/:id', (0, rbac_middleware_1.requirePermission)(HANDOVER_VIEW_PERMS), handover_controller_1.getHandoverDetail);
+router.post('/', (0, rbac_middleware_1.requirePermission)(HANDOVER_ACTION_PERMS), handover_controller_1.postHandover);
+router.put('/:id', (0, rbac_middleware_1.requirePermission)(HANDOVER_ACTION_PERMS), handover_controller_1.putHandover);
+router.post('/:id/acknowledge', (0, rbac_middleware_1.requirePermission)(HANDOVER_ACTION_PERMS), handover_controller_1.postAcknowledge);
+router.post('/:id/dispute', (0, rbac_middleware_1.requirePermission)(HANDOVER_ACTION_PERMS), handover_controller_1.postDispute);
+router.post('/:id/resolve', (0, rbac_middleware_1.requirePermission)(['cash.reconcile', 'staff.manage']), handover_controller_1.postResolveDispute);
 exports.default = router;

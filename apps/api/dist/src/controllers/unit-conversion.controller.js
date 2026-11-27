@@ -1,9 +1,41 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteUnitConversion = exports.createUnitConversion = exports.getUnitConversions = void 0;
-const drizzle_orm_1 = require("drizzle-orm");
-const db_1 = require("../config/db");
-const schema_1 = require("../config/schema");
+exports.deleteUnitConversion = exports.updateUnitConversion = exports.createUnitConversion = exports.getUnitConversions = void 0;
+const zod_1 = require("zod");
+const unitConversionService = __importStar(require("../services/unit-conversion.service"));
 const unit_conversion_validator_1 = require("../validators/unit-conversion.validator");
 const getUnitConversions = async (req, res) => {
     try {
@@ -12,29 +44,12 @@ const getUnitConversions = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const conversions = await db_1.db
-            .select({
-            id: schema_1.unitConversions.id,
-            tenantId: schema_1.unitConversions.tenantId,
-            fromUnit: schema_1.unitConversions.fromUnit,
-            toUnit: schema_1.unitConversions.toUnit,
-            conversionFactor: schema_1.unitConversions.conversionFactor,
-            inventoryItemId: schema_1.unitConversions.inventoryItemId,
-            inventoryItemName: schema_1.inventoryItems.name,
-            unitCategory: schema_1.unitConversions.unitCategory,
-            description: schema_1.unitConversions.description,
-            isDefault: schema_1.unitConversions.isDefault,
-            createdAt: schema_1.unitConversions.createdAt,
-        })
-            .from(schema_1.unitConversions)
-            .leftJoin(schema_1.inventoryItems, (0, drizzle_orm_1.eq)(schema_1.unitConversions.inventoryItemId, schema_1.inventoryItems.id))
-            .where((0, drizzle_orm_1.eq)(schema_1.unitConversions.tenantId, tenantId))
-            .orderBy((0, drizzle_orm_1.desc)(schema_1.unitConversions.id));
-        res.status(200).json({ status: 'success', data: conversions });
+        const data = await unitConversionService.listTenantUnitConversions(tenantId);
+        res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        console.error('[Get Unit Conversions Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch unit conversions' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch unit conversions';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getUnitConversions = getUnitConversions;
@@ -45,45 +60,80 @@ const createUnitConversion = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const validated = unit_conversion_validator_1.createUnitConversionSchema.parse(req.body);
-        const [created] = await db_1.db
-            .insert(schema_1.unitConversions)
-            .values({
-            tenantId,
-            fromUnit: validated.fromUnit,
-            toUnit: validated.toUnit,
-            conversionFactor: validated.conversionFactor.toFixed(4),
-            inventoryItemId: validated.inventoryItemId || null,
-            unitCategory: validated.unitCategory,
-            description: validated.description || null,
-        })
-            .returning();
+        const payload = unit_conversion_validator_1.createUnitConversionSchema.parse(req.body);
+        const created = await unitConversionService.registerUnitConversion(tenantId, payload);
         res.status(201).json({ status: 'success', data: created });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(500).json({ status: 'error', message: error.message });
+        const message = error instanceof Error ? error.message : 'Failed to create unit conversion rule';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.createUnitConversion = createUnitConversion;
-const deleteUnitConversion = async (req, res) => {
+const updateUnitConversion = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const { id } = req.params;
         if (!tenantId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        await db_1.db
-            .delete(schema_1.unitConversions)
-            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.unitConversions.id, Number(id)), (0, drizzle_orm_1.eq)(schema_1.unitConversions.tenantId, tenantId)));
-        res.status(200).json({ status: 'success', message: 'Conversion rule removed' });
+        const conversionId = Number(req.params.id);
+        if (!Number.isInteger(conversionId) || conversionId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid conversion rule ID' });
+            return;
+        }
+        const payload = unit_conversion_validator_1.updateUnitConversionSchema.parse(req.body);
+        const updated = await unitConversionService.modifyUnitConversion(tenantId, conversionId, payload);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Unit conversion rule not found' });
+            return;
+        }
+        res.status(200).json({ status: 'success', data: updated });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to update unit conversion rule';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.updateUnitConversion = updateUnitConversion;
+const deleteUnitConversion = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized' });
+            return;
+        }
+        const conversionId = Number(req.params.id);
+        if (!Number.isInteger(conversionId) || conversionId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid conversion rule ID' });
+            return;
+        }
+        const deleted = await unitConversionService.removeUnitConversion(tenantId, conversionId);
+        if (!deleted) {
+            res.status(404).json({ status: 'error', message: 'Unit conversion rule not found' });
+            return;
+        }
+        res.status(200).json({ status: 'success', message: 'Unit conversion rule deleted.' });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to delete unit conversion rule';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.deleteUnitConversion = deleteUnitConversion;

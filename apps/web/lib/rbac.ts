@@ -1,19 +1,20 @@
 // apps/web/lib/rbac.ts
 
 // Maps each route prefix to the exact permission(s) from ENTERPRISE_PERMISSIONS_CATALOG.
-// Empty array = accessible to any authenticated user (e.g. /notifications, /help).
+// Empty array = accessible to any standard (non-kiosk) authenticated user.
 export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   // Mission Control & Terminals
   '/dashboard': ['reports.view', 'settings.view'],
-  '/pos': ['pos.access'],
+  '/pos': ['pos.access', 'pos.kiosk'],
 
   // Front-of-House & Guest Service
-  '/orders/open': ['orders.view', 'pos.access'],
-  '/orders/takeaway': ['orders.view', 'pos.access'],
+  '/orders/open': ['orders.view'],
+  '/orders/takeaway': ['orders.view'],
   '/orders/delivery': ['orders.view'],
+  '/orders/online-orders': ['orders.view'],
   '/orders': ['orders.view'],
   '/online-orders': ['orders.view'],
-  '/tables': ['tables.manage', 'pos.access'],
+  '/tables': ['tables.manage'],
   '/reservations/waitlist': ['reservations.manage'],
   '/reservations': ['reservations.manage'],
 
@@ -31,8 +32,8 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/menu/modifiers': ['settings.manage', 'pos.discount'],
   '/menu/combos': ['settings.manage', 'pos.discount'],
   '/menu/pricing': ['settings.manage', 'pos.discount'],
-  '/menu/availability': ['kitchen.manage', 'pos.access', 'settings.manage'],
-  '/menu': ['pos.access', 'recipes.view', 'settings.manage'],
+  '/menu/availability': ['kitchen.manage', 'settings.manage'],
+  '/menu': ['recipes.view', 'settings.manage'],
 
   // Inventory & Logistics
   '/inventory/counts': ['inventory.count', 'inventory.manage'],
@@ -67,15 +68,17 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/finance/expenses': ['payments.view', 'reports.view'],
   '/finance/payables': ['purchasing.view', 'payments.view'],
   '/finance': ['payments.view', 'reports.view'],
-  '/marketing': ['pos.discount', 'reports.view'],
 
   // Guests, Loyalty & Marketing
   '/customers/feedback': ['orders.view', 'reports.view'],
-  '/customers': ['orders.view', 'pos.access'],
+  '/customers': ['orders.view'],
   '/loyalty/rewards': ['pos.discount', 'settings.manage'],
   '/loyalty/transactions': ['orders.view', 'payments.view'],
-  '/loyalty': ['orders.view', 'pos.access'],
+  '/loyalty': ['orders.view'],
   '/marketing/campaigns': ['pos.discount', 'reports.view'],
+  '/marketing/templates': ['pos.discount', 'reports.view'],
+  '/marketing/promotions': ['pos.discount', 'reports.view'],
+  '/marketing': ['pos.discount', 'reports.view'],
 
   // Executive Analytics & BI
   '/reports/builder': ['reports.view'],
@@ -96,8 +99,8 @@ export const ROUTE_PERMISSIONS: Record<string, string[]> = {
   '/staff/schedules': ['staff.view', 'staff.manage'],
   '/staff/attendance': ['staff.view', 'staff.manage'],
   '/staff/handover': ['staff.view', 'cash.reconcile'],
-  '/staff': ['staff.view', 'staff.manage'],
   '/staff/commissions': ['staff.manage', 'reports.view'],
+  '/staff': ['staff.view', 'staff.manage'],
 
   // Organization & System Settings
   '/settings/business': ['settings.view', 'settings.manage'],
@@ -132,6 +135,18 @@ const LANDING_ROUTE_PRIORITY: Array<{ path: string; label: string }> = [
   { path: '/notifications', label: 'Alert Center' },
 ];
 
+/**
+ * Capability-based (SaaS-safe) check for shared POS Kiosk terminals.
+ * Driven strictly by the `pos.kiosk` permission — works regardless of what
+ * custom role title or slug a tenant creates (e.g. WAITERS_WAITRESS, COUNTER_1, etc.).
+ */
+export function isKioskOnlySession(permissions?: string[], role?: string): boolean {
+  if (role === 'ADMIN' || role === 'SUPER_ADMIN' || permissions?.includes('*')) {
+    return false;
+  }
+  return Boolean(permissions?.includes('pos.kiosk'));
+}
+
 export function getRequiredPermissionsForPath(pathname: string): string[] {
   if (!pathname) return [];
   const matched = SORTED_ROUTES.find(
@@ -149,6 +164,11 @@ export function canAccessRoute(
     return true;
   }
 
+  // Kiosk-scoped sessions are strictly locked to /pos (not even /notifications or /help)
+  if (isKioskOnlySession(permissions, role)) {
+    return pathname === '/pos' || pathname.startsWith('/pos/');
+  }
+
   const required = getRequiredPermissionsForPath(pathname);
   if (required.length === 0) return true;
 
@@ -161,6 +181,10 @@ export function canAccessRoute(
  * Resolves the highest-priority workspace route the authenticated user is authorized to open.
  */
 export function getDefaultLandingRoute(permissions?: string[], role?: string): string {
+  if (isKioskOnlySession(permissions, role)) {
+    return '/pos';
+  }
+
   for (const candidate of LANDING_ROUTE_PRIORITY) {
     if (canAccessRoute(candidate.path, permissions, role)) {
       return candidate.path;
@@ -184,6 +208,10 @@ export function resolveSafeRedirectPath(
   permissions?: string[],
   role?: string
 ): string {
+  if (isKioskOnlySession(permissions, role)) {
+    return '/pos';
+  }
+
   if (
     requestedPath &&
     requestedPath.startsWith('/') &&

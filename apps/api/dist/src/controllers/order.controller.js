@@ -38,13 +38,14 @@ const drizzle_orm_1 = require("drizzle-orm");
 const db_1 = require("../config/db");
 const schema_1 = require("../config/schema");
 const orderRepo = __importStar(require("../repositories/order.repository"));
+const posRepo = __importStar(require("../repositories/pos-terminal.repository"));
 const order_validator_1 = require("../validators/order.validator");
 const resolveAuthenticatedUserId = async (req) => {
     const rawId = req.user?.userId ??
         req.user?.id ??
         req.user?.sub ??
         null;
-    if (rawId && !isNaN(Number(rawId))) {
+    if (rawId && !Number.isNaN(Number(rawId))) {
         return Number(rawId);
     }
     if (req.user?.email && req.user?.tenantId) {
@@ -67,6 +68,27 @@ const createOrder = async (req, res) => {
             : req.user?.defaultBranchId
                 ? Number(req.user.defaultBranchId)
                 : null;
+        const normalizedItems = Array.isArray(items)
+            ? items
+                .map((i) => ({
+                menuItemId: Number(i.menuItemId),
+                quantity: Number(i.quantity),
+            }))
+                .filter((i) => Number.isInteger(i.menuItemId) && i.menuItemId > 0 && i.quantity > 0)
+            : [];
+        // 1. Enforce live stock & manual availability limits before creating the order
+        if (normalizedItems.length > 0) {
+            const stockCheck = await posRepo.validateOrderStockAvailability(tenantId, normalizedItems, effectiveBranchId ?? undefined);
+            if (!stockCheck.valid) {
+                res.status(409).json({
+                    status: 'error',
+                    message: stockCheck.shortages.map((s) => s.reason).join(' '),
+                    shortages: stockCheck.shortages,
+                });
+                return;
+            }
+        }
+        // 2. Create the order record
         const order = await orderRepo.createOrderRecord(tenantId, {
             branchId: effectiveBranchId,
             cashierId,
@@ -91,11 +113,23 @@ const createOrder = async (req, res) => {
             paymentMethod,
             notes,
         }, items);
+        // 3. Synchronize menu_item_availability remainingCount / is86ed (and deduct stock if not already done)
+        if (order?.id && normalizedItems.length > 0) {
+            await posRepo.syncPostOrderStockAndAvailability({
+                tenantId,
+                branchId: effectiveBranchId,
+                userId: cashierId,
+                orderId: Number(order.id),
+                orderNumber: String(order.orderNumber || `ORD-${order.id}`),
+                items: normalizedItems,
+            });
+        }
         res.status(201).json({ status: 'success', data: order });
     }
     catch (error) {
         console.error('[Order Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to process order' });
+        const message = error instanceof Error ? error.message : 'Failed to process order';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.createOrder = createOrder;
@@ -107,7 +141,8 @@ const getOpenOrders = async (req, res) => {
         res.status(200).json({ status: 'success', data: openOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch open orders' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch open orders';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getOpenOrders = getOpenOrders;
@@ -121,7 +156,8 @@ const updateStatus = async (req, res) => {
         res.status(200).json({ status: 'success', message: `Order updated to ${status}` });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to update order status' });
+        const message = error instanceof Error ? error.message : 'Failed to update order status';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.updateStatus = updateStatus;
@@ -133,7 +169,8 @@ const getTakeawayOrders = async (req, res) => {
         res.status(200).json({ status: 'success', data: takeawayOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch takeaway orders' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch takeaway orders';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getTakeawayOrders = getTakeawayOrders;
@@ -145,7 +182,8 @@ const getOrders = async (req, res) => {
         res.status(200).json({ status: 'success', data: allOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch orders' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch orders';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getOrders = getOrders;
@@ -153,7 +191,7 @@ const getOrderDetail = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
         const orderId = parseInt(String(req.params.id), 10);
-        if (isNaN(orderId)) {
+        if (Number.isNaN(orderId)) {
             res.status(400).json({ status: 'error', message: 'Invalid order ID' });
             return;
         }
@@ -165,7 +203,8 @@ const getOrderDetail = async (req, res) => {
         res.status(200).json({ status: 'success', data: detail });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to load order details' });
+        const message = error instanceof Error ? error.message : 'Failed to load order details';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getOrderDetail = getOrderDetail;
@@ -177,7 +216,8 @@ const getOnlineOrders = async (req, res) => {
         res.status(200).json({ status: 'success', data: onlineOrders });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch online orders' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch online orders';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getOnlineOrders = getOnlineOrders;

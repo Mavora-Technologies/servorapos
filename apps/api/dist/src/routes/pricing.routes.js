@@ -9,5 +9,7 @@ router.use(auth_middleware_1.requireAuth);
 router.get('/', pricing_controller_1.getPricingOverview);
 router.put('/bulk', pricing_controller_1.bulkUpdatePrices);
 router.post('/rules', pricing_controller_1.createPricingRule);
+router.put('/rules/:id', pricing_controller_1.updatePricingRule);
+router.patch('/rules/:id', pricing_controller_1.updatePricingRule);
 router.delete('/rules/:id', pricing_controller_1.deletePricingRule);
 exports.default = router;

@@ -33,44 +33,89 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.adjustStock = exports.createInventoryItem = exports.getInventory = void 0;
+exports.adjustStock = exports.createInventoryItem = exports.getStorageLocations = exports.getInventory = void 0;
 const inventoryService = __importStar(require("../services/inventory.service"));
 const getInventory = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const items = await inventoryService.fetchInventoryItems(tenantId);
-        res.status(200).json({ status: 'success', data: items });
+        const [items, summary] = await Promise.all([
+            inventoryService.fetchInventoryItems(tenantId),
+            inventoryService.fetchInventorySummary(tenantId),
+        ]);
+        res.status(200).json({
+            status: 'success',
+            data: {
+                items,
+                summary,
+            },
+        });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch inventory' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch inventory';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getInventory = getInventory;
+const getStorageLocations = async (req, res) => {
+    try {
+        const tenantId = req.user.tenantId;
+        const locations = await inventoryService.fetchStorageLocations(tenantId);
+        res.status(200).json({ status: 'success', data: locations });
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to fetch storage locations';
+        res.status(500).json({ status: 'error', message });
+    }
+};
+exports.getStorageLocations = getStorageLocations;
 const createInventoryItem = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const newItem = await inventoryService.addInventoryItem(tenantId, req.body);
+        const userId = req.user?.userId ?? null;
+        const branchId = req.user?.defaultBranchId ?? null;
+        const newItem = await inventoryService.addInventoryItem(tenantId, userId, branchId, req.body);
         res.status(201).json({ status: 'success', data: newItem });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to create inventory item' });
+        const message = error instanceof Error ? error.message : 'Failed to create inventory item';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.createInventoryItem = createInventoryItem;
 const adjustStock = async (req, res) => {
     try {
         const tenantId = req.user.tenantId;
-        const { itemId, adjustment, type, notes } = req.body;
-        await inventoryService.processStockAdjustment(tenantId, {
+        const userId = req.user?.userId ?? null;
+        const itemId = Number(req.body.inventoryItemId ?? req.body.itemId);
+        const adjustment = Number(req.body.quantityDelta ?? req.body.adjustment);
+        const rawLocationId = req.body.locationId;
+        const locationId = rawLocationId !== undefined && rawLocationId !== null && rawLocationId !== ''
+            ? Number(rawLocationId)
+            : null;
+        const resolvedBranchId = req.body.branchId !== undefined && req.body.branchId !== null && req.body.branchId !== ''
+            ? Number(req.body.branchId)
+            : req.user?.defaultBranchId ?? null;
+        const result = await inventoryService.processStockAdjustment(tenantId, {
             itemId,
+            branchId: resolvedBranchId,
+            userId,
             adjustment,
-            type: type || 'ADJUSTMENT',
-            notes,
+            type: req.body.type || 'PHYSICAL_INVENTORY_ADJ',
+            locationId: locationId && !Number.isNaN(locationId) ? locationId : null,
+            locationBin: req.body.locationBin ?? null,
+            batchNumber: req.body.batchNumber ?? null,
+            documentReference: req.body.documentReference ?? null,
+            notes: req.body.notes ?? null,
         });
-        res.status(200).json({ status: 'success', message: 'Stock adjusted successfully' });
+        res.status(200).json({
+            status: 'success',
+            message: 'Stock movement posted successfully',
+            data: result,
+        });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to adjust stock' });
+        const message = error instanceof Error ? error.message : 'Failed to post stock movement';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.adjustStock = adjustStock;

@@ -33,42 +33,84 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.postAcknowledge = exports.putHandover = exports.postHandover = exports.getHandoverDetail = exports.getHandovers = void 0;
-const handoverRepo = __importStar(require("../repositories/handover.repository"));
+exports.postResolveDispute = exports.postDispute = exports.postAcknowledge = exports.putHandover = exports.postHandover = exports.getHandoverDetail = exports.getHandoverContext = exports.getHandovers = void 0;
+const zod_1 = require("zod");
+const handoverService = __importStar(require("../services/handover.service"));
 const handover_validator_1 = require("../validators/handover.validator");
+function getActor(req) {
+    const user = req.user;
+    if (!user?.tenantId || !user?.userId)
+        return null;
+    return {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        role: user.role,
+        ipAddress: req.ip || null,
+    };
+}
 const getHandovers = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { startDate, endDate, branchId, shiftType, status } = req.query;
-        const branchIdStr = typeof branchId === 'string' ? branchId : undefined;
-        const branchIdNum = branchIdStr && branchIdStr !== 'ALL' ? parseInt(branchIdStr, 10) : undefined;
-        const entries = await handoverRepo.listHandovers(tenantId, {
-            startDate: typeof startDate === 'string' ? startDate : undefined,
-            endDate: typeof endDate === 'string' ? endDate : undefined,
-            branchId: branchIdNum && !isNaN(branchIdNum) ? branchIdNum : undefined,
-            shiftType: typeof shiftType === 'string' ? shiftType : undefined,
-            status: typeof status === 'string' ? status : undefined,
-        });
+        const query = handover_validator_1.listHandoversQuerySchema.parse(req.query);
+        const entries = await handoverService.fetchHandoverLogs(actor, query);
         res.status(200).json({ status: 'success', data: entries });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve handover logs' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid filter parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to retrieve handover logs';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getHandovers = getHandovers;
+const getHandoverContext = async (req, res) => {
+    try {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const query = handover_validator_1.handoverContextQuerySchema.parse(req.query);
+        const snapshot = await handoverService.fetchBranchContextSnapshot(actor, query);
+        res.status(200).json({ status: 'success', data: snapshot });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid context parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to load branch handover telemetry';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.getHandoverContext = getHandoverContext;
 const getHandoverDetail = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const handoverId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(handoverId)) {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const handoverId = Number(req.params.id);
+        if (!Number.isInteger(handoverId) || handoverId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid handover identifier' });
             return;
         }
-        const entry = await handoverRepo.findHandoverById(tenantId, handoverId);
+        const entry = await handoverService.fetchHandoverById(actor, handoverId);
         if (!entry) {
             res.status(404).json({ status: 'error', message: 'Handover report not found' });
             return;
@@ -76,20 +118,20 @@ const getHandoverDetail = async (req, res) => {
         res.status(200).json({ status: 'success', data: entry });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch handover detail' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch handover detail';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getHandoverDetail = getHandoverDetail;
 const postHandover = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const outgoingManagerId = req.user?.userId;
-        if (!tenantId || !outgoingManagerId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = handover_validator_1.createHandoverSchema.parse(req.body);
-        const handover = await handoverRepo.createHandover(tenantId, outgoingManagerId, input);
+        const handover = await handoverService.submitHandover(actor, input);
         res.status(201).json({
             status: 'success',
             data: handover,
@@ -97,24 +139,37 @@ const postHandover = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to submit handover' });
+        const message = error instanceof Error ? error.message : 'Failed to submit handover';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postHandover = postHandover;
 const putHandover = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const handoverId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(handoverId)) {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const handoverId = Number(req.params.id);
+        if (!Number.isInteger(handoverId) || handoverId <= 0) {
             res.status(400).json({ status: 'error', message: 'Invalid handover identifier' });
             return;
         }
         const input = handover_validator_1.updateHandoverSchema.parse(req.body);
-        const updated = await handoverRepo.updateHandover(tenantId, handoverId, input);
+        const updated = await handoverService.modifyHandover(actor, handoverId, input);
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Handover report not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: updated,
@@ -122,25 +177,37 @@ const putHandover = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to update handover' });
+        const message = error instanceof Error ? error.message : 'Failed to update handover';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.putHandover = putHandover;
 const postAcknowledge = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const incomingManagerId = req.user?.userId;
-        const handoverId = parseInt(String(req.params.id), 10);
-        if (!tenantId || !incomingManagerId || isNaN(handoverId)) {
-            res.status(400).json({ status: 'error', message: 'Invalid session or handover identifier' });
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        handover_validator_1.acknowledgeHandoverSchema.parse(req.body);
-        const acknowledged = await handoverRepo.acknowledgeHandover(tenantId, handoverId, incomingManagerId);
+        const handoverId = Number(req.params.id);
+        if (!Number.isInteger(handoverId) || handoverId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid handover identifier' });
+            return;
+        }
+        const input = handover_validator_1.acknowledgeHandoverSchema.parse(req.body || {});
+        const acknowledged = await handoverService.countersignHandover(actor, handoverId, input.notes);
+        if (!acknowledged) {
+            res.status(404).json({ status: 'error', message: 'Handover report not found' });
+            return;
+        }
         res.status(200).json({
             status: 'success',
             data: acknowledged,
@@ -148,7 +215,84 @@ const postAcknowledge = async (req, res) => {
         });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to acknowledge handover' });
+        const message = error instanceof Error ? error.message : 'Failed to acknowledge handover';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.postAcknowledge = postAcknowledge;
+const postDispute = async (req, res) => {
+    try {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const handoverId = Number(req.params.id);
+        if (!Number.isInteger(handoverId) || handoverId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid handover identifier' });
+            return;
+        }
+        const { reason } = handover_validator_1.disputeHandoverSchema.parse(req.body);
+        const disputed = await handoverService.escalateHandoverDispute(actor, handoverId, reason);
+        if (!disputed) {
+            res.status(404).json({ status: 'error', message: 'Handover report not found' });
+            return;
+        }
+        res.status(200).json({
+            status: 'success',
+            data: disputed,
+            message: 'Shift handover disputed and escalated to compliance governance.',
+        });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Dispute justification is required',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to dispute handover';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.postDispute = postDispute;
+const postResolveDispute = async (req, res) => {
+    try {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const handoverId = Number(req.params.id);
+        if (!Number.isInteger(handoverId) || handoverId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid handover identifier' });
+            return;
+        }
+        const { resolutionNotes, postGlAdjustment } = handover_validator_1.resolveDisputeSchema.parse(req.body);
+        const resolved = await handoverService.resolveHandoverDispute(actor, handoverId, resolutionNotes, postGlAdjustment);
+        if (!resolved) {
+            res.status(404).json({ status: 'error', message: 'Handover report not found' });
+            return;
+        }
+        res.status(200).json({
+            status: 'success',
+            data: resolved,
+            message: 'Handover dispute officially resolved and closed.',
+        });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Resolution notes required',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to resolve dispute';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.postResolveDispute = postResolveDispute;

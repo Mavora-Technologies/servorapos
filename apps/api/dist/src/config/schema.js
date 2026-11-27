@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.mpesaC2bCallbacks = exports.drawerSessions = exports.cashDrawers = exports.refunds = exports.mpesaTransactions = exports.bankStatementLines = exports.bankStatements = exports.payments = exports.cashierShifts = exports.deliveryAssignments = exports.transferFleetDispatches = exports.logisticsVehicles = exports.logisticsFleet = exports.stockTransferItems = exports.stockTransfers = exports.stockCountItems = exports.stockCounts = exports.stockMovements = exports.orderItems = exports.orders = exports.waitlistEntries = exports.reservations = exports.restaurantTables = exports.diningAreas = exports.wasteLogs = exports.warehouseLocations = exports.inventoryBatches = exports.unitConversions = exports.inventoryBranchStock = exports.inventoryItems = exports.supplierReturnItems = exports.supplierReturns = exports.supplierInvoiceItems = exports.supplierInvoices = exports.goodsReceivedItems = exports.goodsReceivedNotes = exports.purchaseOrderItems = exports.purchaseOrders = exports.purchaseRequestItems = exports.purchaseRequests = exports.suppliers = exports.menuModifiers = exports.menuItems = exports.menuCategories = exports.userBranchMemberships = exports.roles = exports.users = exports.branches = exports.tenants = exports.userRoleEnum = void 0;
-exports.supportTickets = exports.userSessions = exports.securitySettings = exports.billingInvoices = exports.tenantSubscriptions = exports.billingPaymentMethods = exports.subscriptionPlans = exports.deviceEnrollmentTokens = exports.posDevices = exports.offlineSyncBatches = exports.offlineSettings = exports.auditLogs = exports.orderIntegrationLogs = exports.orderIntegrations = exports.messagingLogs = exports.messagingTemplates = exports.messagingIntegrations = exports.paymentWebhookLogs = exports.paymentIntegrations = exports.kitchenGlobalSettings = exports.kitchenStations = exports.networkPrinters = exports.receiptTemplates = exports.serviceModels = exports.taxCodes = exports.tenantFinancialSettings = exports.staffPerformanceReviews = exports.cashierAssignments = exports.shiftHandovers = exports.attendanceRecords = exports.workSchedules = exports.shiftTemplates = exports.warehouseBins = exports.warehouseZones = exports.notifications = exports.recipeIngredients = exports.recipes = exports.menuItemAvailability = exports.itemPricingRules = exports.comboBundleItems = exports.comboBundles = exports.modifierOptions = exports.modifierGroups = exports.orderItemsRelations = exports.ordersRelations = exports.menuItemsRelations = exports.menuCategoriesRelations = exports.branchesRelations = exports.tenantsRelations = exports.fiscalInvoices = void 0;
-exports.financialAdjustments = exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = exports.supportTicketMessages = void 0;
+exports.tenantSubscriptions = exports.billingPaymentMethods = exports.subscriptionPlans = exports.deviceEnrollmentTokens = exports.posDevices = exports.offlineSyncBatches = exports.offlineSettings = exports.auditLogs = exports.orderIntegrationLogs = exports.orderIntegrations = exports.messagingLogs = exports.messagingTemplates = exports.messagingIntegrations = exports.paymentWebhookLogs = exports.paymentIntegrations = exports.kitchenGlobalSettings = exports.kitchenStations = exports.networkPrinters = exports.receiptTemplates = exports.serviceModels = exports.taxCodes = exports.tenantFinancialSettings = exports.commissionLedgerEntries = exports.commissionPayoutRuns = exports.commissionPlans = exports.staffPerformanceReviews = exports.cashierAssignments = exports.shiftHandovers = exports.attendanceRecords = exports.workSchedules = exports.shiftTemplates = exports.warehouseBins = exports.warehouseZones = exports.notifications = exports.recipeIngredients = exports.recipes = exports.menuItemModifierGroups = exports.menuItemAvailability = exports.itemPricingRules = exports.comboBundleItems = exports.comboBundles = exports.modifierOptions = exports.modifierGroups = exports.orderItemsRelations = exports.ordersRelations = exports.menuItemsRelations = exports.menuCategoriesRelations = exports.branchesRelations = exports.tenantsRelations = exports.fiscalInvoices = void 0;
+exports.financialAdjustments = exports.expenses = exports.expenseCategories = exports.workflowExecutionLogs = exports.workflowRules = exports.menuEngineeringSnapshots = exports.predictiveInventoryReplenishments = exports.hourlyForecastIntervals = exports.demandForecastSnapshots = exports.aiAssistantMessages = exports.aiAssistantSessions = exports.promotionalDiscounts = exports.marketingTemplates = exports.campaignRecipientsLog = exports.marketingCampaigns = exports.customerFeedback = exports.loyaltyPointTransactions = exports.loyaltyTransactionsLedger = exports.loyaltyRewardsCatalog = exports.customerLoyaltyProfiles = exports.loyaltyTiers = exports.customerInteractions = exports.customers = exports.reportSchedules = exports.reportExecutions = exports.reportDefinitions = exports.knowledgeBaseArticles = exports.supportTicketMessages = exports.supportTickets = exports.userSessions = exports.securitySettings = exports.billingInvoices = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 const drizzle_orm_1 = require("drizzle-orm");
 /**
@@ -191,6 +191,11 @@ exports.menuItems = (0, pg_core_1.pgTable)('menu_items', {
     etimsTaxTypeCode: (0, pg_core_1.varchar)('etims_tax_type_code', { length: 10 }).default('B'), // B = 16% VAT
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
     imageUrl: (0, pg_core_1.text)('image_url'),
+    imagePublicId: (0, pg_core_1.varchar)('image_public_id', { length: 255 }),
+    imageOriginalFilename: (0, pg_core_1.varchar)('image_original_filename', { length: 255 }),
+    imageMimeType: (0, pg_core_1.varchar)('image_mime_type', { length: 64 }),
+    imageFileSize: (0, pg_core_1.integer)('image_file_size'),
+    imageUploadedAt: (0, pg_core_1.timestamp)('image_uploaded_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
         .defaultNow()
@@ -1414,28 +1419,56 @@ exports.modifierGroups = (0, pg_core_1.pgTable)('modifier_groups', {
 }, (t) => [(0, pg_core_1.index)('modifier_groups_tenant_idx').on(t.tenantId)]);
 exports.modifierOptions = (0, pg_core_1.pgTable)('modifier_options', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
-    modifierGroupId: (0, pg_core_1.integer)('modifier_group_id').notNull().references(() => exports.modifierGroups.id, { onDelete: 'cascade' }),
-    name: (0, pg_core_1.varchar)('name', { length: 150 }).notNull(), // e.g., "Extra Cheddar", "Well Done"
-    priceAdjustment: (0, pg_core_1.decimal)('price_adjustment', { precision: 10, scale: 2 }).default('0.00').notNull(),
+    modifierGroupId: (0, pg_core_1.integer)('modifier_group_id')
+        .notNull()
+        .references(() => exports.modifierGroups.id, { onDelete: 'cascade' }),
+    name: (0, pg_core_1.varchar)('name', { length: 150 }).notNull(), // Customer-facing label (auto-filled from inventory or custom prep note)
+    priceAdjustment: (0, pg_core_1.decimal)('price_adjustment', { precision: 10, scale: 2 })
+        .default('0.00')
+        .notNull(),
+    linkedInventoryItemId: (0, pg_core_1.integer)('linked_inventory_item_id').references(() => exports.inventoryItems.id, { onDelete: 'set null' }),
+    linkedQuantity: (0, pg_core_1.decimal)('linked_quantity', { precision: 12, scale: 4 })
+        .default('0.0000')
+        .notNull(),
+    linkedUnit: (0, pg_core_1.varchar)('linked_unit', { length: 30 }),
     isDefault: (0, pg_core_1.boolean)('is_default').default(false).notNull(),
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
-}, (t) => [(0, pg_core_1.index)('modifier_options_group_idx').on(t.modifierGroupId)]);
+}, (t) => [
+    (0, pg_core_1.index)('modifier_options_group_idx').on(t.modifierGroupId),
+    (0, pg_core_1.index)('modifier_options_inv_idx').on(t.linkedInventoryItemId),
+]);
 exports.comboBundles = (0, pg_core_1.pgTable)('combo_bundles', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
     tenantId: (0, pg_core_1.integer)('tenant_id').notNull().references(() => exports.tenants.id, { onDelete: 'cascade' }),
     branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'set null' }),
-    name: (0, pg_core_1.varchar)('name', { length: 150 }).notNull(), // e.g. "Family Feast Combo", "Burger & Shake Deal"
+    name: (0, pg_core_1.varchar)('name', { length: 150 }).notNull(),
     description: (0, pg_core_1.text)('description'),
     sku: (0, pg_core_1.varchar)('sku', { length: 50 }),
     basePrice: (0, pg_core_1.decimal)('base_price', { precision: 10, scale: 2 }).notNull(),
     isAvailable: (0, pg_core_1.boolean)('is_available').default(true).notNull(),
+    // Optional promotional schedule
+    validFrom: (0, pg_core_1.timestamp)('valid_from', { withTimezone: true }),
+    validUntil: (0, pg_core_1.timestamp)('valid_until', { withTimezone: true }),
+    // Cloudinary image metadata (reuses existing Menu Catalog image pipeline)
+    imageUrl: (0, pg_core_1.text)('image_url'),
+    imagePublicId: (0, pg_core_1.varchar)('image_public_id', { length: 255 }),
+    imageOriginalFilename: (0, pg_core_1.varchar)('image_original_filename', { length: 255 }),
+    imageMimeType: (0, pg_core_1.varchar)('image_mime_type', { length: 64 }),
+    imageFileSize: (0, pg_core_1.integer)('image_file_size'),
+    imageUploadedAt: (0, pg_core_1.timestamp)('image_uploaded_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
         .defaultNow()
         .$onUpdate(() => new Date())
         .notNull(),
-}, (t) => [(0, pg_core_1.index)('combo_bundles_tenant_idx').on(t.tenantId)]);
+}, (t) => [
+    (0, pg_core_1.index)('combo_bundles_tenant_idx').on(t.tenantId),
+    (0, pg_core_1.index)('combo_bundles_tenant_avail_idx').on(t.tenantId, t.isAvailable),
+    (0, pg_core_1.uniqueIndex)('combo_bundles_tenant_sku_idx')
+        .on(t.tenantId, t.sku)
+        .where((0, drizzle_orm_1.sql) `${t.sku} IS NOT NULL`),
+]);
 exports.comboBundleItems = (0, pg_core_1.pgTable)('combo_bundle_items', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
     comboId: (0, pg_core_1.integer)('combo_id').notNull().references(() => exports.comboBundles.id, { onDelete: 'cascade' }),
@@ -1480,6 +1513,24 @@ exports.menuItemAvailability = (0, pg_core_1.pgTable)('menu_item_availability', 
 }, (t) => [
     (0, pg_core_1.index)('item_avail_tenant_idx').on(t.tenantId),
     (0, pg_core_1.index)('item_avail_menu_item_idx').on(t.menuItemId),
+]);
+exports.menuItemModifierGroups = (0, pg_core_1.pgTable)('menu_item_modifier_groups', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .notNull()
+        .references(() => exports.tenants.id, { onDelete: 'cascade' }),
+    menuItemId: (0, pg_core_1.integer)('menu_item_id')
+        .notNull()
+        .references(() => exports.menuItems.id, { onDelete: 'cascade' }),
+    modifierGroupId: (0, pg_core_1.integer)('modifier_group_id')
+        .notNull()
+        .references(() => exports.modifierGroups.id, { onDelete: 'cascade' }),
+    sortOrder: (0, pg_core_1.integer)('sort_order').default(0).notNull(),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+    (0, pg_core_1.uniqueIndex)('menu_item_mod_group_unique_idx').on(t.menuItemId, t.modifierGroupId),
+    (0, pg_core_1.index)('menu_item_mod_group_tenant_idx').on(t.tenantId),
+    (0, pg_core_1.index)('menu_item_mod_group_item_idx').on(t.menuItemId),
 ]);
 exports.recipes = (0, pg_core_1.pgTable)('recipes', {
     id: (0, pg_core_1.serial)('id').primaryKey(),
@@ -1719,11 +1770,21 @@ exports.shiftHandovers = (0, pg_core_1.pgTable)('shift_handovers', {
     branchId: (0, pg_core_1.integer)('branch_id')
         .references(() => exports.branches.id, { onDelete: 'cascade' })
         .notNull(),
+    // Chain-of-custody relational anchors
+    handoverScope: (0, pg_core_1.varchar)('handover_scope', { length: 30 }).default('BRANCH_WIDE').notNull(), // BRANCH_WIDE | TILL_CUSTODY
+    cashierShiftId: (0, pg_core_1.integer)('cashier_shift_id').references(() => exports.cashierShifts.id, {
+        onDelete: 'set null',
+    }),
+    cashDrawerId: (0, pg_core_1.integer)('cash_drawer_id').references(() => exports.cashDrawers.id, {
+        onDelete: 'set null',
+    }),
+    linkedAdjustmentId: (0, pg_core_1.integer)('linked_adjustment_id').references(() => exports.financialAdjustments.id, { onDelete: 'set null' }),
     outgoingManagerId: (0, pg_core_1.integer)('outgoing_manager_id')
         .references(() => exports.users.id, { onDelete: 'cascade' })
         .notNull(),
-    incomingManagerId: (0, pg_core_1.integer)('incoming_manager_id')
-        .references(() => exports.users.id, { onDelete: 'set null' }),
+    incomingManagerId: (0, pg_core_1.integer)('incoming_manager_id').references(() => exports.users.id, {
+        onDelete: 'set null',
+    }),
     shiftType: (0, pg_core_1.varchar)('shift_type', { length: 50 }).notNull(), // MORNING | MIDDAY | EVENING | NIGHT_CLOSING
     handoverDate: (0, pg_core_1.date)('handover_date').notNull(), // YYYY-MM-DD
     cashStatus: (0, pg_core_1.varchar)('cash_status', { length: 50 }).default('BALANCED').notNull(), // BALANCED | DISCREPANCY_SHORT | DISCREPANCY_OVER
@@ -1738,9 +1799,14 @@ exports.shiftHandovers = (0, pg_core_1.pgTable)('shift_handovers', {
         .$type()
         .default([])
         .notNull(),
-    status: (0, pg_core_1.varchar)('status', { length: 50 }).default('SUBMITTED').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | DISPUTED
+    status: (0, pg_core_1.varchar)('status', { length: 50 }).default('SUBMITTED').notNull(), // DRAFT | SUBMITTED | ACKNOWLEDGED | DISPUTED | RESOLVED
     outgoingSignedAt: (0, pg_core_1.timestamp)('outgoing_signed_at', { withTimezone: true }).defaultNow().notNull(),
     incomingSignedAt: (0, pg_core_1.timestamp)('incoming_signed_at', { withTimezone: true }),
+    resolutionNotes: (0, pg_core_1.text)('resolution_notes'),
+    resolvedByUserId: (0, pg_core_1.integer)('resolved_by_user_id').references(() => exports.users.id, {
+        onDelete: 'set null',
+    }),
+    resolvedAt: (0, pg_core_1.timestamp)('resolved_at', { withTimezone: true }),
     createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
         .defaultNow()
@@ -1751,6 +1817,8 @@ exports.shiftHandovers = (0, pg_core_1.pgTable)('shift_handovers', {
     (0, pg_core_1.index)('shift_handovers_tenant_date_idx').on(t.tenantId, t.handoverDate),
     (0, pg_core_1.index)('shift_handovers_tenant_branch_idx').on(t.tenantId, t.branchId),
     (0, pg_core_1.index)('shift_handovers_status_idx').on(t.tenantId, t.status),
+    (0, pg_core_1.index)('shift_handovers_shift_idx').on(t.cashierShiftId),
+    (0, pg_core_1.index)('shift_handovers_drawer_idx').on(t.cashDrawerId),
 ]);
 // ============================================================================
 // CASH DRAWER CUSTODIANS & CASHIER ASSIGNMENTS (HCM / TREASURY)
@@ -1846,6 +1914,125 @@ exports.staffPerformanceReviews = (0, pg_core_1.pgTable)('staff_performance_revi
     (0, pg_core_1.index)('perf_reviews_user_idx').on(t.userId),
     (0, pg_core_1.index)('perf_reviews_cycle_idx').on(t.tenantId, t.reviewCycle),
     (0, pg_core_1.index)('perf_reviews_status_idx').on(t.tenantId, t.status),
+]);
+exports.commissionPlans = (0, pg_core_1.pgTable)('commission_plans', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .references(() => exports.tenants.id, { onDelete: 'cascade' })
+        .notNull(),
+    branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'cascade' }), // Nullable = tenant-wide plan
+    name: (0, pg_core_1.varchar)('name', { length: 150 }).notNull(), // e.g. "Beverage Upsell 5%", "Senior Waiter Tiered Plan"
+    description: (0, pg_core_1.text)('description'),
+    // Eligibility Scope
+    targetRole: (0, pg_core_1.varchar)('target_role', { length: 100 }), // Nullable = all roles (or e.g. "WAITER", "CASHIER")
+    targetUserId: (0, pg_core_1.integer)('target_user_id').references(() => exports.users.id, { onDelete: 'cascade' }), // Optional individual override
+    attributionMode: (0, pg_core_1.varchar)('attribution_mode', { length: 40 })
+        .default('COALESCE_WAITER_CASHIER')
+        .notNull(), // WAITER_ONLY | CASHIER_ONLY | COALESCE_WAITER_CASHIER
+    // Product & Calculation Basis
+    productScope: (0, pg_core_1.varchar)('product_scope', { length: 30 }).default('ALL_ITEMS').notNull(), // ALL_ITEMS | CATEGORY | MENU_ITEM
+    menuCategoryId: (0, pg_core_1.integer)('menu_category_id').references(() => exports.menuCategories.id, {
+        onDelete: 'set null',
+    }),
+    menuItemId: (0, pg_core_1.integer)('menu_item_id').references(() => exports.menuItems.id, { onDelete: 'set null' }),
+    basisType: (0, pg_core_1.varchar)('basis_type', { length: 30 }).default('NET_SALES').notNull(), // NET_SALES | GROSS_SALES | GROSS_MARGIN | ITEM_QUANTITY
+    rateType: (0, pg_core_1.varchar)('rate_type', { length: 30 }).default('FLAT_PERCENTAGE').notNull(), // FLAT_PERCENTAGE | FLAT_PER_UNIT | TIERED_ACCELERATOR
+    // Rates, Hurdles & Caps
+    flatRate: (0, pg_core_1.numeric)('flat_rate', { precision: 10, scale: 4 }).default('0.0000').notNull(), // % or fixed KES per unit
+    tiers: (0, pg_core_1.jsonb)('tiers').$type().default([]).notNull(),
+    minQualifyingSales: (0, pg_core_1.numeric)('min_qualifying_sales', { precision: 12, scale: 2 })
+        .default('0.00')
+        .notNull(), // Minimum quota hurdle before commission activates
+    maxPayoutCap: (0, pg_core_1.numeric)('max_payout_cap', { precision: 12, scale: 2 }), // Optional ceiling per period
+    // Governance & Validity
+    clawbackOnRefund: (0, pg_core_1.boolean)('clawback_on_refund').default(true).notNull(),
+    effectiveFrom: (0, pg_core_1.date)('effective_from').notNull(),
+    effectiveTo: (0, pg_core_1.date)('effective_to'),
+    isActive: (0, pg_core_1.boolean)('is_active').default(true).notNull(),
+    createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
+}, (t) => [
+    (0, pg_core_1.index)('comm_plans_tenant_idx').on(t.tenantId),
+    (0, pg_core_1.index)('comm_plans_branch_idx').on(t.tenantId, t.branchId),
+    (0, pg_core_1.index)('comm_plans_active_idx').on(t.tenantId, t.isActive),
+]);
+exports.commissionPayoutRuns = (0, pg_core_1.pgTable)('commission_payout_runs', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .references(() => exports.tenants.id, { onDelete: 'cascade' })
+        .notNull(),
+    branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'set null' }), // Nullable = multi-branch run
+    runNumber: (0, pg_core_1.varchar)('run_number', { length: 50 }).notNull(), // e.g. "COM-202611-001"
+    periodStart: (0, pg_core_1.date)('period_start').notNull(),
+    periodEnd: (0, pg_core_1.date)('period_end').notNull(),
+    currency: (0, pg_core_1.varchar)('currency', { length: 10 }).default('KES').notNull(),
+    // Financial Totals
+    employeeCount: (0, pg_core_1.integer)('employee_count').default(0).notNull(),
+    totalQualifyingSales: (0, pg_core_1.numeric)('total_qualifying_sales', { precision: 14, scale: 2 })
+        .default('0.00')
+        .notNull(),
+    totalGrossCommission: (0, pg_core_1.numeric)('total_gross_commission', { precision: 14, scale: 2 })
+        .default('0.00')
+        .notNull(),
+    totalClawbacks: (0, pg_core_1.numeric)('total_clawbacks', { precision: 14, scale: 2 })
+        .default('0.00')
+        .notNull(),
+    netPayableAmount: (0, pg_core_1.numeric)('net_payable_amount', { precision: 14, scale: 2 })
+        .default('0.00')
+        .notNull(),
+    // Maker-Checker Lifecycle & Settlement
+    status: (0, pg_core_1.varchar)('status', { length: 30 }).default('DRAFT').notNull(), // DRAFT | APPROVED | PAID | VOIDED
+    createdById: (0, pg_core_1.integer)('created_by_id').references(() => exports.users.id, { onDelete: 'set null' }),
+    approvedByUserId: (0, pg_core_1.integer)('approved_by_user_id').references(() => exports.users.id, {
+        onDelete: 'set null',
+    }),
+    approvedAt: (0, pg_core_1.timestamp)('approved_at', { withTimezone: true }),
+    paymentMethod: (0, pg_core_1.varchar)('payment_method', { length: 50 }), // MPESA_B2C | BANK_TRANSFER | PAYROLL_CONSOLIDATION | CASH_DRAWER
+    paymentReference: (0, pg_core_1.varchar)('payment_reference', { length: 120 }),
+    paidAt: (0, pg_core_1.timestamp)('paid_at', { withTimezone: true }),
+    notes: (0, pg_core_1.text)('notes'),
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)('updated_at', { withTimezone: true })
+        .defaultNow()
+        .$onUpdate(() => new Date())
+        .notNull(),
+}, (t) => [
+    (0, pg_core_1.uniqueIndex)('comm_runs_tenant_num_idx').on(t.tenantId, t.runNumber),
+    (0, pg_core_1.index)('comm_runs_tenant_idx').on(t.tenantId),
+    (0, pg_core_1.index)('comm_runs_status_idx').on(t.tenantId, t.status),
+]);
+exports.commissionLedgerEntries = (0, pg_core_1.pgTable)('commission_ledger_entries', {
+    id: (0, pg_core_1.serial)('id').primaryKey(),
+    tenantId: (0, pg_core_1.integer)('tenant_id')
+        .references(() => exports.tenants.id, { onDelete: 'cascade' })
+        .notNull(),
+    payoutRunId: (0, pg_core_1.integer)('payout_run_id')
+        .references(() => exports.commissionPayoutRuns.id, { onDelete: 'cascade' })
+        .notNull(),
+    branchId: (0, pg_core_1.integer)('branch_id').references(() => exports.branches.id, { onDelete: 'set null' }),
+    userId: (0, pg_core_1.integer)('user_id')
+        .references(() => exports.users.id, { onDelete: 'cascade' })
+        .notNull(),
+    planId: (0, pg_core_1.integer)('plan_id')
+        .references(() => exports.commissionPlans.id, { onDelete: 'set null' }),
+    planNameSnapshot: (0, pg_core_1.varchar)('plan_name_snapshot', { length: 150 }).notNull(),
+    ordersCount: (0, pg_core_1.integer)('orders_count').default(0).notNull(),
+    qualifyingUnits: (0, pg_core_1.numeric)('qualifying_units', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    qualifyingSales: (0, pg_core_1.numeric)('qualifying_sales', { precision: 14, scale: 2 }).default('0.00').notNull(),
+    effectiveRateLabel: (0, pg_core_1.varchar)('effective_rate_label', { length: 60 }).notNull(), // e.g. "3.5% Tier 2" or "KES 50/unit"
+    grossCommission: (0, pg_core_1.numeric)('gross_commission', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    clawbackAmount: (0, pg_core_1.numeric)('clawback_amount', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    netCommission: (0, pg_core_1.numeric)('net_commission', { precision: 12, scale: 2 }).default('0.00').notNull(),
+    status: (0, pg_core_1.varchar)('status', { length: 30 }).default('ACCRUED').notNull(), // ACCRUED | APPROVED | PAID | VOIDED
+    createdAt: (0, pg_core_1.timestamp)('created_at', { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+    (0, pg_core_1.uniqueIndex)('comm_entries_run_user_plan_idx').on(t.payoutRunId, t.userId, t.planId),
+    (0, pg_core_1.index)('comm_entries_tenant_user_idx').on(t.tenantId, t.userId),
+    (0, pg_core_1.index)('comm_entries_run_idx').on(t.payoutRunId),
 ]);
 // ============================================================================
 // FINANCIAL SETTINGS, STATUTORY TAX CODES & FISCAL DEVICES (FIN / HCM)

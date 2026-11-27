@@ -34,7 +34,8 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.exportAuditLogs = exports.getFilterOptions = exports.getAuditTelemetry = exports.getAuditLogDetail = exports.getAuditLogs = void 0;
-const auditRepo = __importStar(require("../repositories/audit-log.repository"));
+const zod_1 = require("zod");
+const auditService = __importStar(require("../services/audit-log.service"));
 const audit_log_validator_1 = require("../validators/audit-log.validator");
 const getAuditLogs = async (req, res) => {
     try {
@@ -44,7 +45,7 @@ const getAuditLogs = async (req, res) => {
             return;
         }
         const query = audit_log_validator_1.listAuditLogsQuerySchema.parse(req.query);
-        const result = await auditRepo.listAuditLogs(tenantId, query);
+        const result = await auditService.listTenantAuditLogs(tenantId, query);
         res.status(200).json({
             status: 'success',
             data: result.records,
@@ -52,24 +53,32 @@ const getAuditLogs = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid filter query',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve audit logs' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve audit logs';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getAuditLogs = getAuditLogs;
 const getAuditLogDetail = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const logId = parseInt(String(req.params.id), 10);
-        if (!tenantId || isNaN(logId)) {
+        if (!tenantId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const logId = Number(req.params.id);
+        if (!Number.isInteger(logId) || logId <= 0) {
             res.status(400).json({ status: 'error', message: 'Valid audit log ID is required' });
             return;
         }
-        const log = await auditRepo.getAuditLogById(tenantId, logId);
+        const log = await auditService.getTenantAuditLogDetail(tenantId, logId);
         if (!log) {
             res.status(404).json({ status: 'error', message: 'Audit record not found' });
             return;
@@ -77,7 +86,8 @@ const getAuditLogDetail = async (req, res) => {
         res.status(200).json({ status: 'success', data: log });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve audit log detail' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve audit log detail';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getAuditLogDetail = getAuditLogDetail;
@@ -88,11 +98,12 @@ const getAuditTelemetry = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const telemetry = await auditRepo.getAuditLogTelemetry(tenantId);
+        const telemetry = await auditService.getTenantAuditTelemetry(tenantId);
         res.status(200).json({ status: 'success', data: telemetry });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve telemetry' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve telemetry';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getAuditTelemetry = getAuditTelemetry;
@@ -103,11 +114,12 @@ const getFilterOptions = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const options = await auditRepo.getDynamicFilterOptions(tenantId);
+        const options = await auditService.getTenantFilterOptions(tenantId);
         res.status(200).json({ status: 'success', data: options });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to retrieve filter options' });
+        const message = error instanceof Error ? error.message : 'Failed to retrieve filter options';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getFilterOptions = getFilterOptions;
@@ -119,34 +131,36 @@ const exportAuditLogs = async (req, res) => {
             return;
         }
         const query = audit_log_validator_1.exportAuditLogsQuerySchema.parse(req.query);
-        const result = await auditRepo.listAuditLogs(tenantId, { ...query, page: 1, limit: 5000 });
-        if (query.format === 'json') {
-            res.setHeader('Content-Type', 'application/json');
-            res.setHeader('Content-Disposition', `attachment; filename=audit-logs-${Date.now()}.json`);
-            res.status(200).send(JSON.stringify(result.records, null, 2));
-            return;
-        }
-        // Default CSV formatting
-        const headers = ['Timestamp', 'Module', 'Action', 'Entity Type', 'Entity ID', 'Actor Name', 'Actor Email', 'Branch', 'IP Address', 'Reason'];
-        const rows = result.records.map((r) => [
-            `"${new Date(r.createdAt).toISOString()}"`,
-            `"${r.module}"`,
-            `"${r.action}"`,
-            `"${r.entityType}"`,
-            `"${r.entityId}"`,
-            `"${(r.actorName || 'System').replace(/"/g, '""')}"`,
-            `"${(r.actorEmail || '').replace(/"/g, '""')}"`,
-            `"${(r.branchName || '').replace(/"/g, '""')}"`,
-            `"${r.ipAddress || ''}"`,
-            `"${(r.reason || '').replace(/"/g, '""')}"`,
-        ]);
-        const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', `attachment; filename=audit-logs-${Date.now()}.csv`);
-        res.status(200).send(csvContent);
+        const exported = await auditService.buildTenantAuditExport(tenantId, query);
+        // Log the compliance export itself
+        void auditService.logAuditEvent(tenantId, {
+            branchId: req.user?.defaultBranchId ?? null,
+            userId: req.user?.userId ?? null,
+            action: 'AUDIT_LOGS_EXPORTED',
+            module: 'SECURITY',
+            entityType: 'audit_logs',
+            entityId: `${exported.count}_records`,
+            reason: `Exported ${exported.count} audit records as ${query.format.toUpperCase()}`,
+            newValues: { format: query.format, filters: query, recordCount: exported.count },
+            ipAddress: (typeof req.headers['x-forwarded-for'] === 'string'
+                ? req.headers['x-forwarded-for'].split(',')[0].trim()
+                : req.ip) ?? null,
+        });
+        res.setHeader('Content-Type', exported.contentType);
+        res.setHeader('Content-Disposition', `attachment; filename=audit-logs-${new Date().toISOString().split('T')[0]}.${exported.extension}`);
+        res.status(200).send(exported.body);
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to export audit logs' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid export parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to export audit logs';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.exportAuditLogs = exportAuditLogs;

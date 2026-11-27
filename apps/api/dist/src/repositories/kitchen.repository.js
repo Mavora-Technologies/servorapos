@@ -18,6 +18,54 @@ const cleanItemNotesSql = (0, drizzle_orm_1.sql) `NULLIF(
   ''
 )`;
 // ============================================================================
+// TRANSACTIONAL KDS "FOOD READY" NOTIFICATION DISPATCHER
+// ============================================================================
+/**
+ * Emits a branch-scoped, waiter-targeted `KDS` notification when an order transitions to `Ready`.
+ * Targeted to `waiterId` (falling back to `cashierId`, or branch KDS broadcast if unassigned).
+ */
+async function emitFoodReadyNotificationInTx(tx, params) {
+    const platedItems = await tx
+        .select({
+        quantity: schema_1.orderItems.quantity,
+        itemName: schema_1.menuItems.name,
+    })
+        .from(schema_1.orderItems)
+        .leftJoin(schema_1.menuItems, (0, drizzle_orm_1.eq)(schema_1.orderItems.menuItemId, schema_1.menuItems.id))
+        .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.tenantId, params.tenantId), (0, drizzle_orm_1.eq)(schema_1.orderItems.orderId, params.orderId)));
+    const dishSummary = platedItems
+        .slice(0, 4)
+        .map((line) => `${Number(line.quantity)}x ${line.itemName || 'Item'}`)
+        .join(', ');
+    const overflowCount = platedItems.length > 4 ? ` +${platedItems.length - 4} more` : '';
+    const locationLabel = params.tableName || params.orderType || 'Counter';
+    const passPrefix = params.stationLabel && params.stationLabel !== 'ALL'
+        ? `${params.stationLabel} Pass: `
+        : 'Kitchen Pass: ';
+    const recipientUserId = params.waiterId ?? params.cashierId ?? null;
+    await tx.insert(schema_1.notifications).values({
+        tenantId: params.tenantId,
+        branchId: params.branchId ?? null,
+        userId: recipientUserId,
+        title: `Food Ready: ${params.orderNumber} (${locationLabel})`,
+        detail: dishSummary
+            ? `${passPrefix}${dishSummary}${overflowCount} — plated and ready for guest service.`
+            : `${passPrefix}Order ${params.orderNumber} for ${locationLabel} is ready for pickup.`,
+        severity: 'SUCCESS',
+        module: 'KDS',
+        category: 'FYI_STREAM',
+        entityType: 'orders',
+        entityId: params.orderNumber,
+        actionUrl: '/pos',
+        actionPayload: {
+            actionCode: 'KDS_ORDER_READY_PICKUP',
+            buttonLabel: 'Acknowledge Pickup',
+        },
+        isRead: false,
+        isResolved: false,
+    });
+}
+// ============================================================================
 // ACTIVE KDS TICKETS, WORKLOAD TELEMETRY & STATION BUMP OPERATIONS
 // ============================================================================
 const getDistinctTenantKitchenStations = async (tenantId) => {
@@ -160,19 +208,40 @@ const getActiveKitchenTickets = async (tenantId, query = {}) => {
 exports.getActiveKitchenTickets = getActiveKitchenTickets;
 const updateTicketStatus = async (tenantId, userId, orderId, status) => {
     return await db_1.db.transaction(async (tx) => {
+        const [existingOrder] = await tx
+            .select({
+            id: schema_1.orders.id,
+            status: schema_1.orders.status,
+        })
+            .from(schema_1.orders)
+            .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId), (0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId)))
+            .limit(1);
+        if (!existingOrder) {
+            throw new Error('Kitchen ticket not found');
+        }
         const [updatedOrder] = await tx
             .update(schema_1.orders)
             .set({ status, updatedAt: new Date() })
             .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId), (0, drizzle_orm_1.eq)(schema_1.orders.tenantId, tenantId)))
             .returning();
-        if (!updatedOrder) {
-            throw new Error('Kitchen ticket not found');
-        }
         if (status === 'Preparing' || status === 'Ready') {
             await tx
                 .update(schema_1.orderItems)
                 .set({ kitchenStatus: status })
                 .where((0, drizzle_orm_1.and)((0, drizzle_orm_1.eq)(schema_1.orderItems.tenantId, tenantId), (0, drizzle_orm_1.eq)(schema_1.orderItems.orderId, orderId)));
+        }
+        // Trigger live KDS "Food Ready" alert once upon transitioning into Ready
+        if (status === 'Ready' && existingOrder.status !== 'Ready') {
+            await emitFoodReadyNotificationInTx(tx, {
+                tenantId,
+                branchId: updatedOrder.branchId ?? null,
+                orderId: updatedOrder.id,
+                orderNumber: updatedOrder.orderNumber,
+                orderType: updatedOrder.orderType,
+                tableName: updatedOrder.tableName ?? null,
+                waiterId: updatedOrder.waiterId ?? null,
+                cashierId: updatedOrder.cashierId ?? null,
+            });
         }
         await tx.insert(schema_1.auditLogs).values({
             tenantId,
@@ -819,6 +888,20 @@ const bumpStationItemsOnOrder = async (tenantId, userId, orderId, station) => {
                 .update(schema_1.orders)
                 .set({ status: nextOrderStatus, updatedAt: new Date() })
                 .where((0, drizzle_orm_1.eq)(schema_1.orders.id, orderId));
+        }
+        // Trigger live KDS "Food Ready" alert when the final station completes the order
+        if (allItemsReady && order.status !== 'Ready') {
+            await emitFoodReadyNotificationInTx(tx, {
+                tenantId,
+                branchId: order.branchId ?? null,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+                orderType: order.orderType,
+                tableName: order.tableName ?? null,
+                waiterId: order.waiterId ?? null,
+                cashierId: order.cashierId ?? null,
+                stationLabel: station,
+            });
         }
         await tx.insert(schema_1.auditLogs).values({
             tenantId,

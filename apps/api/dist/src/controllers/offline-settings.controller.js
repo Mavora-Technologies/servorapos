@@ -33,8 +33,9 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.postSimulateSync = exports.putSettings = exports.getSettings = void 0;
-const offlineRepo = __importStar(require("../repositories/offline-settings.repository"));
+exports.postSyncOfflineBatch = exports.putSettings = exports.getSettings = void 0;
+const zod_1 = require("zod");
+const offlineService = __importStar(require("../services/offline-settings.service"));
 const offline_settings_validator_1 = require("../validators/offline-settings.validator");
 const getSettings = async (req, res) => {
     try {
@@ -43,24 +44,16 @@ const getSettings = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { branchId } = req.query;
-        const branchIdNum = typeof branchId === 'string' && branchId !== 'ALL' ? parseInt(branchId, 10) : undefined;
-        const [settings, batches, telemetry] = await Promise.all([
-            offlineRepo.getOrCreateOfflineSettings(tenantId, branchIdNum),
-            offlineRepo.listSyncBatches(tenantId),
-            offlineRepo.getSyncTelemetry(tenantId),
-        ]);
-        res.status(200).json({
-            status: 'success',
-            data: {
-                settings,
-                batches,
-                telemetry,
-            },
-        });
+        const rawBranch = req.query.branchId;
+        const branchIdNum = typeof rawBranch === 'string' && rawBranch !== 'ALL' && /^\d+$/.test(rawBranch)
+            ? parseInt(rawBranch, 10)
+            : undefined;
+        const data = await offlineService.fetchOfflineOverview(tenantId, branchIdNum);
+        res.status(200).json({ status: 'success', data });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch offline settings' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch offline settings';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getSettings = getSettings;
@@ -72,45 +65,55 @@ const putSettings = async (req, res) => {
             return;
         }
         const input = offline_settings_validator_1.updateOfflineSettingsSchema.parse(req.body);
-        const updated = await offlineRepo.updateOfflineSettings(tenantId, input);
+        const updated = await offlineService.saveOfflineSettings(tenantId, input);
         res.status(200).json({
             status: 'success',
             data: updated,
-            message: 'Offline survivability and sync configurations saved.',
+            message: 'Offline survivability and sync policies saved.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to update offline settings' });
+        const message = error instanceof Error ? error.message : 'Failed to update offline settings';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.putSettings = putSettings;
-const postSimulateSync = async (req, res) => {
+const postSyncOfflineBatch = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
         if (!tenantId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const input = offline_settings_validator_1.simulateSyncBatchSchema.parse(req.body);
-        const result = await offlineRepo.triggerSyncSimulation(tenantId, input);
+        const input = offline_settings_validator_1.syncOfflineBatchSchema.parse(req.body);
+        const result = await offlineService.reconcileOfflineBatch(tenantId, req.user?.userId ?? null, req.user?.defaultBranchId ?? null, input);
         res.status(200).json({
             status: 'success',
             data: result,
-            message: `Batch ${result.batchReference} successfully processed and reconciled.`,
+            message: result.alreadyProcessed
+                ? `Batch ${result.batch.batchReference} was already reconciled.`
+                : `Batch ${result.batch.batchReference} reconciled ${result.batch.recordCount} order(s) with ${result.batch.conflictCount} conflict(s).`,
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            const detailed = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
-            res.status(400).json({ status: 'error', message: detailed, errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid offline sync batch payload',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Sync simulation failed' });
+        const message = error instanceof Error ? error.message : 'Offline batch reconciliation failed';
+        res.status(400).json({ status: 'error', message });
     }
 };
-exports.postSimulateSync = postSimulateSync;
+exports.postSyncOfflineBatch = postSyncOfflineBatch;

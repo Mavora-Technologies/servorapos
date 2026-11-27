@@ -14,6 +14,7 @@ const tenant_routes_1 = __importDefault(require("./routes/tenant.routes"));
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const branch_routes_1 = __importDefault(require("./routes/branch.routes"));
 const business_routes_1 = __importDefault(require("./routes/business.routes"));
+const audit_logger_middleware_1 = require("./middleware/audit-logger.middleware");
 // Menu & Catalog Routes
 const modifier_routes_1 = __importDefault(require("./routes/modifier.routes"));
 const combo_routes_1 = __importDefault(require("./routes/combo.routes"));
@@ -68,6 +69,7 @@ const attendance_routes_1 = __importDefault(require("./routes/attendance.routes"
 const handover_routes_1 = __importDefault(require("./routes/handover.routes"));
 const cashier_assignment_routes_1 = __importDefault(require("./routes/cashier-assignment.routes"));
 const performance_routes_1 = __importDefault(require("./routes/performance.routes"));
+const commission_routes_1 = __importDefault(require("./routes/commission.routes"));
 const financial_routes_1 = __importDefault(require("./routes/financial.routes"));
 const service_model_routes_1 = __importDefault(require("./routes/service-model.routes"));
 const receipt_routes_1 = __importDefault(require("./routes/receipt.routes"));
@@ -150,6 +152,7 @@ app.get('/health', (req, res) => {
    MOUNT MODULAR API ROUTES (ORDERED FROM MOST SPECIFIC TO LEAST SPECIFIC)
    ========================================================================== */
 // 1. System, Tenant & Core Infrastructure
+app.use('/api/v1', audit_logger_middleware_1.globalAuditLogger);
 app.use('/api/v1/system', system_routes_1.default);
 app.use('/api/v1/tenants', tenant_routes_1.default);
 app.use('/api/v1/auth', auth_routes_1.default);
@@ -216,6 +219,7 @@ app.use('/api/v1/staff/attendance', attendance_routes_1.default);
 app.use('/api/v1/staff/handover', handover_routes_1.default);
 app.use('/api/v1/staff/cashier-assignments', cashier_assignment_routes_1.default);
 app.use('/api/v1/staff/performance', performance_routes_1.default);
+app.use('/api/v1/staff/commissions', commission_routes_1.default);
 // 10 . Settings, Financials & Service Models, Receipts & Printers, Kitchen Configurations
 app.use('/api/v1/settings/financial', financial_routes_1.default);
 app.use('/api/v1/settings/service-models', service_model_routes_1.default);

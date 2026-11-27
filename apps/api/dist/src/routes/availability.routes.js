@@ -8,4 +8,5 @@ const router = (0, express_1.Router)();
 router.use(auth_middleware_1.requireAuth);
 router.get('/', availability_controller_1.getAvailabilityOverview);
 router.post('/toggle', availability_controller_1.updateItemAvailability);
+router.post('/bulk', availability_controller_1.bulkUpdateItemAvailability);
 exports.default = router;

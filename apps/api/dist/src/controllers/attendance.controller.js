@@ -33,57 +33,72 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleBatchApprove = exports.handleManualAdjustment = exports.handleClockOut = exports.handleClockIn = exports.getLiveDuty = exports.getAttendanceList = void 0;
-const attendanceRepo = __importStar(require("../repositories/attendance.repository"));
+exports.handleBatchReject = exports.handleBatchApprove = exports.handleManualAdjustment = exports.handleClockOut = exports.handleClockIn = exports.getLiveDuty = exports.getAttendanceList = void 0;
+const zod_1 = require("zod");
+const attendanceService = __importStar(require("../services/attendance.service"));
 const attendance_validator_1 = require("../validators/attendance.validator");
+function getActor(req) {
+    const user = req.user;
+    if (!user?.tenantId || !user?.userId)
+        return null;
+    return {
+        tenantId: user.tenantId,
+        userId: user.userId,
+        role: user.role,
+        ipAddress: req.ip || null,
+    };
+}
 const getAttendanceList = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { startDate, endDate, branchId, userId, status } = req.query;
-        const records = await attendanceRepo.listAttendanceRecords(tenantId, {
-            startDate: typeof startDate === 'string' ? startDate : undefined,
-            endDate: typeof endDate === 'string' ? endDate : undefined,
-            branchId: typeof branchId === 'string' && branchId !== 'ALL' ? parseInt(branchId, 10) : undefined,
-            userId: typeof userId === 'string' && userId !== 'ALL' ? parseInt(userId, 10) : undefined,
-            status: typeof status === 'string' ? status : undefined,
-        });
+        const query = attendance_validator_1.listAttendanceQuerySchema.parse(req.query);
+        const records = await attendanceService.fetchAttendanceLedger(actor, query);
         res.status(200).json({ status: 'success', data: records });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch attendance records' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Invalid filter parameters',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to fetch attendance records';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getAttendanceList = getAttendanceList;
 const getLiveDuty = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
-        const { branchId } = req.query;
-        const branchIdNum = typeof branchId === 'string' && branchId !== 'ALL' ? parseInt(branchId, 10) : undefined;
-        const roster = await attendanceRepo.getLiveDutyRoster(tenantId, branchIdNum);
+        const query = attendance_validator_1.liveDutyQuerySchema.parse(req.query);
+        const roster = await attendanceService.fetchLiveDutyRoster(actor, query);
         res.status(200).json({ status: 'success', data: roster });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch live duty roster' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch live duty roster';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.getLiveDuty = getLiveDuty;
 const handleClockIn = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = attendance_validator_1.clockInSchema.parse(req.body);
-        const session = await attendanceRepo.clockIn(tenantId, input);
+        const session = await attendanceService.recordClockIn(actor, input);
         res.status(201).json({
             status: 'success',
             data: session,
@@ -91,23 +106,28 @@ const handleClockIn = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Clock-in failed' });
+        const message = error instanceof Error ? error.message : 'Clock-in failed';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.handleClockIn = handleClockIn;
 const handleClockOut = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        if (!tenantId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = attendance_validator_1.clockOutSchema.parse(req.body);
-        const record = await attendanceRepo.clockOut(tenantId, input);
+        const record = await attendanceService.recordClockOut(actor, input);
         res.status(200).json({
             status: 'success',
             data: record,
@@ -115,57 +135,103 @@ const handleClockOut = async (req, res) => {
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Clock-out failed' });
+        const message = error instanceof Error ? error.message : 'Clock-out failed';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.handleClockOut = handleClockOut;
 const handleManualAdjustment = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const managerUserId = req.user?.userId;
-        if (!tenantId || !managerUserId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = attendance_validator_1.manualAdjustmentSchema.parse(req.body);
-        const record = await attendanceRepo.createManualAdjustment(tenantId, managerUserId, input);
+        const record = await attendanceService.recordManualAdjustment(actor, input);
         res.status(201).json({
             status: 'success',
             data: record,
-            message: 'Manual time-card entry recorded with manager audit authorization.',
+            message: 'Manual time-card entry recorded with audit trail.',
         });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to submit manual adjustment' });
+        const message = error instanceof Error ? error.message : 'Failed to submit manual adjustment';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.handleManualAdjustment = handleManualAdjustment;
 const handleBatchApprove = async (req, res) => {
     try {
-        const tenantId = req.user?.tenantId;
-        const managerUserId = req.user?.userId;
-        if (!tenantId || !managerUserId) {
+        const actor = getActor(req);
+        if (!actor) {
             res.status(401).json({ status: 'error', message: 'Unauthorized session' });
             return;
         }
         const input = attendance_validator_1.approveAttendanceSchema.parse(req.body);
-        const result = await attendanceRepo.batchApproveAttendance(tenantId, managerUserId, input.recordIds);
+        const result = await attendanceService.approveTimesheets(actor, input.recordIds);
         res.status(200).json({
             status: 'success',
             data: result,
-            message: `${result.approvedCount} timesheet record(s) approved for payroll consolidation.`,
+            message: `${result.approvedCount} timesheet record(s) approved for payroll.`,
         });
     }
     catch (error) {
-        res.status(400).json({ status: 'error', message: error.message || 'Failed to approve attendance records' });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to approve attendance records';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.handleBatchApprove = handleBatchApprove;
+const handleBatchReject = async (req, res) => {
+    try {
+        const actor = getActor(req);
+        if (!actor) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+            return;
+        }
+        const input = attendance_validator_1.rejectAttendanceSchema.parse(req.body);
+        const result = await attendanceService.rejectTimesheets(actor, input.recordIds, input.reason);
+        res.status(200).json({
+            status: 'success',
+            data: result,
+            message: `${result.rejectedCount} timesheet record(s) rejected.`,
+        });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to reject attendance records';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.handleBatchReject = handleBatchReject;

@@ -1,9 +1,41 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteCombo = exports.createCombo = exports.getCombos = void 0;
-const drizzle_orm_1 = require("drizzle-orm");
-const db_1 = require("../config/db");
-const schema_1 = require("../config/schema");
+exports.deleteCombo = exports.updateCombo = exports.createCombo = exports.getCombos = void 0;
+const zod_1 = require("zod");
+const comboService = __importStar(require("../services/combo.service"));
 const combo_validator_1 = require("../validators/combo.validator");
 const getCombos = async (req, res) => {
     try {
@@ -12,99 +44,117 @@ const getCombos = async (req, res) => {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        const combos = await db_1.db
-            .select()
-            .from(schema_1.comboBundles)
-            .where((0, drizzle_orm_1.eq)(schema_1.comboBundles.tenantId, tenantId))
-            .orderBy((0, drizzle_orm_1.desc)(schema_1.comboBundles.createdAt));
-        if (combos.length === 0) {
-            res.status(200).json({ status: 'success', data: [] });
-            return;
-        }
-        const comboIds = combos.map((c) => c.id);
-        const items = await db_1.db
-            .select({
-            id: schema_1.comboBundleItems.id,
-            comboId: schema_1.comboBundleItems.comboId,
-            menuItemId: schema_1.comboBundleItems.menuItemId,
-            quantity: schema_1.comboBundleItems.quantity,
-            additionalPrice: schema_1.comboBundleItems.additionalPrice,
-            itemName: schema_1.menuItems.name,
-            itemPrice: schema_1.menuItems.price,
-        })
-            .from(schema_1.comboBundleItems)
-            .leftJoin(schema_1.menuItems, (0, drizzle_orm_1.eq)(schema_1.comboBundleItems.menuItemId, schema_1.menuItems.id))
-            .where((0, drizzle_orm_1.inArray)(schema_1.comboBundleItems.comboId, comboIds));
-        const result = combos.map((combo) => ({
-            ...combo,
-            items: items.filter((item) => item.comboId === combo.id),
-        }));
-        res.status(200).json({ status: 'success', data: result });
+        const rawBranchId = req.query.branchId;
+        const branchId = typeof rawBranchId === 'string' && rawBranchId !== '' && rawBranchId !== 'ALL'
+            ? Number(rawBranchId)
+            : undefined;
+        const activeOnly = req.query.activeOnly === 'true';
+        const combos = await comboService.listTenantCombos(tenantId, {
+            branchId: branchId && Number.isInteger(branchId) && branchId > 0 ? branchId : undefined,
+            activeOnly,
+        });
+        res.status(200).json({ status: 'success', data: combos });
     }
     catch (error) {
-        console.error('[Get Combos Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to fetch combos' });
+        const message = error instanceof Error ? error.message : 'Failed to fetch combo bundles';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.getCombos = getCombos;
 const createCombo = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const defaultBranchId = req.user?.defaultBranchId;
-        if (!tenantId) {
+        const userId = req.user?.userId;
+        if (!tenantId || !userId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
         const validated = combo_validator_1.createComboBundleSchema.parse(req.body);
-        const created = await db_1.db.transaction(async (tx) => {
-            const [newCombo] = await tx
-                .insert(schema_1.comboBundles)
-                .values({
-                tenantId,
-                branchId: defaultBranchId || null,
-                name: validated.name,
-                description: validated.description,
-                sku: validated.sku,
-                basePrice: validated.basePrice.toFixed(2),
-                isAvailable: validated.isAvailable,
-            })
-                .returning();
-            const itemInserts = validated.items.map((i) => ({
-                comboId: newCombo.id,
-                menuItemId: i.menuItemId,
-                quantity: i.quantity,
-                additionalPrice: i.additionalPrice.toFixed(2),
-            }));
-            await tx.insert(schema_1.comboBundleItems).values(itemInserts);
-            return newCombo;
+        const branchId = req.user?.defaultBranchId ?? null;
+        const created = await comboService.registerComboBundle(tenantId, branchId, validated, {
+            userId,
+            ipAddress: req.ip || null,
         });
         res.status(201).json({ status: 'success', data: created });
     }
     catch (error) {
-        if (error.name === 'ZodError') {
-            res.status(400).json({ status: 'error', errors: error.errors });
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
             return;
         }
-        console.error('[Create Combo Error]:', error);
-        res.status(500).json({ status: 'error', message: error.message || 'Failed to create combo bundle' });
+        const message = error instanceof Error ? error.message : 'Failed to create combo bundle';
+        res.status(400).json({ status: 'error', message });
     }
 };
 exports.createCombo = createCombo;
-const deleteCombo = async (req, res) => {
+const updateCombo = async (req, res) => {
     try {
         const tenantId = req.user?.tenantId;
-        const { id } = req.params;
-        if (!tenantId) {
+        const userId = req.user?.userId;
+        if (!tenantId || !userId) {
             res.status(401).json({ status: 'error', message: 'Unauthorized' });
             return;
         }
-        await db_1.db
-            .delete(schema_1.comboBundles)
-            .where((0, drizzle_orm_1.eq)(schema_1.comboBundles.id, Number(id)));
+        const comboId = Number(req.params.id);
+        if (!Number.isInteger(comboId) || comboId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid combo bundle ID' });
+            return;
+        }
+        const validated = combo_validator_1.updateComboBundleSchema.parse(req.body);
+        const updated = await comboService.modifyComboBundle(tenantId, comboId, validated, {
+            userId,
+            ipAddress: req.ip || null,
+        });
+        if (!updated) {
+            res.status(404).json({ status: 'error', message: 'Combo bundle not found' });
+            return;
+        }
+        res.status(200).json({ status: 'success', data: updated });
+    }
+    catch (error) {
+        if (error instanceof zod_1.ZodError) {
+            res.status(400).json({
+                status: 'error',
+                message: error.issues[0]?.message || 'Validation failed',
+                errors: error.issues,
+            });
+            return;
+        }
+        const message = error instanceof Error ? error.message : 'Failed to update combo bundle';
+        res.status(400).json({ status: 'error', message });
+    }
+};
+exports.updateCombo = updateCombo;
+const deleteCombo = async (req, res) => {
+    try {
+        const tenantId = req.user?.tenantId;
+        const userId = req.user?.userId;
+        if (!tenantId || !userId) {
+            res.status(401).json({ status: 'error', message: 'Unauthorized' });
+            return;
+        }
+        const comboId = Number(req.params.id);
+        if (!Number.isInteger(comboId) || comboId <= 0) {
+            res.status(400).json({ status: 'error', message: 'Invalid combo bundle ID' });
+            return;
+        }
+        const deleted = await comboService.removeComboBundle(tenantId, comboId, {
+            userId,
+            ipAddress: req.ip || null,
+        });
+        if (!deleted) {
+            res.status(404).json({ status: 'error', message: 'Combo bundle not found' });
+            return;
+        }
         res.status(200).json({ status: 'success', message: 'Combo bundle deleted successfully' });
     }
     catch (error) {
-        res.status(500).json({ status: 'error', message: error.message });
+        const message = error instanceof Error ? error.message : 'Failed to delete combo bundle';
+        res.status(500).json({ status: 'error', message });
     }
 };
 exports.deleteCombo = deleteCombo;
