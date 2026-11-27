@@ -58,6 +58,10 @@ import {
   isOfflineOrNetworkError,
   type CachedPosSnapshot,
 } from '@/lib/offline-engine';
+import PosPinKioskOverlay, {
+  type KioskOperatorOption,
+  type SwitchedOperatorSession,
+} from '@/components/pos/PosPinKioskOverlay';
 
 interface UserProfile {
   id: number;
@@ -516,6 +520,12 @@ export default function POSPage() {
   const [branches, setBranches] = useState<BranchProfile[]>([]);
   const [activeBranch, setActiveBranch] = useState<BranchProfile | null>(null);
 
+  // Shared Kiosk PIN Operator Switching & Lockout States
+  const [kioskOperators, setKioskOperators] = useState<KioskOperatorOption[]>([]);
+  const [isPinKioskOpen, setIsPinKioskOpen] = useState(false);
+  const [isTerminalLocked, setIsTerminalLocked] = useState(false);
+  const [autoLockAfterSale, setAutoLockAfterSale] = useState(false);
+
   // Cash Drawers, Active Shift & Custodian Guardrails
   const [drawers, setDrawers] = useState<CashDrawerOption[]>([]);
   const [selectedDrawerId, setSelectedDrawerId] = useState<string>('');
@@ -661,6 +671,7 @@ export default function POSPage() {
             : undefined);
 
         const branchParam = savedBranchId ? `?branchId=${savedBranchId}` : '';
+        const comboQuery = `?activeOnly=true${savedBranchId ? `&branchId=${savedBranchId}` : ''}`;
 
         const [
           authRes,
@@ -678,7 +689,7 @@ export default function POSPage() {
           fetchApi(`/api/v1/menu/active${branchParam}`).catch(() => ({
             data: { items: [], categories: [] },
           })),
-          fetchApi('/api/v1/menu/combos').catch(() => ({ data: [] })),
+          fetchApi(`/api/v1/menu/combos${comboQuery}`).catch(() => ({ data: [] })),
           fetchApi(`/api/v1/restaurant/tables${branchParam}`).catch(() => ({ data: [] })),
           fetchApi('/api/v1/settings/service-models').catch(() => ({ data: [] })),
           fetchApi('/api/v1/settings/financial').catch(() => ({ data: null })),
@@ -686,7 +697,7 @@ export default function POSPage() {
           fetchApi('/api/v1/settings/offline').catch(() => null),
         ]);
 
-        // Discard stale response if user switched branches mid-flight
+        // Discard stale response if user switched branches or operators mid-flight
         if (requestId !== loadRequestIdRef.current) return;
 
         if (!authRes && !posContextRes && !(menuRes?.data?.items?.length > 0)) {
@@ -783,6 +794,19 @@ export default function POSPage() {
           setActiveBranch(resolvedActiveBranch);
         }
 
+        // Load branch-scoped PIN kiosk operators in the background
+        if (resolvedActiveBranch) {
+          fetchApi(`/api/v1/pos/kiosk-operators?branchId=${resolvedActiveBranch.id}`)
+            .then((res) => {
+              if (requestId === loadRequestIdRef.current && Array.isArray(res?.data)) {
+                setKioskOperators(res.data);
+              }
+            })
+            .catch(() => {});
+        } else {
+          setKioskOperators([]);
+        }
+
         // 1. Base Menu Items (preserving Cloudinary imageUrl / imageCardUrl / imagePublicId)
         let baseItems: MenuItem[] = [];
         let baseCategories: string[] = [];
@@ -823,52 +847,52 @@ export default function POSPage() {
         // 2. Active Combos & Meal Bundles
         const rawCombos = Array.isArray(combosRes?.data) ? combosRes.data : [];
         const comboMenuItems: MenuItem[] = rawCombos
-       .filter(
-         (c: { effectiveAvailable?: boolean; isAvailable?: boolean; items?: unknown[] }) =>
-           c.effectiveAvailable !== false &&
-           c.isAvailable !== false &&
-           Array.isArray(c.items) &&
-           c.items.length > 0
-       )
-       .map(
-         (c: {
-           id: number;
-           name: string;
-           sku?: string | null;
-           basePrice: string | number;
-           isAvailable: boolean;
-           imageUrl?: string | null;
-           imageCardUrl?: string | null;
-           imagePublicId?: string | null;
-           items: Array<{
-             menuItemId: number;
-             quantity: number;
-             additionalPrice?: string | number;
-             itemName?: string | null;
-             itemPrice?: string | number | null;
-           }>;
-         }) => ({
-           id: `combo-${c.id}`,
-           comboId: c.id,
-           isCombo: true,
-           name: c.name,
-           category: COMBOS_CATEGORY_LABEL,
-           price: Number(c.basePrice || 0),
-           isAvailable: c.isAvailable !== false,
-           sku: c.sku || undefined,
-           image: c.imageCardUrl || c.imageUrl || null,
-           imageUrl: c.imageUrl || null,
-           imageCardUrl: c.imageCardUrl || null,
-           imagePublicId: c.imagePublicId || null,
-           comboItems: c.items.map((line) => ({
-             menuItemId: Number(line.menuItemId),
-             quantity: Number(line.quantity) || 1,
-             additionalPrice: Number(line.additionalPrice || 0),
-             itemName: line.itemName || `Item #${line.menuItemId}`,
-             itemPrice: Number(line.itemPrice || 0),
-           })),
-         })
-       );
+          .filter(
+            (c: { effectiveAvailable?: boolean; isAvailable?: boolean; items?: unknown[] }) =>
+              c.effectiveAvailable !== false &&
+              c.isAvailable !== false &&
+              Array.isArray(c.items) &&
+              c.items.length > 0
+          )
+          .map(
+            (c: {
+              id: number;
+              name: string;
+              sku?: string | null;
+              basePrice: string | number;
+              isAvailable: boolean;
+              imageUrl?: string | null;
+              imageCardUrl?: string | null;
+              imagePublicId?: string | null;
+              items: Array<{
+                menuItemId: number;
+                quantity: number;
+                additionalPrice?: string | number;
+                itemName?: string | null;
+                itemPrice?: string | number | null;
+              }>;
+            }) => ({
+              id: `combo-${c.id}`,
+              comboId: c.id,
+              isCombo: true,
+              name: c.name,
+              category: COMBOS_CATEGORY_LABEL,
+              price: Number(c.basePrice || 0),
+              isAvailable: c.isAvailable !== false,
+              sku: c.sku || undefined,
+              image: c.imageCardUrl || c.imageUrl || null,
+              imageUrl: c.imageUrl || null,
+              imageCardUrl: c.imageCardUrl || null,
+              imagePublicId: c.imagePublicId || null,
+              comboItems: c.items.map((line) => ({
+                menuItemId: Number(line.menuItemId),
+                quantity: Number(line.quantity) || 1,
+                additionalPrice: Number(line.additionalPrice || 0),
+                itemName: line.itemName || `Item #${line.menuItemId}`,
+                itemPrice: Number(line.itemPrice || 0),
+              })),
+            })
+          );
 
         const mergedItems = [...comboMenuItems, ...baseItems];
         const mergedCategories = Array.from(
@@ -961,6 +985,39 @@ export default function POSPage() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  // Authoritative PIN Kiosk Operator Session Swap
+  const handleOperatorSwitched = useCallback(
+    async (session: SwitchedOperatorSession) => {
+      if (typeof window !== 'undefined') {
+        if (localStorage.getItem('servora_token') !== null) {
+          localStorage.setItem('servora_token', session.token);
+        }
+        localStorage.setItem('token', session.token);
+
+        try {
+          const cached = localStorage.getItem('servora_cached_workspace');
+          const parsed = cached ? JSON.parse(cached) : {};
+          localStorage.setItem(
+            'servora_cached_workspace',
+            JSON.stringify({ ...parsed, user: session.user })
+          );
+        } catch {
+          // Ignore malformed workspace cache
+        }
+      }
+
+      setCurrentUser(session.user);
+      setOrderDiscountPercent(0);
+      setIsPinKioskOpen(false);
+      setIsTerminalLocked(false);
+      setOfflineSyncBanner(
+        `Active POS operator switched to ${session.user.fullName} (${session.user.role}).`
+      );
+      await loadInitialData(activeBranch?.id);
+    },
+    [loadInitialData, activeBranch?.id]
+  );
 
   // Manual & Automatic Reconnect Reconciliation for Offline Queued Orders
   const handleSyncOfflineQueue = useCallback(async () => {
@@ -1231,7 +1288,7 @@ export default function POSPage() {
       });
       if (res?.data) {
         setAppliedPromo(res.data);
-        setOrderDiscountPercent(0); // Prevent stacking manual discount on top of promo code
+        setOrderDiscountPercent(0);
         setPromoCodeInput('');
       }
     } catch (err: unknown) {
@@ -1813,7 +1870,6 @@ export default function POSPage() {
     if (isCheckingOut) return;
     setCheckoutError(null);
 
-    // Pre-flight payment validation
     if (paymentMethod === 'Cash' && (parseFloat(cashTendered) || 0) < calculations.grandTotal) {
       setCheckoutError('Cash tendered is less than the total payable amount.');
       return;
@@ -2023,7 +2079,7 @@ export default function POSPage() {
         );
       }
 
-      // 4. Trigger M-Pesa STK Push and report explicit pending/failed state (never swallow errors)
+      // 4. Trigger M-Pesa STK Push and report explicit pending/failed state
       let paymentConfirmationStatus: 'PAID' | 'PENDING_MPESA' | 'STK_FAILED' | 'CARD_PENDING' =
         paymentMethod === 'Card' ? 'CARD_PENDING' : 'PAID';
       let paymentStatusMessage: string | null = null;
@@ -2312,20 +2368,47 @@ export default function POSPage() {
             </div>
           </div>
 
+          {/* Active Operator PIN Switcher & Shared Kiosk Auto-Lock */}
           {currentUser && (
-            <div className="hidden sm:flex items-center gap-1.5 bg-servora-pale border border-servora-core/15 px-3 py-1.5 rounded-xl text-xs">
-              <UserCheck size={14} className="text-servora-core shrink-0" />
-              <span className="font-bold text-servora-navy">
-                {currentUser.fullName || currentUser.firstName}
-              </span>
-              <span className="text-[10px] font-mono uppercase text-servora-deepTeal">
-                ({currentUser.role})
-              </span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={!isOnline}
+                onClick={() => {
+                  setIsTerminalLocked(false);
+                  setIsPinKioskOpen(true);
+                }}
+                title="Switch Waiter / Cashier via POS PIN"
+                className="flex items-center gap-1.5 bg-servora-pale hover:bg-blue-100 border border-servora-core/25 px-3 py-1.5 rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <UserCheck size={14} className="text-servora-core shrink-0" />
+                <span className="font-bold text-servora-navy">
+                  {currentUser.fullName || currentUser.firstName}
+                </span>
+                <span className="text-[10px] font-mono uppercase text-servora-deepTeal">
+                  ({currentUser.role})
+                </span>
+                <Lock size={11} className="text-servora-core ml-0.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAutoLockAfterSale((v) => !v)}
+                title="Auto-lock terminal to PIN keypad after each completed sale (shared waiter kiosk mode)"
+                className={`hidden md:inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10.5px] font-bold border transition-colors cursor-pointer ${
+                  autoLockAfterSale
+                    ? 'bg-servora-navy text-white border-servora-navy'
+                    : 'bg-slate-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                <Lock size={10} />
+                <span>{autoLockAfterSale ? 'Auto-Lock ON' : 'Auto-Lock'}</span>
+              </button>
             </div>
           )}
         </div>
 
-        {/* Right Side: Network Pill, Offline Queue Sync, Shift Status & Refresh */}
+        {/* Right Side: Network Pill, Offline Queue Sync, Shift Status, Lock & Refresh */}
         <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto justify-between xl:justify-end">
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold border ${
@@ -2379,6 +2462,20 @@ export default function POSPage() {
 
           <button
             type="button"
+            disabled={!isOnline}
+            onClick={() => {
+              setIsTerminalLocked(true);
+              setIsPinKioskOpen(true);
+            }}
+            title="Lock Terminal (Require Staff PIN)"
+            aria-label="Lock POS Terminal"
+            className="p-2 bg-servora-navy text-white rounded-xl hover:bg-slate-800 transition-colors cursor-pointer disabled:opacity-40"
+          >
+            <Lock size={14} />
+          </button>
+
+          <button
+            type="button"
             onClick={() => loadInitialData(activeBranch?.id)}
             title="Sync Workspace, Drawers & Catalog"
             className="p-2 bg-gray-50 border border-gray-200 rounded-xl hover:bg-gray-100 text-gray-600 transition-colors cursor-pointer"
@@ -2388,7 +2485,7 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* OFFLINE QUEUE / RECONCILIATION STATUS BANNER */}
+      {/* OFFLINE QUEUE / OPERATOR SWITCH / RECONCILIATION STATUS BANNER */}
       {offlineSyncBanner && (
         <div
           role="status"
@@ -2401,7 +2498,7 @@ export default function POSPage() {
           <button
             type="button"
             onClick={() => setOfflineSyncBanner(null)}
-            aria-label="Dismiss sync notification"
+            aria-label="Dismiss notification"
             className="text-emerald-700 hover:text-emerald-950"
           >
             <X size={14} />
@@ -3576,7 +3673,7 @@ export default function POSPage() {
                   : 'max-w-[340px]'
             }`}
           >
-            {/* Non-printable payment status alert (M-Pesa pending / STK failed / Loyalty warning) */}
+            {/* Non-printable payment status alert */}
             {completedOrder.paymentStatusMessage && (
               <div
                 className={`p-2.5 rounded-xl border font-sans text-[11px] font-semibold print:hidden ${
@@ -3865,7 +3962,13 @@ export default function POSPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setCompletedOrder(null)}
+                onClick={() => {
+                  setCompletedOrder(null);
+                  if (autoLockAfterSale && isOnline) {
+                    setIsTerminalLocked(true);
+                    setIsPinKioskOpen(true);
+                  }
+                }}
                 className="px-4 py-2.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-xl hover:bg-gray-200 transition-all cursor-pointer"
               >
                 Done
@@ -3874,6 +3977,18 @@ export default function POSPage() {
           </div>
         </div>
       )}
+
+      {/* SHARED WAITER / CASHIER PIN KIOSK OVERLAY */}
+      <PosPinKioskOverlay
+        isOpen={isPinKioskOpen}
+        isLocked={isTerminalLocked}
+        branchId={activeBranch?.id ?? null}
+        branchName={activeBranch?.name || 'Main Outlet'}
+        currentOperatorName={currentUser?.fullName || currentUser?.firstName}
+        operators={kioskOperators}
+        onClose={() => setIsPinKioskOpen(false)}
+        onSwitched={handleOperatorSwitched}
+      />
     </div>
   );
 }

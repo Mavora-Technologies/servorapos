@@ -8,6 +8,8 @@ import {
   posCustomerSearchQuerySchema,
   posValidatePromoSchema,
   posValidateStockSchema,
+  posPinSwitchSchema,
+  assignStaffPosPinSchema,
 } from '../validators/pos-terminal.validator';
 
 export const getPosContext = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -167,5 +169,134 @@ export const postValidateStock = async (req: AuthRequest, res: Response): Promis
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Stock validation failed';
     res.status(500).json({ status: 'error', message });
+  }
+};
+
+export const getKioskOperators = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const role = req.user?.role;
+
+    if (!tenantId || !userId || !role) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const parsed = posBootstrapQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'Invalid branch parameter',
+      });
+      return;
+    }
+
+    const branchId = parsed.data.branchId ?? req.user?.defaultBranchId ?? undefined;
+    if (!branchId) {
+      res.status(400).json({ status: 'error', message: 'Active branchId is required' });
+      return;
+    }
+
+    const authorized = await getUserAuthorizedBranches(tenantId, userId, role);
+    if (authorized !== 'ALL' && !authorized.includes(branchId)) {
+      res.status(403).json({ status: 'error', message: 'Unauthorized branch scope' });
+      return;
+    }
+
+    const operators = await posRepo.listBranchKioskOperators(tenantId, branchId);
+    res.status(200).json({ status: 'success', data: operators });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to load kiosk operators';
+    res.status(500).json({ status: 'error', message });
+  }
+};
+
+export const postPosPinSwitch = async (req: AuthRequest, res: Response): Promise<void> => {
+  // Prevent globalAuditLogger from persisting plaintext PIN from req.body
+  res.locals.auditLogged = true;
+
+  try {
+    const tenantId = req.user?.tenantId;
+    const previousUserId = req.user?.userId;
+
+    if (!tenantId || !previousUserId) {
+      res.status(401).json({ status: 'error', message: 'Terminal session required' });
+      return;
+    }
+
+    const parsed = posPinSwitchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'Invalid PIN payload',
+      });
+      return;
+    }
+
+    const session = await posRepo.authenticatePosPinSwitch({
+      tenantId,
+      branchId: parsed.data.branchId,
+      pin: parsed.data.pin,
+      targetUserId: parsed.data.userId,
+      previousUserId,
+      ipAddress: req.ip || null,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: session,
+      message: `Switched active POS operator to ${session.user.fullName}.`,
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'POS PIN authentication failed';
+    res.status(401).json({ status: 'error', message });
+  }
+};
+
+export const putStaffPosPin = async (req: AuthRequest, res: Response): Promise<void> => {
+  // Prevent globalAuditLogger from persisting plaintext PIN from req.body
+  res.locals.auditLogged = true;
+
+  try {
+    const tenantId = req.user?.tenantId;
+    const actorUserId = req.user?.userId;
+
+    if (!tenantId || !actorUserId) {
+      res.status(401).json({ status: 'error', message: 'Unauthorized session' });
+      return;
+    }
+
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isInteger(targetUserId) || targetUserId <= 0) {
+      res.status(400).json({ status: 'error', message: 'Invalid staff user ID' });
+      return;
+    }
+
+    const parsed = assignStaffPosPinSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: 'error',
+        message: parsed.error.issues[0]?.message || 'PIN must be 4 to 6 numeric digits',
+      });
+      return;
+    }
+
+    const result = await posRepo.assignStaffPosPinTransaction({
+      tenantId,
+      targetUserId,
+      pin: parsed.data.pin,
+      actorUserId,
+      ipAddress: req.ip || null,
+    });
+
+    res.status(200).json({
+      status: 'success',
+      data: result,
+      message: `POS PIN updated for ${result.fullName}.`,
+    });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to assign POS PIN';
+    res.status(400).json({ status: 'error', message });
   }
 };

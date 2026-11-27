@@ -1,5 +1,18 @@
 // apps/api/src/repositories/pos-terminal.repository.ts
-import { eq, and, desc, asc, sql, or, ilike, isNull, inArray } from 'drizzle-orm';
+import {
+  eq,
+  and,
+  desc,
+  asc,
+  sql,
+  or,
+  ilike,
+  isNull,
+  isNotNull,
+  inArray,
+} from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { db } from '../config/db';
 import {
   branches,
@@ -23,7 +36,14 @@ import {
   recipeIngredients,
   orders,
   stockMovements,
+  users,
+  userBranchMemberships,
+  auditLogs,
 } from '../config/schema';
+import {
+  getEffectiveUserPermissions,
+  getUserAuthorizedBranches,
+} from '../services/role.service';
 
 export interface StockRequirementLine {
   inventoryItemId: number;
@@ -76,6 +96,11 @@ export interface PosModifierGroupDTO {
 }
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+// In-memory failed PIN rate limiter (tenantId:branchId:target -> { count, lockedUntil })
+const pinAttemptTracker = new Map<string, { count: number; lockedUntil: number }>();
+const MAX_PIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 5 * 60 * 1000;
 
 export const getPosTerminalContext = async (
   tenantId: number,
@@ -643,7 +668,6 @@ export const validateOrderStockAvailability = async (
     return { valid: true, shortages: [] };
   }
 
-  // Aggregate quantity per menuItemId
   const qtyByMenuItem = new Map<number, number>();
   for (const line of requestedItems) {
     qtyByMenuItem.set(
@@ -785,7 +809,6 @@ export const validateOrderStockAvailability = async (
       continue;
     }
 
-    // Collect inventory demand
     if (item.stockTrackingType === 'STOCKED_PRODUCT' && item.directInventoryItemId) {
       requiredInventoryIds.add(item.directInventoryItemId);
       demandByInventoryId.set(
@@ -1226,7 +1249,6 @@ export const syncPostOrderStockAndAvailability = async (params: {
   }
 
   await db.transaction(async (tx) => {
-    // 1. Lock order row and check whether inventory was already deducted
     const [orderRow] = await tx
       .select({ id: orders.id, inventoryDeducted: orders.inventoryDeducted })
       .from(orders)
@@ -1244,8 +1266,6 @@ export const syncPostOrderStockAndAvailability = async (params: {
     const inventoryAlreadyDeducted =
       orderRow.inventoryDeducted || existingMovements.length > 0;
 
-    // 2. If inventory was NOT yet deducted by orderRepo, run full atomic deduction
-    //    (which handles both menu_item_availability and inventory_items)
     if (!inventoryAlreadyDeducted) {
       await deductOrderInventoryInTx(tx, {
         tenantId,
@@ -1258,7 +1278,6 @@ export const syncPostOrderStockAndAvailability = async (params: {
       return;
     }
 
-    // 3. Inventory was already deducted by orderRepo — decrement manual availability caps
     const availRows = await tx
       .select()
       .from(menuItemAvailability)
@@ -1302,5 +1321,292 @@ export const syncPostOrderStockAndAvailability = async (params: {
         .set({ inventoryDeducted: true, updatedAt: new Date() })
         .where(and(eq(orders.id, orderId), eq(orders.tenantId, tenantId)));
     }
+  });
+};
+
+/**
+ * Lists active staff cleared for the terminal's branch who have a POS PIN configured.
+ * Never returns passwordHash or pinHash.
+ */
+export const listBranchKioskOperators = async (tenantId: number, branchId: number) => {
+  const memberSubquery = db
+    .select({ userId: userBranchMemberships.userId })
+    .from(userBranchMemberships)
+    .where(
+      and(
+        eq(userBranchMemberships.tenantId, tenantId),
+        eq(userBranchMemberships.branchId, branchId),
+        eq(userBranchMemberships.isActive, true)
+      )
+    );
+
+  const rows = await db
+    .select({
+      id: users.id,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      role: users.role,
+      defaultBranchId: users.defaultBranchId,
+    })
+    .from(users)
+    .where(
+      and(
+        eq(users.tenantId, tenantId),
+        eq(users.isActive, true),
+        isNotNull(users.pinHash),
+        or(
+          inArray(users.role, ['ADMIN', 'SUPER_ADMIN']),
+          eq(users.defaultBranchId, branchId),
+          inArray(users.id, memberSubquery)
+        )
+      )
+    )
+    .orderBy(asc(users.firstName), asc(users.lastName));
+
+  return rows.map((u) => ({
+    id: u.id,
+    firstName: u.firstName,
+    lastName: u.lastName,
+    fullName: `${u.firstName} ${u.lastName}`.trim(),
+    role: u.role,
+  }));
+};
+
+/**
+ * Verifies a waiter/cashier POS PIN, enforces branch clearance & RBAC,
+ * signs a fresh authoritative JWT for that operator, and writes a sanitized audit log.
+ */
+export const authenticatePosPinSwitch = async (params: {
+  tenantId: number;
+  branchId: number;
+  pin: string;
+  targetUserId?: number;
+  previousUserId: number;
+  ipAddress?: string | null;
+}) => {
+  const { tenantId, branchId, pin, targetUserId, previousUserId, ipAddress } = params;
+  const throttleKey = `${tenantId}:${branchId}:${targetUserId ?? 'DIRECT'}`;
+  const now = Date.now();
+  const tracker = pinAttemptTracker.get(throttleKey);
+
+  if (tracker && tracker.lockedUntil > now) {
+    const minsLeft = Math.ceil((tracker.lockedUntil - now) / 60000);
+    throw new Error(
+      `Terminal PIN temporarily locked after ${MAX_PIN_ATTEMPTS} failed attempts. Try again in ${minsLeft} minute(s).`
+    );
+  }
+
+  const memberSubquery = db
+    .select({ userId: userBranchMemberships.userId })
+    .from(userBranchMemberships)
+    .where(
+      and(
+        eq(userBranchMemberships.tenantId, tenantId),
+        eq(userBranchMemberships.branchId, branchId),
+        eq(userBranchMemberships.isActive, true)
+      )
+    );
+
+  const candidateConditions = [
+    eq(users.tenantId, tenantId),
+    eq(users.isActive, true),
+    isNotNull(users.pinHash),
+    or(
+      inArray(users.role, ['ADMIN', 'SUPER_ADMIN']),
+      eq(users.defaultBranchId, branchId),
+      inArray(users.id, memberSubquery)
+    ),
+  ];
+
+  if (targetUserId) {
+    candidateConditions.push(eq(users.id, targetUserId));
+  }
+
+  const candidates = await db
+    .select({
+      id: users.id,
+      tenantId: users.tenantId,
+      firstName: users.firstName,
+      lastName: users.lastName,
+      email: users.email,
+      role: users.role,
+      defaultBranchId: users.defaultBranchId,
+      pinHash: users.pinHash,
+    })
+    .from(users)
+    .where(and(...candidateConditions));
+
+  let matchedUser: (typeof candidates)[number] | null = null;
+
+  for (const candidate of candidates) {
+    if (!candidate.pinHash) continue;
+    const isMatch = await bcrypt.compare(pin, candidate.pinHash);
+    if (isMatch) {
+      matchedUser = candidate;
+      break;
+    }
+  }
+
+  if (!matchedUser) {
+    const nextCount = (tracker?.count ?? 0) + 1;
+    pinAttemptTracker.set(throttleKey, {
+      count: nextCount,
+      lockedUntil: nextCount >= MAX_PIN_ATTEMPTS ? now + LOCKOUT_MS : 0,
+    });
+
+    await db.insert(auditLogs).values({
+      tenantId,
+      branchId,
+      userId: previousUserId,
+      action: 'POS_PIN_SWITCH_FAILED',
+      module: 'AUTH',
+      entityType: 'pos_terminal_session',
+      entityId: String(targetUserId ?? branchId),
+      reason: `Invalid POS PIN attempt (${nextCount}/${MAX_PIN_ATTEMPTS})`,
+      ipAddress: ipAddress ?? null,
+    });
+
+    throw new Error('Invalid POS PIN or operator is not cleared for this branch.');
+  }
+
+  pinAttemptTracker.delete(throttleKey);
+
+  const allowedBranches = await getUserAuthorizedBranches(
+    tenantId,
+    matchedUser.id,
+    matchedUser.role
+  );
+  if (allowedBranches !== 'ALL' && !allowedBranches.includes(branchId)) {
+    throw new Error('Operator does not have branch clearance for this outlet.');
+  }
+
+  const effectivePermissions = await getEffectiveUserPermissions(
+    tenantId,
+    matchedUser.id,
+    matchedUser.role,
+    branchId
+  );
+
+  const secret = process.env.JWT_SECRET || 'servora-super-secret-key-2026';
+  const token = jwt.sign(
+    {
+      userId: matchedUser.id,
+      tenantId: matchedUser.tenantId,
+      role: matchedUser.role,
+      email: matchedUser.email,
+      defaultBranchId: branchId,
+    },
+    secret,
+    { expiresIn: '12h' }
+  );
+
+  await Promise.all([
+    db
+      .update(users)
+      .set({ lastLoginAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(users.id, matchedUser.id), eq(users.tenantId, tenantId))),
+    db.insert(auditLogs).values({
+      tenantId,
+      branchId,
+      userId: matchedUser.id,
+      action: 'POS_OPERATOR_PIN_SWITCH',
+      module: 'AUTH',
+      entityType: 'pos_terminal_session',
+      entityId: String(matchedUser.id),
+      reason: `Operator switched on POS terminal (previous userId: ${previousUserId})`,
+      newValues: { operatorId: matchedUser.id, role: matchedUser.role, branchId },
+      ipAddress: ipAddress ?? null,
+    }),
+  ]);
+
+  return {
+    token,
+    user: {
+      id: matchedUser.id,
+      firstName: matchedUser.firstName,
+      lastName: matchedUser.lastName,
+      fullName: `${matchedUser.firstName} ${matchedUser.lastName}`.trim(),
+      email: matchedUser.email,
+      role: matchedUser.role,
+      defaultBranchId: branchId,
+      permissions: effectivePermissions,
+    },
+  };
+};
+
+/**
+ * Assigns or resets a unique 4–6 digit POS PIN for an active tenant employee.
+ * Enforces PIN uniqueness across the tenant so direct PIN-only login is unambiguous.
+ */
+export const assignStaffPosPinTransaction = async (params: {
+  tenantId: number;
+  targetUserId: number;
+  pin: string;
+  actorUserId: number;
+  ipAddress?: string | null;
+}) => {
+  const { tenantId, targetUserId, pin, actorUserId, ipAddress } = params;
+
+  return await db.transaction(async (tx) => {
+    const [target] = await tx
+      .select({
+        id: users.id,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        defaultBranchId: users.defaultBranchId,
+        isActive: users.isActive,
+      })
+      .from(users)
+      .where(and(eq(users.id, targetUserId), eq(users.tenantId, tenantId)))
+      .limit(1);
+
+    if (!target || !target.isActive) {
+      throw new Error('Staff member not found or inactive.');
+    }
+
+    const existingPinHolders = await tx
+      .select({ id: users.id, pinHash: users.pinHash })
+      .from(users)
+      .where(
+        and(
+          eq(users.tenantId, tenantId),
+          eq(users.isActive, true),
+          isNotNull(users.pinHash)
+        )
+      );
+
+    for (const holder of existingPinHolders) {
+      if (holder.id === targetUserId || !holder.pinHash) continue;
+      if (await bcrypt.compare(pin, holder.pinHash)) {
+        throw new Error(
+          'This POS PIN is already assigned to another active staff member. Choose a unique PIN.'
+        );
+      }
+    }
+
+    const pinHash = await bcrypt.hash(pin, 10);
+
+    await tx
+      .update(users)
+      .set({ pinHash, updatedAt: new Date() })
+      .where(and(eq(users.id, targetUserId), eq(users.tenantId, tenantId)));
+
+    await tx.insert(auditLogs).values({
+      tenantId,
+      branchId: target.defaultBranchId ?? null,
+      userId: actorUserId,
+      action: 'STAFF_POS_PIN_ASSIGNED',
+      module: 'WORKFORCE_HCM',
+      entityType: 'users',
+      entityId: String(targetUserId),
+      reason: `POS PIN updated for ${target.firstName} ${target.lastName}`,
+      ipAddress: ipAddress ?? null,
+    });
+
+    return {
+      userId: target.id,
+      fullName: `${target.firstName} ${target.lastName}`.trim(),
+      pinConfigured: true,
+    };
   });
 };
